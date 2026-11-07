@@ -7,11 +7,11 @@ export interface AccountSettings { name: string; address: string; protocol: 'ima
 export interface AccountInfo { id: string; settings: AccountSettings | null; connected: boolean; configured: boolean }
 export interface SecurityInfo { cleanup_pending: boolean; protected: boolean; locked: boolean }
 
-async function request<T>(extension: string, account: string, path: string, input?: unknown): Promise<T> {
+async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE'): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, {
-      method: input === undefined ? 'GET' : 'POST',
+      method: method ?? (input === undefined ? 'GET' : 'POST'),
       headers: {
         'x-colecto-extension': extension, 'x-colecto-account': account,
         ...(input === undefined ? {} : { 'content-type': 'application/json' }),
@@ -50,4 +50,21 @@ export const hostService = {
   disconnect: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}/disconnect`, {}),
   security: () => request<SecurityInfo>('host', 'demo', '/security'),
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
+};
+
+export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send';
+export interface ExtensionState {
+  manifest: { id: string; name: string; description: string; author: string; api_version: number; slot: string; capabilities: Capability[] };
+  bundled: boolean;
+  enabled: boolean;
+  grants: Capability[];
+}
+export interface ExtensionView { title: string; text: string; actions: string[] }
+export const extensionHost = {
+  install: (manifest: string, module: number[]) => request<boolean>('host', 'demo', '/extensions', { manifest, module }),
+  remove: (id: string) => request<boolean>('host', 'demo', `/extensions/${encodeURIComponent(id)}`, {}, 'DELETE'),
+  run: (account: string, id: string, action: string) => request<ExtensionView>('host', account, `/extensions/${encodeURIComponent(id)}/run`, { action }),
+  list: (account: string) => request<ExtensionState[]>('host', account, '/extensions'),
+  update: (account: string, id: string, enabled: boolean, grants: Capability[]) =>
+    request<boolean>('host', account, `/extensions/${encodeURIComponent(id)}`, { enabled, grants }),
 };

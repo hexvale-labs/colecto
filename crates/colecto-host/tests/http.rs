@@ -271,3 +271,196 @@ async fn management_is_host_only_and_password_mode_needs_no_keychain() {
         b"[]"
     );
 }
+
+#[tokio::test]
+async fn extension_controls_are_host_only_and_revocation_reaches_service_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    );
+    let origin = "http://127.0.0.1:4173";
+    for (method, path, identity, body, status) in [
+        ("GET", "/api/v1/extensions", "host", "", 200),
+        ("GET", "/api/v1/extensions", "reader", "", 403),
+        (
+            "POST",
+            "/api/v1/extensions/reader",
+            "reader",
+            r#"{"enabled":true,"grants":["messages.read"]}"#,
+            403,
+        ),
+        (
+            "POST",
+            "/api/v1/extensions/reader",
+            "host",
+            r#"{"enabled":true,"grants":["messages.send"]}"#,
+            403,
+        ),
+        (
+            "POST",
+            "/api/v1/extensions/reader",
+            "host",
+            r#"{"enabled":true,"grants":["accounts.manage"]}"#,
+            400,
+        ),
+        (
+            "POST",
+            "/api/v1/extensions/reader",
+            "host",
+            r#"{"enabled":true,"grants":[]}"#,
+            200,
+        ),
+        ("GET", "/api/v1/messages/1", "reader", "", 403),
+        (
+            "POST",
+            "/api/v1/extensions/inbox",
+            "host",
+            r#"{"enabled":false,"grants":["messages.list"]}"#,
+            200,
+        ),
+        ("GET", "/api/v1/messages", "inbox", "", 403),
+        (
+            "POST",
+            "/api/v1/extensions/inbox",
+            "host",
+            r#"{"enabled":true,"grants":["messages.list"]}"#,
+            200,
+        ),
+        ("GET", "/api/v1/messages", "inbox", "", 200),
+        ("GET", "/api/v1/drafts", "inbox", "", 403),
+        (
+            "POST",
+            "/api/v1/extensions/external",
+            "host",
+            r#"{"enabled":true,"grants":[]}"#,
+            403,
+        ),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(request(method, path, identity, origin, body))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status().as_u16(),
+            status,
+            "{method} {path} {identity}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn installed_wasm_uses_consented_account_grants_and_cannot_call_http_services() {
+    let dir = tempfile::tempdir().unwrap();
+    let authority = "127.0.0.1:4173";
+    let origin = "http://127.0.0.1:4173";
+    let create = || {
+        app(
+            MailStore::open(dir.path()).unwrap(),
+            authority.into(),
+            dir.path().into(),
+        )
+    };
+    let router = create();
+    let manifest = include_str!("../../../extensions/examples/connection-panel/extension.toml");
+    let module = wat::parse_str(include_str!(
+        "../../../extensions/examples/connection-panel/module.wat"
+    ))
+    .unwrap();
+    let package = serde_json::json!({"manifest": manifest, "module": module}).to_string();
+    let response = router
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/extensions",
+            "host",
+            origin,
+            &package,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let run = "/api/v1/extensions/connection-panel/run";
+    let response = router
+        .clone()
+        .oneshot(request("POST", run, "host", origin, r#"{"action":"open"}"#))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    for (policy, text) in [
+        (r#"{"enabled":true,"grants":[]}"#, "Permission required"),
+        (
+            r#"{"enabled":true,"grants":["account.read"]}"#,
+            "Account disconnected",
+        ),
+        (r#"{"enabled":true,"grants":[]}"#, "Permission required"),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/api/v1/extensions/connection-panel",
+                "host",
+                origin,
+                policy,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = router
+            .clone()
+            .oneshot(request(
+                "POST",
+                run,
+                "host",
+                origin,
+                r#"{"action":"Refresh"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+        assert!(body["text"].as_str().unwrap().contains(text));
+    }
+    let response = router
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/account",
+            "connection-panel",
+            origin,
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    drop(router);
+    let restarted = create();
+    let response = restarted
+        .clone()
+        .oneshot(request("POST", run, "host", origin, r#"{"action":"open"}"#))
+        .await
+        .unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+    assert!(
+        body["text"]
+            .as_str()
+            .unwrap()
+            .contains("Permission required")
+    );
+    let response = restarted
+        .oneshot(request(
+            "DELETE",
+            "/api/v1/extensions/connection-panel",
+            "host",
+            origin,
+            "{}",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}

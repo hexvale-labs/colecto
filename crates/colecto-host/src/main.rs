@@ -59,14 +59,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let authority = listener.local_addr()?.to_string();
     println!("Colecto local demo: http://{authority}");
     println!("Draft directory: {}", directory.display());
-    axum::serve(
-        listener,
-        colecto_host::app_with_accounts(accounts, authority, assets),
-    )
-    .with_graceful_shutdown(async {
-        let _ = tokio::signal::ctrl_c().await;
-    })
-    .await?;
+    let application = colecto_host::app_with_accounts(accounts, authority.clone(), assets);
+    #[cfg(not(feature = "native"))]
+    axum::serve(listener, application)
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await?;
+    #[cfg(feature = "native")]
+    {
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(listener, application).await {
+                eprintln!("Host server failed: {error}");
+            }
+        });
+        let url = format!("http://{authority}").parse()?;
+        tauri::Builder::default()
+            .setup(move |app| {
+                tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External(url))
+                    .title("Colecto")
+                    .inner_size(1200.0, 800.0)
+                    .on_navigation(move |destination| {
+                        destination
+                            .as_str()
+                            .starts_with(&format!("http://{authority}/"))
+                    })
+                    .build()?;
+                Ok(())
+            })
+            .run(tauri::generate_context!())?;
+    }
+
     Ok(())
 }
 

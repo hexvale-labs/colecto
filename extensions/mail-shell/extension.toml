@@ -1,0 +1,7 @@
+id = "mail-shell"
+name = "Mail workspace"
+api_version = 1
+slot = "shell"
+capabilities = []
+description = "Mail navigation, account selection, and workspace layout."
+author = "Colecto"

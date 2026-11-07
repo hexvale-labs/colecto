@@ -1,0 +1,7 @@
+id = "connection-panel"
+name = "Connection panel"
+description = "An isolated example that checks the selected account connection."
+author = "Colecto example"
+api_version = 1
+slot = "panel"
+capabilities = ["account.read"]

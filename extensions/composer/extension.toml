@@ -1,0 +1,7 @@
+id = "composer"
+name = "Composer"
+api_version = 1
+slot = "composer"
+capabilities = ["drafts.read", "drafts.write", "messages.send"]
+description = "Create and save drafts, and send mail with explicit service access."
+author = "Colecto"

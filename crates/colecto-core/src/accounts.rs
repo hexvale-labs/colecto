@@ -41,6 +41,11 @@ fn connect(store: &mut MailStore, settings: &AccountSettings, secret: &str) -> R
     }
 }
 impl Accounts {
+    /// Host-owned data, including extension policy, lives beside account stores.
+    pub fn data_directory(&self) -> &std::path::Path {
+        &self.directory
+    }
+
     pub fn open(mut legacy: MailStore, backend: Arc<dyn SecretStore>) -> Result<Self, Error> {
         let directory = legacy.directory.clone();
         let mut vault = Vault::open(directory.clone(), backend)?;

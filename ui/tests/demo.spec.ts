@@ -194,3 +194,48 @@ test('waits for restored account before allowing compose', async ({ page }) => {
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
   await expect(page.getByText('remembered@example.test', { exact: true })).toBeVisible();
 });
+
+test('extension controls expose TOML metadata and recover a disabled mail workspace', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+  page.on('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  const shell = page.getByRole('group', { name: 'Mail workspace' });
+  await expect(shell.getByText('By Colecto · API 1')).toBeVisible();
+  await shell.getByRole('checkbox').uncheck();
+  await page.getByRole('button', { name: 'Back to mail', exact: true }).click();
+  await expect(page.getByText('Mail workspace disabled. Open Extensions to restore it.')).toBeVisible();
+  await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  await shell.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Back to mail', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+});
+
+test('installs Wasm disabled, consents to account access, revokes and removes it', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+  page.on('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.getByLabel('TOML manifest', { exact: true }).setInputFiles('../extensions/examples/connection-panel/extension.toml');
+  await page.getByLabel('Wasm module', { exact: true }).setInputFiles('../target/extensions/connection-panel.wasm');
+  await page.getByRole('button', { name: 'Install disabled', exact: true }).click();
+  const panel = page.getByRole('group', { name: 'Connection panel', exact: true });
+  await expect(panel.getByRole('checkbox', { name: 'Enabled for all accounts' })).not.toBeChecked();
+  await expect(panel.getByRole('checkbox', { name: 'account.read', exact: true })).not.toBeChecked();
+  await panel.getByRole('checkbox', { name: 'Enabled for all accounts' }).check();
+  await page.getByRole('button', { name: 'Back to mail', exact: true }).click();
+  await page.getByRole('button', { name: 'Connection panel', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Extension panel' })).toContainText('Permission required');
+  await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  await panel.getByRole('checkbox', { name: 'account.read', exact: true }).check();
+  await page.getByRole('button', { name: 'Back to mail', exact: true }).click();
+  await page.getByRole('button', { name: 'Connection panel', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Extension panel' })).toContainText('Account disconnected');
+  await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  await panel.getByRole('checkbox', { name: 'account.read', exact: true }).uncheck();
+  await page.reload();
+  await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  await expect(panel.getByRole('checkbox', { name: 'account.read', exact: true })).not.toBeChecked();
+  await panel.getByRole('button', { name: 'Remove extension', exact: true }).click();
+  await expect(panel).toHaveCount(0);
+});

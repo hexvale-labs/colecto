@@ -8,6 +8,10 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+toml.workspace = true
+serde.workspace = true
+wasmi.workspace = true
+tauri = { workspace = true, optional = true }
 colecto-core.workspace = true
 colecto-extension-api.workspace = true
 axum.workspace = true
@@ -18,7 +22,14 @@ keyring.workspace = true
 zeroize.workspace = true
 serde_json.workspace = true
 
+[features]
+native = ["dep:tauri", "dep:tauri-build"]
+
+[build-dependencies]
+tauri-build = { workspace = true, optional = true }
+
 [dev-dependencies]
+wat.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tower.workspace = true
