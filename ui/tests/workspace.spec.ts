@@ -72,6 +72,7 @@ test('remote access token stays in the session and reconnecting preserves a draf
 
 test('profile names fall back to email and message tabs stay with their account', async ({ page }) => {
   const accounts = ['a', 'b'].map(id => ({ id, configured: true, connected: false, settings: { name: '', address: `${id}@example.test`, protocol: 'imap', imap_host: '', imap_port: 993, smtp_host: '', smtp_port: 587, username: '', session_url: '' } }));
+  await page.route('**/api/v1/labels', route => route.fulfill({ json: {} }));
   await page.route('**/api/v1/accounts', route => route.fulfill({ json: accounts }));
   await page.route('**/api/v1/messages', route => {
     const account = route.request().headers()['x-colecto-account'];
@@ -95,6 +96,7 @@ test('profile names fall back to email and message tabs stay with their account'
 });
 
 test('account action labels use email when the optional profile name is empty', async ({ page }) => {
+  await page.route('**/api/v1/labels', route => route.fulfill({ json: {} }));
   await page.route('**/api/v1/accounts', route => route.fulfill({ json: [{ id: 'unnamed', configured: true, connected: false, settings: { name: '', address: 'unnamed@example.test', protocol: 'imap', imap_host: 'imap.example.test', imap_port: 993, smtp_host: 'smtp.example.test', smtp_port: 587, username: 'unnamed', session_url: '' } }] }));
   await page.route('**/api/v1/security', route => route.fulfill({ json: { protected: false, locked: false, cleanup_pending: false } }));
   await page.goto('/');
@@ -131,4 +133,74 @@ test('mobile controls stay reachable and mail text stays selectable on narrow sc
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page.getByRole('status')).toHaveText('Draft saved');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+});
+
+test('command runner opens by keyboard, filters actions and searches drafts', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  await page.getByLabel('Subject', { exact: true }).fill('Find this local note');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox', { name: 'Search commands' }).fill('drafts');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Commands' })).not.toBeVisible();
+  await page.getByRole('searchbox').fill('absent words');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.getByText('No matching messages')).toBeVisible();
+  await page.getByRole('searchbox').fill('local note');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Find this local note/ })).toBeVisible();
+});
+
+
+test('worst-case mail remains usable at narrow widths and enlarged text', async ({ page }) => {
+  const { worst } = await import('../src/lib/stress-fixtures');
+  await page.route('**/api/v1/messages**', route => {
+    const id = new URL(route.request().url()).pathname.split('/').at(-1);
+    return route.fulfill({ json: id === 'messages' ? worst : worst.find(message => message.id === id) });
+  });
+  for (const width of [320, 390, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/');
+    await page.getByRole('button', { name: /Aleksandra/ }).click();
+    await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+    await expect(page.getByRole('heading', { name: worst[0].subject })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    if (width <= 800) await page.getByRole('button', { name: 'Back to list' }).click();
+    await page.getByRole('button', { name: /Priya/ }).click();
+    await expect(page.locator('.letter .avatar')).toHaveText('👩🏽‍💻');
+    await expect(page.getByRole('heading', { name: '(No subject)' })).toBeVisible();
+  }
+});
+
+test('command navigation preserves canceled unsaved edits and restores focus', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  const subject = page.getByLabel('Subject', { exact: true });
+  await subject.fill('Keep my changes');
+  await page.keyboard.press('Control+k');
+  await page.keyboard.press('Escape');
+  await expect(subject).toBeFocused();
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox', { name: 'Search commands' }).fill('Go to Inbox');
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.keyboard.press('Enter');
+  await expect(subject).toHaveValue('Keep my changes');
+});
+
+test('search command keeps focus and send command uses the existing send flow', async ({ page }) => {
+  await page.route('**/api/v1/accounts', route => route.fulfill({ json: [{ id: 'demo', settings: null, configured: false, connected: true }] }));
+  await page.route('**/api/v1/send', route => route.fulfill({ json: true }));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Commands/ }).click();
+  await page.getByRole('combobox', { name: 'Search commands' }).fill('Search emails');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('searchbox')).toBeFocused();
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  await page.getByLabel('To', { exact: true }).fill('maya@example.test');
+  await page.getByLabel('Subject', { exact: true }).fill('Command send');
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox', { name: 'Search commands' }).fill('Send message');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status')).toHaveText('Accepted by mail server');
 });

@@ -1,4 +1,5 @@
 // Version 1 wire contracts mirror colecto-extension-api. Rust validates all input.
+export type Labels = Record<string, string[]>;
 export interface Message { id: string; sender: string; address: string; subject: string; body: string; date: string }
 export interface Draft { id: string; recipient: string; subject: string; body: string }
 export interface DraftInput { id?: string; recipient: string; subject: string; body: string }
@@ -36,11 +37,12 @@ async function request<T>(extension: string, account: string, path: string, inpu
 export function createServices(account: string) {
   return {
     inbox: {
+      labels: () => request<Labels>('inbox', account, '/labels'),
       connected: () => request<boolean>('inbox', account, '/account'),
       messages: (folder: 'inbox' | 'sent' = 'inbox', query = '') => { const params = new URLSearchParams(); if (folder !== 'inbox') params.set('folder', folder); if (query) params.set('q', query); return request<Message[]>('inbox', account, `/messages${params.size ? `?${params}` : ''}`); },
       drafts: () => request<Draft[]>('inbox', account, '/drafts'),
     },
-    reader: { read: (id: string) => request<Message>('reader', account, `/messages/${encodeURIComponent(id)}`) },
+    reader: { label: (name: string, message_id?: string, remove = false) => request<Labels>('reader', account, '/labels', { name, message_id, remove }), read: (id: string) => request<Message>('reader', account, `/messages/${encodeURIComponent(id)}`) },
     composer: {
       send: (draft: DraftInput) => request<boolean>('composer', account, '/send', draft),
       read: (id: string) => request<Draft>('composer', account, `/drafts/${encodeURIComponent(id)}`),
@@ -58,7 +60,7 @@ export const hostService = {
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 
-export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send';
+export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.label';
 export interface ExtensionState {
   manifest: { id: string; name: string; description: string; author: string; api_version: number; slot: string; capabilities: Capability[] };
   bundled: boolean;
