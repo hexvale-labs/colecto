@@ -220,3 +220,65 @@ summary { min-height: 44px; padding-block: 12px; color: var(--accent); }
   .settings-card { padding: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+
+::selection { background: var(--accent); color: var(--on-accent); }
+.letter { -webkit-user-select: text; user-select: text; }
+.brand { -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+.text-button { padding-inline: 12px; }
+.detail-toolbar { flex-shrink: 0; }
+@media (pointer: coarse) {
+  button, summary, .field input, .field select { min-height: 48px; }
+  .settings-button, .message-tab .tab-close { min-width: 48px; min-height: 48px; }
+  .extension-settings label:has(input[type='checkbox']) { display: block; min-height: 48px; }
+}
+@media (max-width: 800px) {
+  .app-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+  .sidebar { display: contents; }
+  .sidebar .brand { display: none; }
+  .profile-row { grid-row: 1; grid-column: 1; width: auto; min-width: 0; padding: 6px 4px 6px 12px; }
+  .profile-account { min-width: 0; }
+  .profile-account .avatar { flex-shrink: 0; }
+  .sidebar .compose-button { grid-row: 1; grid-column: 2; align-self: center; margin: 6px 12px 6px 4px; }
+  .open-messages { grid-row: 2; grid-column: 1 / -1; max-height: 56px; padding: 0 12px 4px; }
+  .message-tab { flex-basis: 200px; }
+  .workspace { grid-row: 3; grid-column: 1 / -1; }
+  .folder-nav {
+    grid-row: 4; grid-column: 1 / -1; width: auto;
+    padding: 4px 8px; gap: 4px; margin: 0;
+    background: var(--canvas); overscroll-behavior-x: contain;
+  }
+  .folder-nav button { flex: 1 0 76px; flex-direction: column; gap: 2px; min-height: 56px; padding: 6px 8px; font-size: 12px; }
+  .folder-nav .nav-icon { font-size: 21px; line-height: 24px; }
+  .app-shell.detail-open .sidebar .compose-button { display: none; }
+  .detail-open .profile-row, .settings-open .profile-row { grid-column: 1 / -1; }
+  .mailbox-header { padding: 16px 20px; }
+  .mailbox-header .eyebrow, .list-footer { display: none; }
+  .title-row { margin: 0 0 6px; }
+  .mail-item { padding: 18px 20px; }
+  .item-top strong, .item-subject { font-size: 15px; }
+  .item-preview { font-size: 14px; }
+  .item-date { font-size: 12px; }
+  .detail-toolbar { position: sticky; top: 0; z-index: 1; background: var(--surface); padding-inline: 8px 16px; }
+  .back { flex-shrink: 0; }
+  .letter { padding: 24px 20px 40px; }
+  .letter-body { line-height: 1.75; }
+  .sender-row strong { font-size: 15px; }
+  .address { font-size: 14px; }
+  .to-me { display: none; }
+  .compose-form { padding: 20px 16px 0; }
+  .compose-heading { margin-bottom: 12px; }
+  .compose-heading h2 { font-size: 24px; margin-block: 8px; }
+  .compose-heading p, .compose-heading .eyebrow { display: none; }
+  .sender-account { align-items: flex-start; }
+  .sender-account strong { min-width: 0; }
+  .compose-footer { position: sticky; bottom: 0; background: var(--surface); padding-block: 12px; gap: 12px; }
+  .compose-footer > div { flex-basis: 100%; }
+  .compose-footer > button { flex: 1; }
+  .compose-footer p { margin-top: 2px; }
+  .account-actions, .button-row { gap: 8px; }
+  .connect-page { padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); }
+}

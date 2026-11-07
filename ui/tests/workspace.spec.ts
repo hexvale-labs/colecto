@@ -106,3 +106,29 @@ test('account action labels use email when the optional profile name is empty', 
   await page.getByRole('button', { name: 'Disconnect unnamed@example.test', exact: true }).click();
   expect(question).toContain('Disconnect unnamed@example.test?');
 });
+
+test('mobile controls stay reachable and mail text stays selectable on narrow screens', async ({ page }) => {
+  const message = { id: 'mobile-reader', sender: 'Maya Chen', address: 'maya@example.test', subject: 'Reading on a phone', body: 'Selectable message text.\n'.repeat(100), date: 'Today' };
+  await page.route('**/api/v1/messages**', route => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/messages') ? [message] : message }));
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto('/');
+  const folders = page.getByRole('navigation', { name: 'Mail folders' });
+  const bounds = await folders.boundingBox();
+  expect(bounds!.y + bounds!.height).toBe(640);
+  for (const button of await folders.getByRole('button').all()) {
+    const box = await button.boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(48);
+  }
+  await page.getByRole('button', { name: /Maya Chen/ }).click();
+  await expect(page.locator('.letter-body')).toBeVisible();
+  expect(await page.locator('.letter').evaluate(el => getComputedStyle(el).userSelect)).toBe('text');
+  await page.locator('.reading-pane').evaluate(el => el.scrollTop = el.scrollHeight);
+  await expect(page.getByRole('button', { name: 'Back to list' })).toBeInViewport();
+  await page.getByRole('button', { name: 'Back to list' }).click();
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  await page.getByLabel('Message', { exact: true }).fill('A long draft\n'.repeat(100));
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page.getByRole('status')).toHaveText('Draft saved');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+});

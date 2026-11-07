@@ -48,7 +48,7 @@
     <div class="compose-heading"><div class="eyebrow">NEW MESSAGE</div><h2>{id ? 'Your draft' : 'New message'}</h2><p>Write, save, or send.</p></div>
     <div class="sender-account"><span>From</span><strong>{sender}</strong></div>
     <fieldset disabled={saving || sent}>
-      <div class="input-row"><label for="recipient">To</label><input id="recipient" autocomplete="email" autocapitalize="none" type="text" inputmode="email" placeholder="someone@example.com" maxlength="320" bind:value={recipient} /></div>
+      <div class="input-row"><label for="recipient">To</label><input id="recipient" autocomplete="email" autocapitalize="none" spellcheck={false} enterkeyhint="next" type="text" inputmode="email" placeholder="someone@example.com" maxlength="320" bind:value={recipient} /></div>
       <div class="input-row"><label for="subject">Subject</label><input id="subject" placeholder="What’s on your mind?" maxlength="998" bind:value={subject} /></div>
       <label class="sr-only" for="body">Message</label><textarea id="body" placeholder="Start a conversation…" maxlength="100000" bind:value={body}></textarea>
     </fieldset>
