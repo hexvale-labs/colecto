@@ -50,6 +50,26 @@ demo: build ui-build
     cargo run -p colecto-host --locked
 
 # Verify UI flows and restart persistence with an isolated temporary data directory.
-ui-test: build ui-build
+ui-test: build ui-build extension-example
     bun test ./ui/tests/restart.test.mjs
     cd ui && bun run --bun test
+
+# Run the Tauri desktop shell (requires platform Tauri build prerequisites).
+native: ui-build
+    cargo run -p colecto-host --features native --locked
+
+# Build the small installable Wasm extension example from its WAT source.
+extension-example:
+    cargo run -p colecto-host --example build-extension --locked
+
+# Compile the optional native adapter.
+native-check:
+    cargo check -p colecto-host --features native --all-targets --locked
+
+# Build the Tauri desktop executable without starting it.
+native-build: ui-build
+    cargo build -p colecto-host --features native --locked
+
+# Linux/X11 native launch smoke check (requires xvfb and xwininfo).
+native-test: native-build
+    xvfb-run -a bun test ./ui/tests/native.test.mjs

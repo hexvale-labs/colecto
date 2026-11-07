@@ -1,128 +1,102 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import Mailbox from './extensions/Mailbox.svelte';
-  import Reader from './extensions/Reader.svelte';
-  import Composer from './extensions/Composer.svelte';
-  import AccountSettings from './AccountSettings.svelte';
-  import { createServices, hostService } from './lib/api';
-  import type { Draft, MailItem, AccountInfo, SecurityInfo } from './lib/api';
-  type View = { kind: 'message'; id: string } | { kind: 'draft'; draft: Draft | null } | null;
-  let connected = $state(false);
-  let initialized = $state(false);
+  import MailShell from './extensions/MailShell.svelte';
+  import { extensionHost, hostService } from './lib/api';
+  import type { AccountInfo, Capability, ExtensionState } from './lib/api';
+  let manifestFile = $state<FileList | undefined>();
+  let moduleFile = $state<FileList | undefined>();
+  let installNotice = $state('');
+  let extensions = $state<ExtensionState[]>([]);
   let accounts = $state<AccountInfo[]>([]);
-  let security = $state<SecurityInfo>({ protected: false, locked: false, cleanup_pending: false });
-  let accountId = $state('demo');
-  let settingsOpen = $state(false);
-  let accountError = $state('');
-  let services = $derived(createServices(accountId));
-  let activeAccount = $derived(accounts.find(a => a.id === accountId));
-  let sender = $derived(activeAccount?.settings?.address ?? 'Demo account · sending unavailable');
-  let accountLabel = $derived(activeAccount?.settings?.name ?? 'Demo account');
-  async function refreshAccounts() {
-    const [nextAccounts, nextSecurity] = await Promise.all([hostService.accounts(), hostService.security()]);
-    accounts = nextAccounts; security = nextSecurity;
-    connected = nextAccounts.find(a => a.id === accountId)?.connected ?? false;
-  }
-  function changeAccount(event: Event) {
-    const select = event.currentTarget as HTMLSelectElement;
-    const next = select.value;
-    if (!canLeave()) { select.value = accountId; return; }
-    clearView(); ++listGeneration; items = [];
-    accountId = next; try { localStorage.setItem('colecto.account', next); } catch { /* Selection persistence is optional. */ } connected = accounts.find(a => a.id === next)?.connected ?? false;
-    settingsOpen = false; folder = 'Inbox'; void loadList();
-  }
-  function manageAccounts() {
-    if (!canLeave()) return;
-    clearView(); ++listGeneration; settingsOpen = true;
-    void refreshAccounts().catch(e => accountError = (e as Error).message);
-  }
-  function closeSettings() {
-    if (!canLeave()) return;
-    clearView(); settingsOpen = false; void loadList();
-  }
-  let folder = $state<'Inbox' | 'Drafts'>('Inbox');
-  let items = $state<MailItem[]>([]);
-  let view = $state<View>(null);
+  let account = $state('demo');
+  let managing = $state(false);
   let loading = $state(true);
-  let error = $state('');
-  let openError = $state('');
-  let dirty = $state(false);
   let busy = $state(false);
-  let opening = $state(false);
-  let listGeneration = 0;
-  let openGeneration = 0;
-  let selected = $derived(view?.kind === 'message' ? view.id : view?.kind === 'draft' ? view.draft?.id ?? null : null);
-  async function loadList() {
-    const generation = ++listGeneration;
-    const requestedFolder = folder;
-    const inboxService = services.inbox;
-    loading = true; error = ''; openError = '';
+  let error = $state('');
+  async function reload() {
+    loading = true; error = '';
     try {
-      const result: MailItem[] = requestedFolder === 'Inbox'
-        ? (await inboxService.messages()).map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date }))
-        : (await inboxService.drafts()).slice().reverse().map(d => ({ id: d.id, name: d.recipient || 'No recipient', subject: d.subject, preview: d.body, date: 'Draft' }));
-      if (generation === listGeneration) items = result;
-    } catch (e) { if (generation === listGeneration) error = (e as Error).message; }
-    finally { if (generation === listGeneration) loading = false; }
+      accounts = await hostService.accounts();
+      if (!accounts.some(a => a.id === account)) account = accounts[0]?.id ?? 'demo';
+      extensions = await extensionHost.list(account);
+    } catch (e) { error = (e as Error).message; }
+    finally { loading = false; }
   }
-  function canLeave() { return initialized && !busy && (!dirty || window.confirm('Discard unsaved changes? Your last saved draft will be kept.')); }
-  function clearView() { ++openGeneration; view = null; dirty = false; openError = ''; opening = false; }
-  function navigate(next: 'Inbox' | 'Drafts') {
-    if (!canLeave()) return;
-    clearView(); settingsOpen = false; folder = next; void loadList();
+  async function update(extension: ExtensionState, enabled: boolean, grants: Capability[]) {
+    busy = true; error = '';
+    try { await extensionHost.update(account, extension.manifest.id, enabled, grants); await reload(); }
+    catch (e) { const message = (e as Error).message; await reload(); error ||= message; }
+    finally { busy = false; }
   }
-  function compose() { if (!canLeave()) return; clearView(); settingsOpen = false; view = { kind: 'draft', draft: null }; }
-  function back() { if (!canLeave()) return; clearView(); }
-  async function open(id: string) {
-    if (!canLeave()) return;
-    clearView();
-    if (folder === 'Inbox') { view = { kind: 'message', id }; return; }
-    const generation = ++openGeneration;
-    opening = true;
+  async function install(event: SubmitEvent) {
+    event.preventDefault();
+    const manifest = manifestFile?.[0]; const module = moduleFile?.[0];
+    if (!manifest || !module) return;
+    if (manifest.size > 8192 || module.size > 65536) { error = 'Manifest must be at most 8 KiB and Wasm at most 64 KiB'; return; }
+    busy = true; error = ''; installNotice = '';
     try {
-      const draft = await services.composer.read(id);
-      if (generation === openGeneration) view = { kind: 'draft', draft };
-    } catch (e) { if (generation === openGeneration) openError = (e as Error).message; }
-    finally { if (generation === openGeneration) opening = false; }
+      await extensionHost.install(await manifest.text(), Array.from(new Uint8Array(await module.arrayBuffer())));
+      installNotice = 'Installed disabled with no account access. Review the requested permissions before enabling.';
+      await reload();
+    } catch (e) { const message = (e as Error).message; await reload(); error ||= message; }
+    finally { busy = false; }
   }
-  function saved(draft: Draft) {
-    // Keep the mounted editor intact; refreshing the list must not reset its state.
-    if (view?.kind === 'draft') view.draft = draft;
-    if (folder === 'Drafts') void loadList();
+  async function remove(extension: ExtensionState) {
+    if (!window.confirm(`Remove ${extension.manifest.name} and all its grants? Saved mail will be kept.`)) return;
+    busy = true; error = '';
+    try { await extensionHost.remove(extension.manifest.id); await reload(); }
+    catch (e) { const message = (e as Error).message; await reload(); error ||= message; }
+    finally { busy = false; }
   }
-  function beforeUnload(event: BeforeUnloadEvent) { if (dirty || busy) { event.preventDefault(); event.returnValue = ''; } }
+  function manage() {
+    // Unmounting a package can discard unsaved local editor state.
+    if (!window.confirm('Open extension controls? Save any unsaved mail or account changes first.')) return;
+    managing = true; void reload();
+  }
   onMount(() => {
-    void refreshAccounts().then(() => {
-      let remembered = ''; try { remembered = localStorage.getItem('colecto.account') ?? ''; } catch { /* Storage can be disabled. */ }
-      if (accounts.some(a => a.id === remembered)) accountId = remembered;
-      connected = accounts.find(a => a.id === accountId)?.connected ?? false;
-    }).catch(e => accountError = (e as Error).message).finally(() => { initialized = true; void loadList(); });
+    void extensionHost.list('demo').then(value => extensions = value)
+      .catch(e => error = (e as Error).message).finally(() => loading = false);
   });
 </script>
 
-<svelte:window onbeforeunload={beforeUnload} />
-<div class="app-shell" class:detail-open={view !== null}>
-  <aside class="sidebar">
-    <a class="brand" href="/" onclick={(event) => { event.preventDefault(); navigate('Inbox'); }} aria-label="Colecto home"><span class="brand-mark" aria-hidden="true">c</span>colecto<span class="brand-dot">.</span></a>
-    <button class="compose-button" disabled={busy || !initialized} onclick={compose}><span aria-hidden="true">＋</span> Compose</button>
-    <nav aria-label="Mail folders">
-      <button class:active={folder === 'Inbox'} aria-current={folder === 'Inbox' ? 'page' : undefined} disabled={busy || !initialized} onclick={() => navigate('Inbox')}><span class="nav-icon" aria-hidden="true">▤</span>Inbox<span class="nav-dot" aria-hidden="true"></span></button>
-      <button class:active={folder === 'Drafts'} aria-current={folder === 'Drafts' ? 'page' : undefined} disabled={busy || !initialized} onclick={() => navigate('Drafts')}><span class="nav-icon" aria-hidden="true">✎</span>Drafts</button>
-    </nav>
-    <div class="account-controls"><label for="current-account">Account</label><select id="current-account" aria-label="Current account" value={accountId} disabled={busy || !initialized} onchange={changeAccount}>{#if !accounts.length}<option value="demo">Demo account</option>{/if}{#each accounts as account (account.id)}<option value={account.id}>{account.settings ? `${account.settings.name} · ${account.settings.address}` : 'Demo account'}</option>{/each}</select><button class="manage-button" disabled={busy || !initialized} onclick={manageAccounts}>Manage accounts</button><span class="account-state">{security.locked ? 'Credentials locked' : activeAccount?.configured ? 'Configured account' : 'Local sample mail'}</span></div>
-  </aside>
-  <main class="workspace">
-    {#if accountError}<div class="account-error error-box" role="alert">{accountError}<button class="text-button" onclick={() => { accountError = ''; void refreshAccounts().catch(e => accountError = (e as Error).message); }}>Retry account settings</button></div>{/if}
-    {#if settingsOpen}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} onback={closeSettings} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} />
-    {:else}<Mailbox {items} {selected} {folder} {loading} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} />
-    <div class="reading-pane">
-      {#key view?.kind === 'message' ? `message:${view.id}` : view}
-        {#if view?.kind === 'message'}<Reader id={view.id} service={services.reader} {accountLabel} onback={back} />
-        {:else if view?.kind === 'draft'}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
-        {:else}
-          <section class="welcome"><div class="eyebrow">{accountLabel}</div><h2>Your mail, in focus.</h2><p>{opening ? 'Opening your draft…' : 'Select a message to read, or compose a new one.'}</p><button class="secondary" disabled={busy || !initialized} onclick={compose}>New message</button></section>
-        {/if}
-      {/key}
-    </div>{/if}
-  </main>
-</div>
+{#if managing}
+  <section class="settings-page" aria-labelledby="extensions-title">
+    <header class="settings-header"><div><div class="eyebrow">HOST CONTROLS</div><h1 id="extensions-title">Extensions</h1><p>Install isolated Wasm packages, disable extensions, and control account access.</p></div><button class="secondary" disabled={busy || loading} onclick={() => managing = false}>Back to mail</button></header>
+    <p>Permissions apply to new requests. Operations already in progress may complete. Permissions and installed packages are saved across restarts.</p>
+    <form onsubmit={install}>
+      <fieldset disabled={busy || loading}><legend>Install extension</legend>
+        <p>Choose a TOML manifest and its Wasm binary. Author names are self-reported, not verified.</p>
+        <label for="extension-manifest">TOML manifest</label><input id="extension-manifest" type="file" accept=".toml" required bind:files={manifestFile} />
+        <label for="extension-module">Wasm module</label><input id="extension-module" type="file" accept=".wasm" required bind:files={moduleFile} />
+        <button class="secondary" type="submit" disabled={!manifestFile?.length || !moduleFile?.length}>Install disabled</button>
+      </fieldset>
+    </form>
+    {#if installNotice}<p role="status">{installNotice}</p>{/if}
+    <label for="permission-account">Permissions for account</label>
+    <select id="permission-account" bind:value={account} disabled={busy || loading} onchange={() => void reload()}>{#each accounts as item}<option value={item.id}>{item.settings?.name ?? 'Demo account'}</option>{/each}</select>
+    {#each extensions as extension (extension.manifest.id)}
+      <fieldset disabled={busy || loading}>
+        <legend>{extension.manifest.name}</legend>
+        <p>{extension.manifest.description}</p><p>{extension.bundled ? 'Bundled · trusted application code' : 'Third-party · isolated Wasm'}</p><p>By {extension.manifest.author} · API {extension.manifest.api_version}</p>
+        <label><input type="checkbox" checked={extension.enabled} onchange={(event) => void update(extension, event.currentTarget.checked, extension.grants)} /> Enabled for all accounts</label>
+        {#each extension.manifest.capabilities as capability}
+          <label style="display:block"><input type="checkbox" checked={extension.grants.includes(capability)} onchange={(event) => void update(extension, extension.enabled, event.currentTarget.checked ? [...extension.grants, capability] : extension.grants.filter(c => c !== capability))} /> {capability}</label>
+        {/each}
+        {#if !extension.bundled}<button class="secondary" onclick={() => void remove(extension)}>Remove extension</button>{/if}
+      </fieldset>
+    {/each}
+  </section>
+{:else if loading}
+  <p role="status">Loading extensions…</p>
+{:else if extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}
+  <svelte:boundary>
+    <MailShell extensionStates={extensions}>
+      {#snippet hostControls()}<button class="manage-button" onclick={manage}>Extensions</button>{/snippet}
+    </MailShell>
+    {#snippet failed(failure, reset)}<div class="error-box" role="alert">Mail workspace failed. Your saved mail remains in Core services.<button class="secondary" onclick={reset}>Retry workspace</button><button class="secondary" onclick={manage}>Extensions</button></div>{/snippet}
+  </svelte:boundary>
+{:else}
+  <p class="error-box">Mail workspace disabled. Open Extensions to restore it.</p>
+{/if}
+{#if error}<p class="error-box" role="alert">{error}<button class="secondary" disabled={busy} onclick={() => void reload()}>Retry</button></p>{/if}
+{#if !managing && !extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}<button class="secondary" onclick={manage}>Extensions</button>{/if}

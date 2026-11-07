@@ -101,3 +101,72 @@ pub struct SecurityInput {
     #[serde(default)]
     pub password: String,
 }
+
+/// Service permissions are separate from native platform permissions.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Capability {
+    #[serde(rename = "account.read")]
+    AccountRead,
+    #[serde(rename = "messages.list")]
+    MessagesList,
+    #[serde(rename = "messages.read")]
+    MessagesRead,
+    #[serde(rename = "drafts.list")]
+    DraftsList,
+    #[serde(rename = "drafts.read")]
+    DraftsRead,
+    #[serde(rename = "drafts.write")]
+    DraftsWrite,
+    #[serde(rename = "messages.send")]
+    MessagesSend,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionManifest {
+    pub description: String,
+    pub author: String,
+    pub id: String,
+    pub name: String,
+    pub api_version: u32,
+    pub slot: String,
+    pub capabilities: Vec<Capability>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionState {
+    pub manifest: ExtensionManifest,
+    pub bundled: bool,
+    pub enabled: bool,
+    pub grants: Vec<Capability>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionPolicyInput {
+    pub enabled: bool,
+    pub grants: Vec<Capability>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionInstallInput {
+    pub manifest: String,
+    pub module: Vec<u8>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionRunInput {
+    pub action: String,
+}
+
+/// Declarative UI: all strings are rendered as text, never markup.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionView {
+    pub title: String,
+    pub text: String,
+    pub actions: Vec<String>,
+}

@@ -61,15 +61,18 @@ Run `just` for all recipes. After editing UI source, `just demo` rebuilds it.
 - `colecto-core`: TLS IMAP/SMTP, prototype JMAP, MIME plain-text decoding, sample messages, draft
   validation, IDs, and atomic JSON storage.
 - `colecto-host`: loopback HTTP/static adapter; validates Host/origin and built-in
-  module grants scoped to an explicitly selected account. API bodies are bounded to 128000 bytes.
+  module grants scoped to an explicitly selected account, persisted extension policy,
+  and isolated Wasm panels. API bodies are bounded to 512000 bytes.
 - `ui/src/extensions`: replaceable bundled mailbox, reader, and composer views.
   The Host supplies their service clients; views cannot access storage directly.
 
-Built-in module identities are not an authentication or sandbox mechanism.
-Third-party code is never loaded. There is no extension discovery/lifecycle
-runtime, native Tauri host, attachment support, sync, or tested mobile platform
-build yet. Tauri v2 remains the intended
-native host; this slice chooses a local Rust HTTP backend for the browser.
+Built-in module identities are routing labels for trusted application code.
+Third-party Wasm panels run without WASI under resource limits, start disabled
+with no grants, and emit only declarative text/actions. Third-party JavaScript
+and HTML are not loaded. An optional Tauri desktop runner uses the same loopback
+Host and exposes no guest native IPC. Attachment support, sync and tested mobile
+builds are not implemented. See [the extension contract](docs/extensions.md) for
+the exact security boundary and `just native` prerequisites.
 
 The frontend build currently inherits a low-severity `deepmerge` advisory from
 `@sveltejs/vite-plugin-svelte`, with no upstream fix. The merge runs on trusted
@@ -221,3 +224,9 @@ The implementation follows the official [keyring API](https://docs.rs/keyring/3.
 OS-keychain behavior on macOS/Windows, live provider connections, and real phone
 interaction require platform testing; automated tests use an injected credential
 store or a password vault with sample connection settings.
+
+Bundled mail UI packages have TOML manifests in `extensions/`. The **Extensions**
+Host control shows metadata, enables/disables packages, and limits service
+capabilities per account, saved across restarts. It can install isolated
+third-party Wasm panels. `just native` starts the optional Tauri desktop runner. See
+[the extension contract](docs/extensions.md) for setup and security limits.

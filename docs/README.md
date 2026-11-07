@@ -35,13 +35,12 @@ The Host owns extension discovery, manifest/API compatibility checks, capability
 grants, lifecycle, isolation, and failure recovery. Disabling an extension must
 not disable core services or prevent recovery.
 
-Sandboxing is a requirement, not an implemented feature. Before loading untrusted
-extensions, choose and validate an isolation model for both executable logic and
-UI on every target. Candidate mechanisms include a restricted Wasm runtime for
-logic and an isolated origin/frame for UI with a narrow message bridge. Importing
-third-party Svelte/JavaScript into the main app context is not a sandbox. Tauri
-capabilities alone do not isolate extension code sharing a privileged context.
-Do not choose a runtime dependency until a working vertical slice needs it.
+Third-party panels run in a fuel- and memory-limited Wasmi runtime without WASI.
+They use a Host-bound, account-scoped service bridge and emit declarative text
+and actions; they never execute HTML or JavaScript in the app origin. Bundled
+Svelte packages remain trusted application code. Tauri capabilities alone do not
+isolate extension code sharing a privileged context. See the extension contract
+for exact limits and platform validation status.
 
 ## Platforms and dependencies
 
@@ -65,8 +64,8 @@ support now. Credentials need a separate explicit security policy before sync.
 
 All Rust crates live under `crates/`, in one root Cargo workspace. The first local prototype implements `colecto-core` mail services and
 `colecto-extension-api` version 1 contracts, consumed by `colecto-host` and the
-Svelte bundled UI. This browser slice uses a loopback Rust HTTP backend; native
-Tauri hosts and untrusted extension isolation remain future work. See the root
+Svelte bundled UI. This browser slice uses a loopback Rust HTTP backend; an optional
+Tauri desktop runner and isolated Wasm panels use the same service boundary. See the root
 README for run commands and the exact prototype limits.
 
 Use justfiles as the entry point for repeatable operations. Keep shared tasks in
@@ -114,4 +113,13 @@ registry/vault rules; the Host supplies the operating system SecretStore adapter
 Only trusted host controls manage accounts or credential protection. Existing
 mail operations retain their module grants and explicit account identifier.
 Secrets never cross into read APIs or bundled extensions. This continues to be a
-local prototype, not a sandbox or a remote multi-user service.
+local prototype, not a remote multi-user service. The Wasm panel sandbox is
+described separately below.
+
+## Bundled extensions
+
+See [extension manifests and capabilities](extensions.md) for the TOML package
+contract, runtime controls, and current trust boundary. Bundled mail UI now loads
+through an explicit registry; the trusted Host retains credential and recovery
+controls. Third-party Wasm panels start disabled with no grants. Permissions and packages
+persist across restarts; an optional Tauri runner exposes no guest native IPC.

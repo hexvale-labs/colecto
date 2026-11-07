@@ -1,0 +1,7 @@
+id = "reader"
+name = "Message reader"
+api_version = 1
+slot = "reader"
+capabilities = ["messages.read"]
+description = "Read plain-text messages from the selected account."
+author = "Colecto"
