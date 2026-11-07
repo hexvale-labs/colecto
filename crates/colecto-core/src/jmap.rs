@@ -204,6 +204,9 @@ fn parse_message(value: &Value) -> Result<Message, Error> {
     let mut body = Vec::new();
     if let Some(parts) = value["textBody"].as_array() {
         for part in parts {
+            if part["type"] != "text/plain" {
+                continue;
+            }
             let body_value = &value["bodyValues"][field(part, "partId")?];
             if body_value["isEncodingProblem"] == true {
                 return Err(failed());
@@ -328,14 +331,14 @@ mod tests {
     #[test]
     fn reads_plain_text_and_marks_truncation() {
         let value = json!({"id":"abc","from":[{"name":"Friend","email":"friend@example.test"}],
-            "subject":"Hi 世界","textBody":[{"partId":"1"}],"bodyValues":{"1":{"value":"<script>text</script>","isTruncated":true}}});
+            "subject":"Hi 世界","textBody":[{"partId":"1","type":"text/plain"},{"partId":"image","type":"image/png"}],"bodyValues":{"1":{"value":"<script>text</script>","isTruncated":true}}});
         let mail = parse_message(&value).unwrap();
         assert_eq!(mail.id, "jmap-abc");
         assert_eq!(mail.sender, "Friend");
         assert_eq!(mail.body, "<script>text</script>\n[Body truncated]");
         assert!(parse_message(&json!({})).is_err());
         assert!(
-            parse_message(&json!({"id":"html","textBody":[]}))
+            parse_message(&json!({"id":"html","textBody":[{"partId":"html","type":"text/html"}],"bodyValues":{"html":{"value":"<b>HTML</b>"}}}))
                 .unwrap()
                 .body
                 .contains("No plain-text")
