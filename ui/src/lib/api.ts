@@ -7,20 +7,26 @@ export interface AccountSettings { name: string; address: string; protocol: 'ima
 export interface AccountInfo { id: string; settings: AccountSettings | null; connected: boolean; configured: boolean }
 export interface SecurityInfo { cleanup_pending: boolean; protected: boolean; locked: boolean }
 
+let transientToken = '';
+export function setAccessToken(token: string) { transientToken = token; try { if (token) sessionStorage.setItem('colecto.token', token); else sessionStorage.removeItem('colecto.token'); } catch { /* Session storage may be disabled. */ } }
+function accessToken() { try { return sessionStorage.getItem('colecto.token') ?? ''; } catch { return transientToken; } }
+
 async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE'): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, {
       method: method ?? (input === undefined ? 'GET' : 'POST'),
       headers: {
+        ...(accessToken() ? { Authorization: `Bearer ${accessToken()}` } : {}),
         'x-colecto-extension': extension, 'x-colecto-account': account,
         ...(input === undefined ? {} : { 'content-type': 'application/json' }),
       },
       ...(input === undefined ? {} : { body: JSON.stringify(input) }),
     });
   } catch {
-    throw new Error('Cannot reach Colecto. Check that the local demo is running, then try again.');
+    throw new Error('Cannot reach Colecto. Check that your mail service is running, then try again.');
   }
+  if (response.status === 401) window.dispatchEvent(new Event('colecto-auth-required'));
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status}). Please try again.`);
   return data as T;
@@ -31,7 +37,7 @@ export function createServices(account: string) {
   return {
     inbox: {
       connected: () => request<boolean>('inbox', account, '/account'),
-      messages: () => request<Message[]>('inbox', account, '/messages'),
+      messages: (folder: 'inbox' | 'sent' = 'inbox', query = '') => { const params = new URLSearchParams(); if (folder !== 'inbox') params.set('folder', folder); if (query) params.set('q', query); return request<Message[]>('inbox', account, `/messages${params.size ? `?${params}` : ''}`); },
       drafts: () => request<Draft[]>('inbox', account, '/drafts'),
     },
     reader: { read: (id: string) => request<Message>('reader', account, `/messages/${encodeURIComponent(id)}`) },

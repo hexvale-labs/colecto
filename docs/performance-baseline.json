@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-11-07T21:22:22Z",
+  "commit": "30a9fc4b78c1bc5fba33239e91ed68e5144a0846",
+  "dirty": true,
+  "binary_sha256": "0fb70b5204b50d182eeb56653dd88abcb8ace66c83092fb82cde11376ce09dc4",
+  "ui_sha256": "d371a70870de9bc2397584e6e9b3ae4bda36223a166155cb581325e2f9327e83",
+  "machine": {
+    "host": "armchair-vnic",
+    "cpu": "aarch64",
+    "kernel": "7.0.0-1012-oracle",
+    "architecture": "aarch64"
+  },
+  "compatibility": {
+    "machine": "feba0bc9a83ea2d7",
+    "workload": "sample-mail-read-compose-v1",
+    "cycles": 12,
+    "ui": true,
+    "profile": "debug",
+    "binary": "colecto-host",
+    "browser_driver": "1.65.0",
+    "cpu_count": 2,
+    "worker_sha256": "3e2832770c4c79d035f32b62392b45d698bcd48f084b2a3c10e322e8de3ee34c",
+    "node": "v22.22.1"
+  },
+  "samples": [
+    {
+      "elapsed_seconds": 6.946064108982682,
+      "daemon_cpu_seconds": 0.05,
+      "daemon_idle_cpu_seconds": 0.0,
+      "daemon_idle_rss_bytes": 23547904,
+      "daemon_retained_rss_bytes": 23756800,
+      "daemon_peak_rss_bytes": 23756800,
+      "daemon_rss_growth_bytes": 208896,
+      "browser_cpu_seconds": 5.0200000000000005,
+      "browser_idle_cpu_seconds": 0.010000000000000009,
+      "browser_idle_rss_bytes": 597708800,
+      "browser_retained_rss_bytes": 659910656,
+      "browser_peak_sampled_rss_bytes": 659910656,
+      "browser_rss_growth_bytes": 62201856
+    },
+    {
+      "elapsed_seconds": 7.031893089879304,
+      "daemon_cpu_seconds": 0.05,
+      "daemon_idle_cpu_seconds": 0.0,
+      "daemon_idle_rss_bytes": 23531520,
+      "daemon_retained_rss_bytes": 23744512,
+      "daemon_peak_rss_bytes": 23744512,
+      "daemon_rss_growth_bytes": 212992,
+      "browser_cpu_seconds": 4.99,
+      "browser_idle_cpu_seconds": 0.0,
+      "browser_idle_rss_bytes": 595759104,
+      "browser_retained_rss_bytes": 670109696,
+      "browser_peak_sampled_rss_bytes": 670109696,
+      "browser_rss_growth_bytes": 74350592
+    },
+    {
+      "elapsed_seconds": 6.972568556200713,
+      "daemon_cpu_seconds": 0.05,
+      "daemon_idle_cpu_seconds": 0.0,
+      "daemon_idle_rss_bytes": 27746304,
+      "daemon_retained_rss_bytes": 27975680,
+      "daemon_peak_rss_bytes": 27975680,
+      "daemon_rss_growth_bytes": 229376,
+      "browser_cpu_seconds": 5.03,
+      "browser_idle_cpu_seconds": 0.0,
+      "browser_idle_rss_bytes": 597073920,
+      "browser_retained_rss_bytes": 659300352,
+      "browser_peak_sampled_rss_bytes": 659300352,
+      "browser_rss_growth_bytes": 62226432
+    }
+  ],
+  "summary": {
+    "elapsed_seconds": {
+      "mean": 6.9835085850209,
+      "median": 6.972568556200713
+    },
+    "daemon_cpu_seconds": {
+      "mean": 0.05,
+      "median": 0.05
+    },
+    "daemon_idle_cpu_seconds": {
+      "mean": 0.0,
+      "median": 0.0
+    },
+    "daemon_idle_rss_bytes": {
+      "mean": 24941909.333333332,
+      "median": 23547904
+    },
+    "daemon_retained_rss_bytes": {
+      "mean": 25158997.333333332,
+      "median": 23756800
+    },
+    "daemon_peak_rss_bytes": {
+      "mean": 25158997.333333332,
+      "median": 23756800
+    },
+    "daemon_rss_growth_bytes": {
+      "mean": 217088,
+      "median": 212992
+    },
+    "browser_cpu_seconds": {
+      "mean": 5.013333333333334,
+      "median": 5.0200000000000005
+    },
+    "browser_idle_cpu_seconds": {
+      "mean": 0.003333333333333336,
+      "median": 0.0
+    },
+    "browser_idle_rss_bytes": {
+      "mean": 596847274.6666666,
+      "median": 597073920
+    },
+    "browser_retained_rss_bytes": {
+      "mean": 663106901.3333334,
+      "median": 659910656
+    },
+    "browser_peak_sampled_rss_bytes": {
+      "mean": 663106901.3333334,
+      "median": 659910656
+    },
+    "browser_rss_growth_bytes": {
+      "mean": 66259626.666666664,
+      "median": 62226432
+    }
+  },
+  "comparison": {
+    "baseline": "20261107T211938Z-30a9fc4b-747676.json",
+    "metrics": {
+      "elapsed_seconds": {
+        "previous_median": 6.976672342047095,
+        "median_percent": -0.05882153618781416
+      },
+      "daemon_cpu_seconds": {
+        "previous_median": 0.06,
+        "median_percent": -16.666666666666664
+      },
+      "daemon_idle_cpu_seconds": {
+        "previous_median": 0.0,
+        "median_percent": null
+      },
+      "daemon_idle_rss_bytes": {
+        "previous_median": 23552000,
+        "median_percent": -0.017391304347824654
+      },
+      "daemon_retained_rss_bytes": {
+        "previous_median": 23764992,
+        "median_percent": -0.03447087211306821
+      },
+      "daemon_peak_rss_bytes": {
+        "previous_median": 23764992,
+        "median_percent": -0.03447087211306821
+      },
+      "daemon_rss_growth_bytes": {
+        "previous_median": 212992,
+        "median_percent": 0.0
+      },
+      "browser_cpu_seconds": {
+        "previous_median": 5.09,
+        "median_percent": -1.3752455795677632
+      },
+      "browser_idle_cpu_seconds": {
+        "previous_median": 0.010000000000000009,
+        "median_percent": -100.0
+      },
+      "browser_idle_rss_bytes": {
+        "previous_median": 596819968,
+        "median_percent": 0.04255085513493739
+      },
+      "browser_retained_rss_bytes": {
+        "previous_median": 659218432,
+        "median_percent": 0.10500677262617053
+      },
+      "browser_peak_sampled_rss_bytes": {
+        "previous_median": 659218432,
+        "median_percent": 0.10500677262617053
+      },
+      "browser_rss_growth_bytes": {
+        "previous_median": 62398464,
+        "median_percent": -0.2756990941315429
+      }
+    }
+  }
+}

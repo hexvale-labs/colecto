@@ -1,8 +1,8 @@
 <script lang="ts">
   import { hostService } from './lib/api';
   import type { AccountInfo, AccountSettings, SecurityInfo } from './lib/api';
-  let { accounts, security, onrefresh, onback, ondirty, onbusy }: {
-    accounts: AccountInfo[]; security: SecurityInfo; onrefresh: () => Promise<void>; onback: () => void;
+  let { accounts, security, onrefresh, ondirty, onbusy }: {
+    accounts: AccountInfo[]; security: SecurityInfo; onrefresh: () => Promise<void>;
     ondirty: (value: boolean) => void; onbusy: (value: boolean) => void;
   } = $props();
   const empty = (): AccountSettings => ({ name: '', address: '', protocol: 'imap', imap_host: '', imap_port: 993, smtp_host: '', smtp_port: 587, username: '', session_url: '' });
@@ -50,14 +50,14 @@
     });
   }
 </script>
-<section class="settings-page" aria-labelledby="settings-title">
-  <header class="settings-header"><div><div class="eyebrow">COLECTO SETTINGS</div><h1 id="settings-title">Accounts &amp; security</h1><p>Your accounts, kept separate. Your credentials, protected.</p></div><button class="secondary" disabled={working} onclick={onback}>Back to mail</button></header>
+<section class="account-settings" aria-labelledby="settings-title">
+  <header class="settings-header"><div><div class="eyebrow">COLECTO SETTINGS</div><h2 id="settings-title">Accounts &amp; security</h2><p>Your accounts, kept separate. Your credentials, protected.</p></div></header>
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   {#if notice}<p class="settings-notice" role="status">{notice}</p>{/if}
   <div class="settings-grid">
     <section class="settings-card" aria-label="Saved accounts"><h2>Mail accounts</h2><p>Inbox and drafts stay with their account.</p>
-      <ul class="account-list">{#each accounts as account (account.id)}<li><div><strong>{account.settings?.name ?? 'Demo account'}</strong><span>{account.settings?.address ?? 'Sample mail · local drafts'}</span><small>{account.configured ? security.locked ? 'Locked' : 'Configured · connection checked in Inbox' : account.settings ? 'Disconnected · drafts kept' : 'Local sample'}</small></div>
-      {#if account.settings}<div class="account-actions"><button class="text-button" disabled={working || security.locked} onclick={() => edit(account)}>Edit / reconnect<span class="sr-only"> {account.settings.name}</span></button>{#if account.configured}<button class="text-button danger-text" disabled={working || security.locked} onclick={() => { if (window.confirm(`Disconnect ${account.settings?.name}? Local drafts will be kept.`)) void run(async () => { await hostService.disconnect(account.id); notice = 'Account disconnected. Local drafts kept.'; }); }}>Disconnect<span class="sr-only"> {account.settings.name}</span></button>{/if}</div>{/if}</li>{/each}</ul>
+      <ul class="account-list">{#each accounts as account (account.id)}<li><div><strong>{account.settings?.name || account.settings?.address || 'Demo account'}</strong><span>{account.settings?.address ?? 'Sample mail · local drafts'}</span><small>{account.configured ? security.locked ? 'Locked' : 'Configured · connection checked in Inbox' : account.settings ? 'Disconnected · drafts kept' : 'Local sample'}</small></div>
+      {#if account.settings}<div class="account-actions"><button class="text-button" disabled={working || security.locked} onclick={() => edit(account)}>Edit / reconnect<span class="sr-only"> {account.settings.name || account.settings.address}</span></button>{#if account.configured}<button class="text-button danger-text" disabled={working || security.locked} onclick={() => { if (window.confirm(`Disconnect ${account.settings?.name || account.settings?.address}? Local drafts will be kept.`)) void run(async () => { await hostService.disconnect(account.id); notice = 'Account disconnected. Local drafts kept.'; }); }}>Disconnect<span class="sr-only"> {account.settings.name || account.settings.address}</span></button>{/if}</div>{/if}</li>{/each}</ul>
     </section>
     <section class="settings-card security-card" aria-label="Credential protection"><h2>Credential protection</h2><p class="protection-state">{security.cleanup_pending ? 'Credential cleanup pending' : security.protected ? security.locked ? 'Credentials locked' : 'Password protection enabled' : 'System credential store'}</p><p>By default, passwords and tokens stay in your system credential store. Optionally protect them with a master password.</p><p class="security-disclosure">Protects credentials only. Local emails and drafts remain unencrypted. A forgotten master password cannot be recovered.</p>
       {#if security.cleanup_pending}<p class="error-box">The new credential storage is saved, but the previous system entry still needs removal. Unlock your system keychain and retry.</p><button class="secondary" disabled={working} onclick={() => protect('cleanup')}>Finish credential cleanup</button>{/if}
@@ -75,7 +75,7 @@
     <section class="settings-card add-account" aria-label="Account connection settings"><h2>{editing ? 'Edit account' : 'Add an account'}</h2><p>Use your provider’s server settings and an app password when required. POP3 is not supported.</p>
       {#if security.locked}<p class="settings-notice">Unlock credentials to add or reconnect an account.</p>{/if}
       <form onsubmit={save}><fieldset disabled={working || security.locked}><div class="form-grid">
-        <label class="field">Account name<input required maxlength="100" autocomplete="off" bind:value={settings.name} placeholder="Work or Personal" /></label>
+        <label class="field">Account name (optional)<input maxlength="100" autocomplete="off" bind:value={settings.name} placeholder="Work or Personal" /></label>
         <label class="field">Email address<input required type="email" maxlength="320" autocomplete="email" autocapitalize="none" bind:value={settings.address} placeholder="you@example.com" /></label>
         <label class="field">Protocol<select bind:value={settings.protocol}><option value="imap">IMAP + SMTP</option><option value="jmap">JMAP</option></select></label>
         {#if settings.protocol === 'imap'}

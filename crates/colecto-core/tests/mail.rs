@@ -122,3 +122,18 @@ fn only_one_store_can_write_a_directory() {
     drop(first);
     assert!(MailStore::open(dir.path()).is_ok());
 }
+
+#[test]
+fn queries_sample_mail_without_losing_reader_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = colecto_core::MailStore::open(directory.path()).unwrap();
+    let inbox = store.query("inbox", "").unwrap();
+    assert_eq!(inbox.len(), 4);
+    let matches = store.query("inbox", "bookshop").unwrap();
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].sender, "Maya Chen");
+    assert!(store.query("sent", "").unwrap().is_empty());
+    assert!(store.message(&inbox[0].id).is_some());
+    assert!(store.query("../other", "").is_err());
+    assert!(store.query("inbox", "bad\r\nquery").is_err());
+}

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { MailItem } from '../lib/api';
   let { items, selected, folder, loading, error, disabled, onopen, onretry }: {
-    items: MailItem[]; selected: string | null; folder: 'Inbox' | 'Drafts';
+    items: MailItem[]; selected: string | null; folder: 'Inbox' | 'Drafts' | 'Sent';
     loading: boolean; error: string; disabled: boolean;
     onopen: (id: string) => void; onretry: () => void;
   } = $props();
@@ -11,7 +11,7 @@
   <header class="mailbox-header">
     <div class="eyebrow">MAILBOX</div>
     <div class="title-row"><h1>{folder}</h1><span class="count">{loading ? '…' : items.length}</span></div>
-    <p>{folder === 'Inbox' ? 'Latest messages in this account.' : 'Saved locally in this account.'}</p>
+    <p>{folder === 'Drafts' ? 'Saved locally in this account.' : folder === 'Sent' ? 'Messages in your provider’s Sent mailbox.' : 'Latest messages in this account.'}</p>
   </header>
   <div class="message-list">
     {#if loading}
@@ -30,5 +30,5 @@
       {/each}
     {/if}
   </div>
-  <footer class="list-footer">{folder === 'Inbox' ? 'Reopen Inbox to refresh.' : 'Your drafts stay on this computer.'}</footer>
+  <footer class="list-footer">{folder === 'Drafts' ? 'Drafts are saved by your mail service.' : `Reopen ${folder} to refresh.`}</footer>
 </section>

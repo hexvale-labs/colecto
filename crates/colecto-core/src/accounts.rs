@@ -22,9 +22,13 @@ fn invalid(message: &str) -> Error {
 fn busy() -> Error {
     invalid("Mail operation in progress. Try again when it finishes.")
 }
-fn connect(store: &mut MailStore, settings: &AccountSettings, secret: &str) -> Result<(), Error> {
-    match settings.protocol {
-        Protocol::Imap => store.connect_account(MailAccount {
+fn prepare_connection(
+    store: &MailStore,
+    settings: &AccountSettings,
+    secret: &str,
+) -> Result<crate::PreparedConnection, Error> {
+    let account = match settings.protocol {
+        Protocol::Imap => Account::Imap(MailAccount {
             imap_host: settings.imap_host.clone(),
             imap_port: settings.imap_port,
             smtp_host: settings.smtp_host.clone(),
@@ -33,13 +37,20 @@ fn connect(store: &mut MailStore, settings: &AccountSettings, secret: &str) -> R
             password: secret.into(),
             address: settings.address.clone(),
         }),
-        Protocol::Jmap => store.connect_jmap(JmapAccount {
+        Protocol::Jmap => Account::Jmap(JmapAccount {
             session_url: settings.session_url.clone(),
             token: secret.into(),
             address: settings.address.clone(),
         }),
-    }
+    };
+    store.prepare_connection(account)
 }
+fn connect(store: &mut MailStore, settings: &AccountSettings, secret: &str) -> Result<(), Error> {
+    let prepared = prepare_connection(store, settings, secret)?;
+    store.apply_connection(prepared);
+    Ok(())
+}
+
 impl Accounts {
     /// Host-owned data, including extension policy, lives beside account stores.
     pub fn data_directory(&self) -> &std::path::Path {
@@ -169,9 +180,10 @@ impl Accounts {
     }
     pub fn upsert(&mut self, mut input: AccountInput) -> Result<AccountInfo, Error> {
         let secret = Secret(std::mem::take(&mut input.secret));
-        let settings = input.settings;
-        if settings.name.trim().is_empty()
-            || settings.name.len() > 100
+        let mut settings = input.settings;
+        settings.name = settings.name.trim().to_owned();
+        settings.address = settings.address.trim().to_owned();
+        if settings.name.len() > 100
             || settings.address.len() > 320
             || settings.imap_host.len() > 253
             || settings.smtp_host.len() > 253
@@ -226,7 +238,7 @@ impl Accounts {
         };
         let mut store = handle.try_lock().map_err(|_| busy())?;
         // Validate without changing the active transport before persistence.
-        validate(&settings, &secret.0)?;
+        let prepared = prepare_connection(&store, &settings, &secret.0)?;
         let mut records = self.vault.accounts().to_vec();
         records.retain(|a| a.id != id);
         records.push(crate::credentials::SavedAccount {
@@ -248,7 +260,7 @@ impl Accounts {
                 .and_then(|s| s.get(&id))
                 .is_some_and(|s| s.0 == secret.0)
         {
-            connect(&mut store, &settings, &secret.0)?;
+            store.apply_connection(prepared);
             drop(store);
             self.stores.insert(id.clone(), handle);
         }
@@ -370,25 +382,5 @@ impl Accounts {
             }
         }
         result
-    }
-}
-fn validate(settings: &AccountSettings, secret: &str) -> Result<(), Error> {
-    match settings.protocol {
-        Protocol::Imap => MailAccount {
-            imap_host: settings.imap_host.clone(),
-            imap_port: settings.imap_port,
-            smtp_host: settings.smtp_host.clone(),
-            smtp_port: settings.smtp_port,
-            username: settings.username.clone(),
-            password: secret.into(),
-            address: settings.address.clone(),
-        }
-        .validate(),
-        Protocol::Jmap => JmapAccount {
-            session_url: settings.session_url.clone(),
-            token: secret.into(),
-            address: settings.address.clone(),
-        }
-        .validate(),
     }
 }

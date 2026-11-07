@@ -29,25 +29,46 @@
 
 ## Tasks and verification
 ### Task 1: Daemon foundation
-- [ ] Add regression tests for auth, service lifecycle, socket cleanup and background refresh.
-- [ ] Extract reusable runtime and standalone binary; preserve host/native entrypoints and old APIs.
-- [ ] Add portable launch documentation and sample systemd units; authenticated remote mode and local socket mode.
-- [ ] Verify targeted Rust tests, then workspace integration.
+- [x] Add regression tests for auth, service lifecycle, socket cleanup and background refresh.
+- [x] Extract reusable runtime and standalone binary; preserve host/native entrypoints and old APIs.
+- [x] Add portable launch documentation and sample systemd units; authenticated remote mode and local socket mode.
+- [x] Verify targeted Rust tests, then workspace integration.
 ### Task 2: Provider mail operations
-- [ ] Add tested inbox/sent querying and provider search/capability reuse where current contracts allow.
-- [ ] Preserve legacy no-query inbox behavior and account/module grants. Explain fallback limitations.
+- [x] Add tested inbox/sent querying and provider search/capability reuse where current contracts allow.
+- [x] Preserve legacy no-query inbox behavior and account/module grants. Explain fallback limitations.
 ### Task 3: Client and mobile UX
-- [ ] Add focused failing UI flows for theme persistence, name fallback, settings navigation and account-safe tabs.
-- [ ] Implement approved client changes, connect service configuration and audit/fix mobile issues.
-- [ ] Run Svelte checks/build and browser flows; report physical-device limits.
+- [x] Add focused failing UI flows for theme persistence, name fallback, settings navigation and account-safe tabs.
+- [x] Implement approved client changes, connect service configuration and audit/fix mobile issues.
+- [x] Run Svelte checks/build and browser flows; report physical-device limits.
 ### Task 4: Resource measurements
-- [ ] Add repeatable isolated workloads and three-run resource recorder with history/comparison metadata.
-- [ ] Integrate just recipe and usage docs; exercise recorder and retain baseline results.
+- [x] Add repeatable isolated workloads and three-run resource recorder with history/comparison metadata.
+- [x] Integrate just recipe and usage docs; exercise recorder and retain baseline results.
 ### Task 5: Integration and review
-- [ ] Review UI with emil-design-eng/mobile-native and security/lifecycle boundaries independently.
-- [ ] Fix important findings, run just verify and relevant browser checks/resource runs.
-- [ ] Update docs/README.md and root README with actual delivered scope and honest remaining limitations.
+- [x] Review UI with emil-design-eng/mobile-native and security/lifecycle boundaries independently.
+- [x] Fix important findings, run just verify and relevant browser checks/resource runs.
+- [x] Update docs/README.md and root README with actual delivered scope and honest remaining limitations.
 
 ## Progress / handoff
 - Planning: complete. Branch created from clean main. No implementation changes before plan.
 - All requested features remain open until checked above; incomplete Android/push/agent work must be recorded rather than silently declared done.
+
+### Integration record
+- Independent review completed by a fresh agent using ponytail-review/emil-design-eng/mobile-native. Three Important findings accepted: transactional cache preparation, long fallback-name edits, and cancellation of queued background operations at shutdown.
+- Fixed cache/account consistency by preparing validated transports and snapshots before vault commit, then applying the prepared connection without I/O. Regression `corrupt_mail_cache_cannot_commit_new_credentials_or_account_settings`: RED → GREEN.
+- Preserve blank optional names in storage; all display surfaces use address fallback. Regression `address_longer_than_profile_limit_can_be_edited_without_a_profile_name`: RED → GREEN. UI action labels and disconnect confirmation use the same fallback (additional regression).
+- Stop queued refresh permit acquisition on shutdown; only already-dispatched provider operations finish. Regression `queued_refresh_never_starts_after_shutdown`: RED → GREEN.
+- Added mailbox-qualified Sent IMAP IDs and a real IMAP wire regression. This revealed/fixed pre-existing invalid multi-attribute FETCH syntax. JMAP wire test proves upstream Sent/text search and requested ordering.
+- Bounded combined text bodies and reader cache bytes (12 MB) in addition to the 500-ID cap. Memory-bound regression tests: RED → GREEN.
+- UI agent checks: full Playwright 16/16, final focused 5/5, Svelte/build clean. No physical-device validation. Root integrated checks in progress.
+- Benchmark agent checks: five Python tests and real three-run browser/daemon workloads passed. Root will record a stable integrated baseline and refresh the committed development sample.
+- Delivery decision: remote server selection opens that server's same-origin UI; simultaneous aggregation is not implemented. One-owner bearer auth replaces the earlier discarded multi-user/admin design.
+- Platform follow-up: native Android lifecycle/FCM/UnifiedPush registration and sending are not implemented; preserve these requested choices for the Android platform slice. Apple deferred. Background provider work currently uses bounded polling, not full-history incremental sync, provider IDLE, labels/flags, or offline mutation queues.
+
+
+### Final verification
+- `just perf-check`: passed. Workspace tests: 59 passed across core, account persistence, HTTP/security, daemon, Unix runtime, and unit suites. Formatting, compilation, strict Clippy, Svelte check and production build passed. Resource recorder tests: 5 passed; three measured runs retained locally.
+- `just ui-test`: passed, including real Host restart persistence and 17 Playwright flows. Root added a regression for unnamed-account action labels and confirmation text (RED → GREEN).
+- `just native-check`: passed. This checks native compilation, not an Android build or physical-device behavior.
+- Final additional `just perf` records the final UI label fix; committed baseline is refreshed from that run. No hardware-independent memory budget is claimed.
+- Remaining explicitly deferred scope: native Android application/service integration and both push transports; provider IDLE/incremental full-history synchronization, labels/flags and offline mutations; simultaneous multi-server aggregation. Apple remains outside initial support. Password-vault mode needs unlocking after restart; remote deployment requires external HTTPS termination.
+- Branch stays local for review; no merge, push, deployment, or PR requested.

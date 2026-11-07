@@ -1,0 +1,16 @@
+[Unit]
+Description=Colecto remote mail notifications
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/colecto-daemon notify
+EnvironmentFile=%h/.config/colecto/notifications.env
+UMask=0077
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=graphical-session.target

@@ -48,6 +48,7 @@ pub enum Protocol {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AccountSettings {
+    #[serde(default)]
     pub name: String,
     pub address: String,
     pub protocol: Protocol,

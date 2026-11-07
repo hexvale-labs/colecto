@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Message, ReaderService } from '../lib/api';
-  let { id, service, accountLabel, onback }: { id: string; accountLabel: string; service: ReaderService; onback: () => void } = $props();
+  let { id, service, accountLabel, folder = 'Inbox', onback }: { id: string; folder?: string; accountLabel: string; service: ReaderService; onback: () => void } = $props();
   let message = $state<Message | null>(null);
   let error = $state('');
   let loading = $state(true);
@@ -19,7 +19,7 @@
   {:else if error}<div class="detail-state"><p role="alert">{error}</p><button class="secondary" onclick={load}>Try again</button></div>
   {:else if message}
     <article class="letter">
-      <div class="eyebrow">{message.date} · INBOX</div>
+      <div class="eyebrow">{message.date} · {folder.toUpperCase()}</div>
       <h2>{message.subject || '(No subject)'}</h2>
       <div class="sender-row"><span class="avatar" aria-hidden="true">{message.sender.charAt(0)}</span><div><strong>{message.sender}</strong><span class="address">{message.address}</span></div><span class="to-me">to you</span></div>
       <div class="letter-body">{message.body}</div>

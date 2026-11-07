@@ -1,12 +1,16 @@
 //! Trusted HTTP adapter for bundled UI and isolated Wasm extensions.
 mod extensions;
+pub mod notifications;
+pub mod runtime;
+mod service;
+pub use service::{AccessPolicy, MailService};
 mod sandbox;
 
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Path, Request, State, rejection::JsonRejection},
+    extract::{DefaultBodyLimit, Path, Query, Request, State, rejection::JsonRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
-    middleware::{self, Next},
+    middleware::Next,
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -44,10 +48,10 @@ impl From<Error> for Failure {
             Error::Missing => Self(StatusCode::NOT_FOUND, error.to_string()),
             Error::Invalid(_) => Self(StatusCode::BAD_REQUEST, error.to_string()),
             Error::Storage(_) => {
-                eprintln!("Draft storage error: {error}");
+                eprintln!("Local mail storage error: {error}");
                 Self(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "Could not save the draft. Your changes are still in the editor.".into(),
+                    "Could not access local mail storage. Your unsaved changes are still in the editor.".into(),
                 )
             }
         }
@@ -67,15 +71,12 @@ pub fn app(store: MailStore, authority: String, assets: PathBuf) -> Router {
 }
 
 pub fn app_with_accounts(accounts: Accounts, authority: String, assets: PathBuf) -> Router {
-    let extensions = extensions::Extensions::open(accounts.data_directory())
-        .expect("Cannot load extension policy; refusing to reset grants");
-    let host = Host {
-        accounts: Arc::new(Mutex::new(accounts)),
-        extensions: Arc::new(Mutex::new(extensions)),
-        execution: Arc::new(tokio::sync::Semaphore::new(2)),
-        origin: format!("http://{authority}"),
-        authority,
-    };
+    MailService::new(accounts, AccessPolicy::local(authority), assets)
+        .expect("Cannot initialize mail service")
+        .router()
+}
+
+fn build_app(host: Host, assets: PathBuf) -> Router {
     let api = Router::new()
         .route("/extensions", get(list_extensions).post(install_extension))
         .route(
@@ -100,7 +101,6 @@ pub fn app_with_accounts(accounts: Accounts, authority: String, assets: PathBuf)
         .nest("/api/v1", api)
         .fallback_service(ServeDir::new(assets))
         .layer(DefaultBodyLimit::max(512_000))
-        .layer(middleware::from_fn_with_state(host.clone(), boundary))
         .with_state(host)
 }
 
@@ -384,12 +384,25 @@ async fn with_store<T: Send + 'static>(
         )
     })?
 }
+#[derive(serde::Deserialize, Default)]
+struct MessageQuery {
+    #[serde(default = "inbox_folder")]
+    folder: String,
+    #[serde(default)]
+    q: String,
+}
+fn inbox_folder() -> String {
+    "inbox".into()
+}
 async fn messages(
     State(host): State<Host>,
     headers: HeaderMap,
+    Query(query): Query<MessageQuery>,
 ) -> Result<Json<Vec<Message>>, Failure> {
     let account = grant(&host, &headers, Capability::MessagesList)?;
-    with_store(host, account, |s| s.refresh()).await.map(Json)
+    with_store(host, account, move |s| s.query(&query.folder, &query.q))
+        .await
+        .map(Json)
 }
 async fn message(
     State(host): State<Host>,
