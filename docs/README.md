@@ -123,3 +123,30 @@ contract, runtime controls, and current trust boundary. Bundled mail UI now load
 through an explicit registry; the trusted Host retains credential and recovery
 controls. Third-party Wasm panels start disabled with no grants. Permissions and packages
 persist across restarts; an optional Tauri runner exposes no guest native IPC.
+
+
+## Daemon and client workspace
+
+The approved continuation is recorded in
+[the daemon and adaptive UI plan](superpowers/plans/2026-11-07-mail-daemon-and-adaptive-ui.md).
+One owner may connect multiple accounts and devices. Multi-user hosting and its
+admin bootstrap flow are deferred. `colecto-host` now provides a reusable service
+runtime and a standalone `colecto-daemon` binary; this avoids duplicating core
+services or introducing a circular crate dependency. The daemon runs in the
+foreground under any supervisor; optional systemd units are packaging only.
+Remote access uses an explicit HTTPS public origin and an owner bearer token,
+with TLS termination at a trusted reverse proxy. Local Unix HTTP sockets use
+private directories and ownership-safe cleanup. See [deployment](daemon.md).
+
+Inbox snapshots persist per account, bounded to 100 messages and 12 MB serialized
+storage. They are not encrypted. Provider-backed Inbox/Sent search and a bounded
+reader cache preserve open-message access when changing views. This is polling
+and caching, not a complete incremental sync engine. Provider flags, labels,
+full-history pagination, and offline mutations still need explicit contracts.
+
+The client uses one Settings pane, optional account profile names, dark/system/
+light appearance, and account-bound open-message tabs. Mobile layout is checked
+in browser tests; Android-native lifecycle, FCM, UnifiedPush, battery use, and
+physical-device keyboard behavior remain separate platform validation work.
+Apple is outside the initial platform scope. Resource regression work uses
+`just perf-check`; see [performance](performance.md).

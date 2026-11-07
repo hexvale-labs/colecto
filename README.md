@@ -1,8 +1,22 @@
 # Colecto
 
-A customizable email client with Rust core services and a Svelte UI. This first
-prototype runs locally in a browser: browse sample mail, read messages, and
-create, save, reopen, and edit drafts. Drafts survive restarting the Host.
+A customizable email client with Rust core services and a Svelte UI. The
+single-owner mail service runs inside the desktop Host or as a standalone daemon.
+Browse mail, search Inbox/Sent through your provider, and save/reopen local drafts.
+The daemon can receive mail while the UI is closed. This remains a prototype;
+background receiving currently polls the latest 100 Inbox messages.
+
+The client defaults to dark mode. Open the gear beside the profile at the bottom
+of the sidebar for one Settings pane: appearance, accounts and credentials,
+server connections, and extensions. Choose System, Dark, or Light. Account profile
+names are optional and fall back to the email address. Opening mail adds closable,
+account-specific tabs; Inbox, Drafts, and Sent remain below the open tabs.
+
+See [daemon deployment and notifications](docs/daemon.md) for authenticated remote
+HTTPS deployment, local HTTP over Unix sockets, supervisor-independent startup,
+and the optional Linux desktop notification agent. Systemd is optional.
+Apple and native Android push integration are deferred; a mobile browser layout
+is not evidence that native FCM/UnifiedPush or Android background services work.
 
 ## Run the local demo
 
@@ -44,6 +58,7 @@ migration mechanism yet; a future incompatible format must provide one.
 
 ```sh
 just verify          # Rust fmt/check/Clippy/tests, Svelte/TypeScript, UI build
+just perf-check      # verification plus three recorded Linux resource runs
 just setup-browser   # install the test Chromium browser once
 just ui-test         # browser flows and actual Host restart persistence
 ```
@@ -85,7 +100,7 @@ See [project direction and architecture](docs/README.md), the
 ## Connect a mail account
 
 IMAP receives mail; SMTP sends mail. **POP3 will not be supported.**
-Use **Manage accounts** inside the app to add IMAP/SMTP or JMAP accounts, edit
+Use **Settings → Accounts & security** inside the app to add IMAP/SMTP or JMAP accounts, edit
 settings, reconnect, and disconnect. The account selector stays available on
 narrow screens. Inbox, drafts, and the compose sender belong to the selected
 account. Saving settings does not verify the provider connection: open Inbox to
@@ -115,15 +130,21 @@ Any mail variable enables account mode; missing or invalid settings stop startup
 Certificates and hostnames are verified; plaintext authentication is unavailable.
 When unlocked, a legacy environment account is imported once into persistent
 account settings and the system credential store, retaining its existing `demo`
-identity and drafts. Saved settings then take precedence; use Manage accounts to
+identity and drafts. Saved settings then take precedence; use Settings → Accounts & security to
 update them. A password-protected vault suppresses environment credentials while
 locked; reconnect/import through the UI after unlocking. Secrets are never
 returned through the API or saved in the draft store. OAuth-only providers are not supported yet.
 
 Opening Inbox fetches the latest 100 messages, read-only, without marking them
 seen. Reopen Inbox to refresh. Messages larger than 2000000 bytes are skipped;
-HTML-only messages show a placeholder. The inbox cache is in memory, so mail is
-fetched again after restart. Drafts remain local and unencrypted. New accounts have separate stores beneath
+HTML-only messages show a placeholder. The latest successful Inbox snapshot persists in a bounded `mail-cache.json`
+inside each account store. It is plain text, keyed to provider identity, and
+restored on reconnect; receiving failures preserve the previous snapshot.
+Preserve and remove a corrupt or unsupported cache file to rebuild it. Sent and
+search results are held in a bounded reader cache in memory. Search uses upstream
+IMAP TEXT or JMAP text filters and returns at most 100 matches. Sent uses the
+provider role, with conventional IMAP folder-name fallbacks. SMTP acceptance does
+not automatically append a Sent copy. Drafts remain local and unencrypted. New accounts have separate stores beneath
 `COLECTO_DATA_DIR/accounts/<account-id>/`; the existing root draft store keeps its
 legacy identity and is never assigned to a new account automatically. Disconnect
 forgets the saved credential and retains settings/drafts for reconnecting.
@@ -186,7 +207,7 @@ directory for this prototype.
 
 ## Optional master password
 
-In **Manage accounts → Credential protection**, enable password protection with a
+In **Settings → Accounts & security → Credential protection**, enable password protection with a
 master password of at least 12 bytes. This is optional: the default is your
 system credential store. Password mode also works when no desktop keychain is
 available. Keep the password somewhere safe: Colecto cannot recover it.
@@ -204,7 +225,7 @@ with random salt/nonces and authenticated account metadata. The password and
 derived key are not saved. It locks on Host restart; **Lock credentials** also
 removes active mail credentials from memory. Local drafts remain accessible.
 Unlocking is shared by tabs using the same local Host. A tab that changes account
-security elsewhere may need to reopen Manage accounts to refresh its status.
+security elsewhere may need to reopen Settings → Accounts & security to refresh its status.
 
 You can change the password while unlocked or return to the system credential
 store. Credential transitions journal replacement entries before switching the
@@ -225,8 +246,16 @@ OS-keychain behavior on macOS/Windows, live provider connections, and real phone
 interaction require platform testing; automated tests use an injected credential
 store or a password vault with sample connection settings.
 
-Bundled mail UI packages have TOML manifests in `extensions/`. The **Extensions**
+Bundled mail UI packages have TOML manifests in `extensions/`. The **Settings → Extensions**
 Host control shows metadata, enables/disables packages, and limits service
 capabilities per account, saved across restarts. It can install isolated
 third-party Wasm panels. `just native` starts the optional Tauri desktop runner. See
 [the extension contract](docs/extensions.md) for setup and security limits.
+
+## Resource regression checks
+
+Run `just perf-check` after feature changes. Three isolated workloads record raw
+CPU and memory samples, mean/median, and environment/build provenance under
+`performance-results/`. Preserve that history for comparisons; see
+[resource measurement limits](docs/performance.md). Initial comparisons report
+changes without enforcing noisy hardware-dependent budgets.

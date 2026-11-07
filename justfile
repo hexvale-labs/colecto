@@ -73,3 +73,22 @@ native-build: ui-build
 # Linux/X11 native launch smoke check (requires xvfb and xwininfo).
 native-test: native-build
     xvfb-run -a bun test ./ui/tests/native.test.mjs
+
+# Test the Linux resource recorder's aggregation, isolation, and comparison rules.
+perf-test:
+    python3 -m unittest discover -s scripts -p '*_test.py'
+
+# Measure three isolated daemon/browser workloads and retain timestamped history.
+perf: build ui-build perf-test
+    python3 scripts/resource_bench.py
+
+# Run the normal verification suite and record resource usage for feature changes.
+perf-check: verify perf
+
+# Run the standalone mail service under any supervisor.
+daemon: build ui-build
+    cargo run -p colecto-host --bin colecto-daemon --locked
+
+# Run the optional Linux desktop notification agent for the configured HTTPS daemon.
+notify: build
+    cargo run -p colecto-host --bin colecto-daemon --locked -- notify

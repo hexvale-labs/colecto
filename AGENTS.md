@@ -8,3 +8,5 @@
 - Read `docs/README.md` for product/architecture. Use justfiles for repeatable operations. Rust workspace changes: run `just verify`.
 - Tests: target changed behavior, important edge cases, regression risks. Avoid redundant/implementation-mirroring tests and excessive suites for trivial changes. Run relevant existing checks.
 - Decide routine reversible details autonomously; think through consequences. Ask direction only when missing intent materially changes work. Do not over-ask; maintainer may not know better.
+
+- Resource regressions: after feature changes, run `just perf-check` (verification plus three isolated resource samples). Preserve timestamped `performance-results/` history locally and upload results as CI artifacts when CI is available. Refresh `docs/performance-baseline.json` from the final integrated run so git retains a reviewable feature baseline. Compare only matching workload/build/environment metadata; performance deltas are report-only until stable budgets are established. See `docs/performance.md`.

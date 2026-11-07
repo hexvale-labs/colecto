@@ -1,0 +1,19 @@
+[Unit]
+Description=Colecto mail daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/colecto-daemon
+EnvironmentFile=%h/.config/colecto/daemon.env
+Environment=COLECTO_DATA_DIR=%h/.local/state/colecto
+StateDirectory=colecto
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=120
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

@@ -352,3 +352,82 @@ fn long_credentials_fit_windows_system_entry_limit() {
             .all(|value| value.encode_utf16().count() * 2 <= 2560)
     );
 }
+
+#[test]
+fn optional_profile_name_is_preserved_and_can_be_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = Arc::new(MemorySecrets::default());
+    let mut accounts =
+        Accounts::open(MailStore::open(dir.path()).unwrap(), secrets.clone()).unwrap();
+    let mut account = input(None, "me@example.test");
+    account.settings.name = "  ".into();
+    let saved = accounts.upsert(account).unwrap();
+    assert!(saved.settings.as_ref().unwrap().name.is_empty());
+    let mut update = input(Some(saved.id.clone()), "me@example.test");
+    update.settings.name = "  Personal  ".into();
+    accounts.upsert(update).unwrap();
+    drop(accounts);
+    let accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), secrets).unwrap();
+    assert_eq!(
+        accounts
+            .list()
+            .iter()
+            .find(|a| a.id == saved.id)
+            .unwrap()
+            .settings
+            .as_ref()
+            .unwrap()
+            .name,
+        "Personal"
+    );
+}
+
+#[test]
+fn corrupt_mail_cache_cannot_commit_new_credentials_or_account_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = Arc::new(MemorySecrets::default());
+    let mut accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), secrets).unwrap();
+    let saved = accounts.upsert(input(None, "before@example.test")).unwrap();
+    let before = std::fs::read(dir.path().join("accounts.json")).unwrap();
+    std::fs::write(
+        dir.path()
+            .join("accounts")
+            .join(&saved.id)
+            .join("mail-cache.json"),
+        "not json",
+    )
+    .unwrap();
+    let mut update = input(Some(saved.id.clone()), "after@example.test");
+    update.secret = "new-secret".into();
+    assert!(accounts.upsert(update).is_err());
+    assert_eq!(
+        std::fs::read(dir.path().join("accounts.json")).unwrap(),
+        before
+    );
+    assert_eq!(
+        accounts
+            .list()
+            .iter()
+            .find(|a| a.id == saved.id)
+            .unwrap()
+            .settings
+            .as_ref()
+            .unwrap()
+            .address,
+        "before@example.test"
+    );
+}
+
+#[test]
+fn address_longer_than_profile_limit_can_be_edited_without_a_profile_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = Arc::new(MemorySecrets::default());
+    let mut accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), secrets).unwrap();
+    let address = format!("{}@{}.example.test", "a".repeat(60), "b".repeat(50));
+    let mut new = input(None, &address);
+    new.settings.name.clear();
+    let saved = accounts.upsert(new).unwrap();
+    let mut edit = input(Some(saved.id.clone()), &address);
+    edit.settings = saved.settings.unwrap();
+    assert!(accounts.upsert(edit).is_ok());
+}

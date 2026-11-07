@@ -95,35 +95,9 @@ impl JmapAccount {
             id,
         })
     }
-    pub fn receive(&self) -> Result<Vec<Message>, Error> {
-        let session = self.session()?;
-        let inbox = session.mailbox("inbox")?;
-        // shortcut: latest 100 messages only; add changes/pagination before full sync.
-        let query = session.call(
-            "Email/query",
-            json!({"filter":{"inMailbox":inbox},
-            "sort":[{"property":"receivedAt","isAscending":false}],"limit":100}),
-        )?;
-        let ids = query["ids"].as_array().ok_or_else(failed)?;
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let data = session.call(
-            "Email/get",
-            json!({"ids":ids,
-            "properties":["id","from","subject","receivedAt","textBody","bodyValues"],
-            "fetchTextBodyValues":true,"maxBodyValueBytes":100000}),
-        )?;
-        let messages = list(&data)?;
-        ids.iter()
-            .map(|id| {
-                let message = messages
-                    .iter()
-                    .find(|v| v["id"] == *id)
-                    .ok_or_else(failed)?;
-                parse_message(message)
-            })
-            .collect()
+    pub fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
+        crate::validate_query(folder, search)?;
+        self.session()?.query(folder, search)
     }
     pub fn send(&self, input: &DraftInput) -> Result<(), Error> {
         self.validate()?;
@@ -165,6 +139,40 @@ impl JmapAccount {
     }
 }
 impl Session<'_> {
+    fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
+        let mailbox = self.mailbox(folder)?;
+        let mut filter = json!({"inMailbox":mailbox});
+        if !search.is_empty() {
+            filter["text"] = json!(search);
+        }
+        // shortcut: latest 100 messages only; add changes/pagination before full sync.
+        let query = self.call(
+            "Email/query",
+            json!({"filter":filter,
+            "sort":[{"property":"receivedAt","isAscending":false}],"limit":100}),
+        )?;
+        let ids = query["ids"].as_array().ok_or_else(failed)?;
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let data = self.call(
+            "Email/get",
+            json!({"ids":ids,
+            "properties":["id","from","subject","receivedAt","textBody","bodyValues"],
+            "fetchTextBodyValues":true,"maxBodyValueBytes":100000}),
+        )?;
+        let messages = list(&data)?;
+        ids.iter()
+            .map(|id| {
+                let message = messages
+                    .iter()
+                    .find(|v| v["id"] == *id)
+                    .ok_or_else(failed)?;
+                parse_message(message)
+            })
+            .collect()
+    }
+
     fn call(&self, method: &str, mut args: Value) -> Result<Value, Error> {
         args["accountId"] = json!(self.id);
         let mut using = vec![CORE, MAIL];
@@ -231,7 +239,7 @@ fn parse_message(value: &Value) -> Result<Message, Error> {
         body: if body.is_empty() {
             "No plain-text body available. HTML and attachments are not displayed.".into()
         } else {
-            body.join("\n")
+            crate::bounded_body(body.join("\n"))
         },
     })
 }
@@ -246,6 +254,88 @@ impl Drop for JmapAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn queries_provider_sent_mail_and_text_filter_in_requested_order() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let api = Url::parse(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+        let server = std::thread::spawn(move || {
+            for index in 0..3 {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = BufReader::new(socket.try_clone().unwrap());
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse::<usize>().unwrap();
+                    }
+                }
+                let mut bytes = vec![0; length];
+                reader.read_exact(&mut bytes).unwrap();
+                let request: Value = serde_json::from_slice(&bytes).unwrap();
+                let call = &request["methodCalls"][0];
+                assert_eq!(call[1]["accountId"], "account");
+                let (method, response) = match index {
+                    0 => (
+                        "Mailbox/get",
+                        json!({"list":[{"id":"sent-id","role":"sent"},{"id":"inbox-id","role":"inbox"}]}),
+                    ),
+                    1 => {
+                        assert_eq!(
+                            call[1]["filter"],
+                            json!({"inMailbox":"sent-id","text":"needle"})
+                        );
+                        assert_eq!(call[1]["limit"], 100);
+                        ("Email/query", json!({"ids":["b","a"]}))
+                    }
+                    _ => {
+                        assert_eq!(call[1]["ids"], json!(["b", "a"]));
+                        (
+                            "Email/get",
+                            json!({"list":[{"id":"a","subject":"Older"},{"id":"b","subject":"Newest"}]}),
+                        )
+                    }
+                };
+                assert_eq!(call[0], method);
+                let body = json!({"methodResponses":[[method,response,"call"]]}).to_string();
+                write!(
+                    socket,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            }
+        });
+        let account = JmapAccount {
+            session_url: "https://example.test/jmap".into(),
+            token: "secret".into(),
+            address: "me@example.test".into(),
+        };
+        let session = Session {
+            account: &account,
+            client: Client::new(),
+            api,
+            id: "account".into(),
+            submission: false,
+        };
+        let messages = session.query("sent", "needle").unwrap();
+        assert_eq!(
+            messages
+                .iter()
+                .map(|m| m.subject.as_str())
+                .collect::<Vec<_>>(),
+            ["Newest", "Older"]
+        );
+        server.join().unwrap();
+    }
     #[test]
     fn posts_authenticated_method_and_redacts_server_errors() {
         use std::{
@@ -334,6 +424,13 @@ mod tests {
             address: "me@example.test".into(),
         };
         assert!(account.validate().is_err());
+    }
+    #[test]
+    fn bounds_combined_text_parts() {
+        let value = json!({"id":"large", "textBody":[{"partId":"one","type":"text/plain"},{"partId":"two","type":"text/plain"}], "bodyValues":{"one":{"value":"界".repeat(20_000)},"two":{"value":"界".repeat(20_000)}}});
+        let message = parse_message(&value).unwrap();
+        assert!(message.body.len() <= 100_100);
+        assert!(message.body.ends_with("[Body truncated]"));
     }
     #[test]
     fn reads_plain_text_and_marks_truncation() {
