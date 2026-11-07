@@ -88,6 +88,7 @@ test('shows a failed draft-open error and recovery on a narrow screen', async ({
 });
 
 test('sending preserves edits on failure and prevents duplicate submission after acceptance', async ({ page }) => {
+  await page.route('**/api/v1/labels', route => route.fulfill({ json: {} }));
   await page.route('**/api/v1/accounts', route => route.fulfill({ json: [{ id: 'demo', settings: null, connected: true, configured: false }] }));
   await page.route('**/api/v1/account', route => route.fulfill({ json: true }));
   let sends = 0;
@@ -160,6 +161,7 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
 
 test('late account responses cannot replace the selected inbox', async ({ page }) => {
   const setting = (name: string) => ({ name, address: `${name}@example.test`, protocol: 'imap', imap_host: 'imap.example.test', imap_port: 993, smtp_host: 'smtp.example.test', smtp_port: 587, username: name, session_url: '' });
+  await page.route('**/api/v1/labels', route => route.fulfill({ json: {} }));
   await page.route('**/api/v1/accounts', route => route.fulfill({ json: [{ id: 'demo', settings: null, connected: false, configured: false }, ...['a', 'b'].map(id => ({ id, settings: setting(id), connected: true, configured: true }))] }));
   await page.route('**/api/v1/security', route => route.fulfill({ json: { protected: false, locked: false, cleanup_pending: false } }));
   let release!: () => void;
@@ -188,6 +190,7 @@ test('waits for restored account before allowing compose', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('colecto.account', 'remembered'));
   let release!: () => void;
   const gate = new Promise<void>(resolve => release = resolve);
+  await page.route('**/api/v1/labels', route => route.fulfill({ json: {} }));
   await page.route('**/api/v1/accounts', async route => {
     await gate;
     await route.fulfill({ json: [{ id: 'remembered', settings: { name: 'Remembered', address: 'remembered@example.test', protocol: 'imap', imap_host: '', imap_port: 993, smtp_host: '', smtp_port: 587, username: '', session_url: '' }, connected: true, configured: true }] });

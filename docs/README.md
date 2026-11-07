@@ -150,3 +150,12 @@ in browser tests; Android-native lifecycle, FCM, UnifiedPush, battery use, and
 physical-device keyboard behavior remain separate platform validation work.
 Apple is outside the initial platform scope. Resource regression work uses
 `just perf-check`; see [performance](performance.md).
+
+## Client productivity
+
+The desktop workspace exposes a searchable **Ctrl/Cmd+K** command runner. Local
+account labels support create, assign, unassign, delete and filtering of current
+mail results. Inbox/Sent queries use the provider; drafts search recipient,
+subject and body locally. Labels do not synchronize with IMAP/JMAP. See
+[client review](client-review.md) for the adversarial preview and motion audit,
+and [label contracts](extensions.md#local-labels) for limits and permissions.

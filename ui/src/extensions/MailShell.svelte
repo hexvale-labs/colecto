@@ -1,4 +1,8 @@
 <script lang="ts">
+  import CommandRunner from '../CommandRunner.svelte';
+  import type { Command } from '../CommandRunner.svelte';
+  import type { Labels } from '../lib/api';
+  import { initial } from '../lib/initial';
   import { appearance, setTheme } from '../lib/theme.svelte';
   import type { Theme } from '../lib/theme.svelte';
   import { setAccessToken } from '../lib/api';
@@ -23,6 +27,33 @@
   let tabs = $state<{ account: string; id: string; subject: string; folder: 'Inbox' | 'Sent' }[]>([]);
   let currentTabs = $derived(tabs.filter(tab => tab.account === accountId));
   let query = $state('');
+  let appliedQuery = $state('');
+  let labels = $state<Labels>({});
+  let labelFilter = $state('');
+  let labelName = $state('');
+  let labelError = $state('');
+  let labeling = $state(false);
+  let runner: CommandRunner;
+  async function label(name: string, messageId?: string, remove = false) {
+    if (labeling || loading || busy || !initialized) return;
+    const account = accountId;
+    labeling = true; labelError = '';
+    try {
+      const result = await services.reader.label(name, messageId, remove);
+      if (account === accountId) { labels = result; labelName = ''; if (!labels[labelFilter]) labelFilter = ''; }
+    } catch (e) { if (account === accountId) labelError = (e as Error).message; }
+    finally { labeling = false; }
+  }
+  async function searchMail(target = 'mail-search') {
+    if (settingsOpen || panelId || view) { if (!canLeave()) return; const reload = settingsOpen || !!panelId; clearView(); settingsOpen = false; if (reload) void loadList(); }
+    await tick(); document.getElementById(target)?.focus();
+  }
+  function keyboard(event: KeyboardEvent) {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'k' && !event.isComposing && !event.repeat) {
+      if (document.querySelector('dialog[open]:not(.command-runner)')) return;
+      event.preventDefault(); runner.open();
+    }
+  }
   let serverUrl = $state('');
   let serverError = $state('');
   function visitServer(event: SubmitEvent) {
@@ -31,7 +62,7 @@
     catch { serverError = 'Enter an HTTPS server address, or HTTP for a local server. Do not include credentials or an access token.'; }
   }
   function settingsTab(next: typeof settingsPage) { if (next === settingsPage || !canLeave()) return; dirty = false; settingsPage = next; if (next === 'Extensions') onsettings(); }
-  function activateTab(tab: typeof tabs[number]) { if (!canLeave()) return; clearView(); settingsOpen = false; view = { kind: 'message', id: tab.id, folder: tab.folder }; }
+  function activateTab(tab: typeof tabs[number]) { if (!canLeave()) return; clearView(); ++listGeneration; loading = false; settingsOpen = false; view = { kind: 'message', id: tab.id, folder: tab.folder }; }
   async function closeTab(id: string) {
     const index = currentTabs.findIndex(tab => tab.id === id);
     const active = view?.kind === 'message' && view.id === id;
@@ -60,9 +91,11 @@
   }
   function changeAccount(event: Event) {
     const select = event.currentTarget as HTMLSelectElement;
-    const next = select.value;
-    if (!canLeave()) { select.value = accountId; return; }
-    clearView(); ++listGeneration; items = [];
+    selectAccount(select.value); select.value = accountId;
+  }
+  function selectAccount(next: string) {
+    if (!accounts.some(account => account.id === next) || !canLeave()) return;
+    clearView(); ++listGeneration; items = []; labels = {}; labelFilter = ''; labelError = '';
     accountId = next; try { localStorage.setItem('colecto.account', next); } catch { /* Selection persistence is optional. */ } connected = accounts.find(a => a.id === next)?.connected ?? false;
     settingsOpen = false; query = ''; folder = 'Inbox'; void loadList();
   }
@@ -87,25 +120,50 @@
   let listGeneration = 0;
   let openGeneration = 0;
   let selected = $derived(view?.kind === 'message' ? view.id : view?.kind === 'draft' ? view.draft?.id ?? null : null);
+  let visibleItems = $derived(labelFilter ? items.filter(item => labels[labelFilter]?.includes(item.id)) : items);
+  let commands: Command[] = $derived([
+    { id: 'compose', name: 'Compose a new message', run: compose, disabled: !Composer },
+    ...(['Inbox', 'Drafts', 'Sent'] as const).map(next => ({ id: next, name: `Go to ${next}`, run: () => navigate(next) })),
+    { id: 'search', name: 'Search emails', run: () => void searchMail(), disabled: !Mailbox },
+    { id: 'new-label', name: 'Create a local label', run: () => void searchMail('new-label'), disabled: !Reader },
+    ...Object.keys(labels).filter(() => view?.kind === 'message').map(name => ({ id: `assign-${name}`, name: `${labels[name].includes(view?.kind === 'message' ? view.id : '') ? 'Remove' : 'Add'} label: ${name}`, run: () => { if (view?.kind === 'message') void label(name, view.id, labels[name].includes(view.id)); }, disabled: loading })),
+    { id: 'refresh', name: 'Refresh current mailbox', run: () => void loadList(), disabled: settingsOpen || !!panelId },
+    { id: 'back', name: 'Back to message list', run: back },
+    ...(['Accounts', 'Appearance', 'Servers', 'Extensions'] as const).map(page => ({ id: `settings-${page}`, name: `Settings: ${page}`, run: () => { manageAccounts(); if (settingsOpen && !dirty) settingsTab(page); } })),
+    ...accounts.map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
+    ...currentTabs.map(tab => ({ id: `tab-${tab.id}`, name: `Open message: ${tab.subject}`, run: () => activateTab(tab) })),
+    ...extensionStates.filter(extension => !extension.bundled && extension.enabled).map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => openPanel(extension.manifest.id) })),
+    ...(['dark', 'light', 'system'] as const).map(theme => ({ id: `theme-${theme}`, name: `Theme: ${theme}`, run: () => setTheme(theme) })),
+    ...Object.keys(labels).map(name => ({ id: `label-${name}`, name: `Filter label: ${name}`, run: () => { navigate('Inbox'); if (!dirty && folder === 'Inbox' && !settingsOpen) labelFilter = name; } })),
+    ...(view?.kind === 'draft' ? ['Save draft', ...(connected ? ['Send message'] : [])].map(name => ({ id: name, name, run: () => { document.querySelector<HTMLButtonElement>(`.composer [data-command="${name === 'Save draft' ? 'save' : 'send'}"]`)?.click(); } })) : []),
+    ...(view?.kind === 'message' ? [{ id: 'close-tab', name: 'Close current message tab', run: () => { if (view?.kind === 'message') void closeTab(view.id); } }] : []),
+  ].map(command => ({ ...command, disabled: command.disabled || busy || labeling || !initialized })));
   async function loadList() {
+    if (labeling) return;
     const generation = ++listGeneration;
     if (!Mailbox) { items = []; loading = false; return; }
     const requestedFolder = folder;
+    const requestedQuery = query.trim();
+    const requestedAccount = accountId;
     const inboxService = services.inbox;
     loading = true; error = ''; openError = '';
     try {
-      const result: MailItem[] = requestedFolder !== 'Drafts'
-        ? (await inboxService.messages(requestedFolder === 'Sent' ? 'sent' : 'inbox', query)).map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date }))
-        : (await inboxService.drafts()).slice().reverse().map(d => ({ id: d.id, name: d.recipient || 'No recipient', subject: d.subject, preview: d.body, date: 'Draft' }));
-      if (generation === listGeneration) items = result;
+      const normalizedQuery = requestedQuery.toLocaleLowerCase();
+      const [nextLabels, result] = await Promise.all([
+        inboxService.labels(),
+        requestedFolder !== 'Drafts'
+          ? inboxService.messages(requestedFolder === 'Sent' ? 'sent' : 'inbox', requestedQuery).then(messages => messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date })))
+          : inboxService.drafts().then(drafts => drafts.filter(draft => [draft.recipient, draft.subject, draft.body].some(text => text.toLocaleLowerCase().includes(normalizedQuery))).slice().reverse().map(d => ({ id: d.id, name: d.recipient || 'No recipient', subject: d.subject, preview: d.body, date: 'Draft' }))),
+      ]);
+      if (generation === listGeneration && requestedAccount === accountId) { items = result; labels = nextLabels; appliedQuery = requestedQuery; }
     } catch (e) { if (generation === listGeneration) error = (e as Error).message; }
     finally { if (generation === listGeneration) loading = false; }
   }
-  function canLeave() { return initialized && !busy && (!dirty || window.confirm('Discard unsaved changes? Your last saved draft will be kept.')); }
+  function canLeave() { return initialized && !busy && !labeling && (!dirty || window.confirm('Discard unsaved changes? Your last saved draft will be kept.')); }
   function clearView() { panelId = null; ++openGeneration; view = null; dirty = false; openError = ''; opening = false; }
   function navigate(next: 'Inbox' | 'Drafts' | 'Sent') {
     if (!canLeave()) return;
-    clearView(); settingsOpen = false; query = ''; folder = next; void loadList();
+    clearView(); settingsOpen = false; query = ''; labelFilter = ''; folder = next; void loadList();
   }
   function compose() { if (!Composer || !canLeave()) return; clearView(); settingsOpen = false; view = { kind: 'draft', draft: null }; }
   function back() { if (!canLeave()) return; clearView(); }
@@ -142,11 +200,13 @@
   });
 </script>
 
-<svelte:window onbeforeunload={beforeUnload} />
+<svelte:window onbeforeunload={beforeUnload} onkeydown={keyboard} />
+<CommandRunner bind:this={runner} {commands} />
 <div class="app-shell" class:detail-open={view !== null} class:settings-open={settingsOpen}>
   <aside class="sidebar">
     <a class="brand" href="/" onclick={(event) => { event.preventDefault(); navigate('Inbox'); }} aria-label="Colecto home"><span class="brand-mark" aria-hidden="true">c</span>colecto<span class="brand-dot">.</span></a>
     <button class="compose-button" disabled={busy || !initialized} onclick={compose}><span aria-hidden="true">＋</span> Compose</button>
+    <button class="secondary command-trigger" onclick={() => runner.open()}>Commands <kbd>Ctrl / ⌘ K</kbd></button>
     {#if currentTabs.length}<nav class="open-messages" aria-label="Open messages">
       {#each currentTabs as tab (tab.id)}<div class="message-tab" class:active={view?.kind === 'message' && view.id === tab.id}>
         <button class="tab-title" aria-pressed={view?.kind === 'message' && view.id === tab.id} disabled={busy} onclick={() => activateTab(tab)} title={tab.subject}>{tab.subject}</button>
@@ -162,7 +222,7 @@
       {/each}
     </nav>
     <div class="profile-row">
-      <div class="profile-account"><span class="avatar" aria-hidden="true">{Array.from(accountLabel)[0]?.toLocaleUpperCase()}</span><span class="profile-name">{accountLabel}<small>{security.locked ? 'Credentials locked' : activeAccount?.configured ? activeAccount.settings?.address : 'Local sample mail'}</small></span><span class="profile-chevron" aria-hidden="true">⌄</span>
+      <div class="profile-account"><span class="avatar" aria-hidden="true">{initial(accountLabel)}</span><span class="profile-name">{accountLabel}<small>{security.locked ? 'Credentials locked' : activeAccount?.configured ? activeAccount.settings?.address : 'Local sample mail'}</small></span><span class="profile-chevron" aria-hidden="true">⌄</span>
         <select aria-label="Current account" value={accountId} disabled={busy || !initialized} onchange={changeAccount}>{#if !accounts.length}<option value="demo">Demo account</option>{/if}{#each accounts as account (account.id)}<option value={account.id}>{account.settings ? account.settings.name || account.settings.address : 'Demo account'}</option>{/each}</select>
       </div>
       <button class="settings-button" aria-label="Settings" title="Settings" disabled={busy || !initialized} onclick={manageAccounts}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 3-1 3-3 1 1 3-2 2 2 2-1 3 3 1 1 3h6l1-3 3-1-1-3 2-2-2-2 1-3-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/></svg></button>
@@ -178,10 +238,15 @@
       {:else}{@render extensionSettings()}{/if}
     </section>
     {:else if panelId}{#key `${accountId}:${panelId}`}<ExtensionPanel id={panelId} account={accountId} onback={() => navigate('Inbox')} />{/key}
-    {:else}{#if Mailbox}<div class="mailbox-column">{#if folder !== 'Drafts'}<form class="mail-search" role="search" onsubmit={(event) => { event.preventDefault(); void loadList(); }}><label class="sr-only" for="mail-search">Search {folder}</label><input id="mail-search" type="search" enterkeyhint="search" autocapitalize="none" bind:value={query} placeholder={`Search ${folder.toLowerCase()}…`} /><button class="text-button" type="submit">Search</button></form>{/if}<Mailbox {items} {selected} {folder} {loading} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} /></div>{:else}<p class="error-box">Mailbox extension disabled. Open Extensions to enable it.</p>{/if}
+    {:else}{#if Mailbox}<div class="mailbox-column"><form class="mail-search" role="search" onsubmit={(event) => { event.preventDefault(); if (!busy && !labeling) void loadList(); }}><label class="sr-only" for="mail-search">Search {folder}</label><input id="mail-search" type="search" enterkeyhint="search" autocapitalize="none" maxlength="1024" bind:value={query} placeholder={`Search ${folder.toLowerCase()}…`} /><button class="text-button" type="submit" disabled={busy}>Search</button></form>
+      <div class="label-controls"><label>Filter by label<select aria-label="Filter by label" bind:value={labelFilter}><option value="">All labels</option>{#each Object.keys(labels) as name}<option value={name}>{name}</option>{/each}</select></label>
+      {#if labelFilter}<button class="text-button" disabled={labeling || loading || busy} aria-label={`Delete label ${labelFilter}`} onclick={() => { if (window.confirm(`Delete label “${labelFilter}”? Messages will be kept.`)) void label(labelFilter, undefined, true); }}>Delete label</button>{/if}
+      <form onsubmit={(event) => { event.preventDefault(); void label(labelName); }}><input id="new-label" aria-label="New label" placeholder="New label" maxlength="80" bind:value={labelName} /><button class="text-button" aria-label="Create label" disabled={!labelName.trim() || labeling || loading || busy}>Add</button></form></div>
+      {#if labelError}<p class="error-box" role="alert">{labelError}</p>{/if}
+      <Mailbox items={visibleItems} searching={!!appliedQuery || !!labelFilter} {selected} {folder} {loading} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} /></div>{:else}<p class="error-box">Mailbox extension disabled. Open Extensions to enable it.</p>{/if}
     <div class="reading-pane">
-      {#key view?.kind === 'message' ? `message:${view.id}` : view}
-        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} folder={view.folder} {accountLabel} onback={back} />
+      {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
+        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} folder={view.folder} {accountLabel} {labels} labeling={labeling || loading || busy} {labelError} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />
         {:else if view?.kind === 'draft' && Composer}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
         {:else}
           <section class="welcome"><div class="eyebrow">{accountLabel}</div><h2>Your mail, in focus.</h2><p>{opening ? 'Opening your draft…' : 'Select a message to read, or compose a new one.'}</p><button class="secondary" disabled={busy || !initialized} onclick={compose}>New message</button></section>

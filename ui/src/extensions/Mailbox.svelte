@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { MailItem } from '../lib/api';
-  let { items, selected, folder, loading, error, disabled, onopen, onretry }: {
-    items: MailItem[]; selected: string | null; folder: 'Inbox' | 'Drafts' | 'Sent';
+  let { items, searching = false, selected, folder, loading, error, disabled, onopen, onretry }: {
+    searching?: boolean; items: MailItem[]; selected: string | null; folder: 'Inbox' | 'Drafts' | 'Sent';
     loading: boolean; error: string; disabled: boolean;
     onopen: (id: string) => void; onretry: () => void;
   } = $props();
@@ -19,11 +19,11 @@
     {:else if error}
       <div class="list-state"><p role="alert">{error}</p><button class="secondary" onclick={onretry}>Try again</button></div>
     {:else if items.length === 0}
-      <div class="list-state"><span class="empty-mark" aria-hidden="true">✎</span><h2>{folder === 'Drafts' ? 'No drafts yet' : 'All quiet here'}</h2><p>{folder === 'Drafts' ? 'Start a note with Compose. Save it when you’re ready.' : 'There are no messages in this folder.'}</p></div>
+      <div class="list-state"><span class="empty-mark" aria-hidden="true">✎</span><h2>{searching ? 'No matching messages' : folder === 'Drafts' ? 'No drafts yet' : 'All quiet here'}</h2><p>{searching ? 'Try another search or clear the label filter.' : folder === 'Drafts' ? 'Start a note with Compose. Save it when you’re ready.' : 'There are no messages in this folder.'}</p></div>
     {:else}
       {#each items as item (item.id)}
         <button class="mail-item" class:selected={selected === item.id} aria-pressed={selected === item.id} {disabled} onclick={() => onopen(item.id)}>
-          <span class="item-top"><strong>{item.name}</strong><span class="item-date">{item.date}</span></span>
+          <span class="item-top"><strong>{item.name || 'Unknown sender'}</strong><span class="item-date">{item.date}</span></span>
           <span class="item-subject">{item.subject || '(No subject)'}</span>
           <span class="item-preview">{item.preview || 'No preview'}</span>
         </button>

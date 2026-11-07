@@ -92,6 +92,7 @@ fn build_app(host: Host, assets: PathBuf) -> Router {
         .route("/security", get(security).post(security_action))
         .route("/account", get(account))
         .route("/send", axum::routing::post(send))
+        .route("/labels", get(labels).post(update_label))
         .route("/messages", get(messages))
         .route("/messages/{id}", get(message))
         .route("/drafts", get(drafts).post(save_draft))
@@ -299,6 +300,7 @@ struct ServiceRequest {
     operation: Capability,
     id: Option<String>,
     draft: Option<DraftInput>,
+    label: Option<colecto_extension_api::LabelInput>,
 }
 fn extension_service(
     host: &Host,
@@ -346,6 +348,14 @@ fn extension_service(
                 .save_draft(request.draft.ok_or("Draft required")?)
                 .map_err(|e| e.to_string())?,
         ),
+        MessagesLabel => {
+            let input = request.label.ok_or("Label input required")?;
+            serde_json::to_value(
+                store
+                    .update_label(&input.name, input.message_id.as_deref(), input.remove)
+                    .map_err(|e| e.to_string())?,
+            )
+        }
         MessagesSend => {
             store
                 .send(request.draft.ok_or("Draft required")?)
@@ -393,6 +403,26 @@ struct MessageQuery {
 }
 fn inbox_folder() -> String {
     "inbox".into()
+}
+async fn labels(
+    State(host): State<Host>,
+    headers: HeaderMap,
+) -> Result<Json<std::collections::BTreeMap<String, Vec<String>>>, Failure> {
+    let account = grant(&host, &headers, Capability::MessagesList)?;
+    with_store(host, account, |s| s.labels()).await.map(Json)
+}
+async fn update_label(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    input: Result<Json<colecto_extension_api::LabelInput>, JsonRejection>,
+) -> Result<Json<std::collections::BTreeMap<String, Vec<String>>>, Failure> {
+    let account = grant(&host, &headers, Capability::MessagesLabel)?;
+    let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
+    with_store(host, account, move |s| {
+        s.update_label(&input.name, input.message_id.as_deref(), input.remove)
+    })
+    .await
+    .map(Json)
 }
 async fn messages(
     State(host): State<Host>,
@@ -624,6 +654,7 @@ mod extension_service_tests {
             serde_json::json!({"operation":"account.read", "extension":"host"}),
             serde_json::json!({"operation":"accounts.manage"}),
             serde_json::json!({"operation":"messages.read", "id":"1"}),
+            serde_json::json!({"operation":"messages.label", "label":{"name":"Work", "remove":false}}),
         ] {
             assert!(extension_service(&host, "connection-panel", "demo", epoch, invalid).is_err());
         }

@@ -4,6 +4,7 @@ mod credentials;
 pub use accounts::Accounts;
 pub use credentials::SecretStore;
 mod jmap;
+mod labels;
 mod remote;
 pub use jmap::JmapAccount;
 pub use remote::MailAccount;

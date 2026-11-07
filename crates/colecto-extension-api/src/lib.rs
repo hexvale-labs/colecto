@@ -120,6 +120,8 @@ pub enum Capability {
     DraftsWrite,
     #[serde(rename = "messages.send")]
     MessagesSend,
+    #[serde(rename = "messages.label")]
+    MessagesLabel,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -170,4 +172,13 @@ pub struct ExtensionView {
     pub title: String,
     pub text: String,
     pub actions: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LabelInput {
+    pub name: String,
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub remove: bool,
 }

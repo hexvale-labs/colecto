@@ -39,7 +39,7 @@ failure recovery remain trusted Host controls.
 ## Capabilities and persistence
 
 Capabilities are `account.read` (connection state only), `messages.list`,
-`messages.read`, `drafts.list`, `drafts.read`, `drafts.write`, and `messages.send`.
+`messages.read`, `drafts.list`, `drafts.read`, `drafts.write`, `messages.send`, and `messages.label`.
 A package can only receive capabilities declared in its manifest. Grants are
 scoped to the selected account; enabled state applies globally. Third-party
 packages have no grants for new accounts. Enabling a package does not grant
@@ -131,3 +131,23 @@ execute server-side and cannot access a webview or native IPC. Tauri's native
 account-scoped service capabilities above; neither is used as a substitute for
 Wasm isolation. Mobile builds and other desktop platforms require separate
 platform testing; this runner does not claim mobile parity.
+
+
+## Local labels
+
+`GET /api/v1/labels` requires `messages.list`; `POST /api/v1/labels` requires
+`messages.label`. The writer accepts `{ "name": "Work", "message_id": null,
+"remove": false }`: omit the message ID to create a label, provide a currently
+known message ID to assign it, and set `remove` to unassign or delete. Guest
+service requests use `{"operation":"messages.label","label":{...}}` with the same
+input. All operations bind to the granted account. Existing saved grants are
+not broadened automatically; enable `messages.label` for the Reader in Settings
+if an older grant lacks it.
+
+Labels persist in a versioned `labels.json` next to each account's mail store.
+Names are trimmed, case-sensitive, 1–80 UTF-8 bytes, without control characters;
+each account permits 50 labels and 1000 message IDs per label, with a 2 MB file
+limit. Writes are atomic; invalid or unreadable stores are never silently reset.
+Labels are local service metadata, unencrypted, and do not sync with providers.
+Filtering applies to the current bounded Inbox/Sent search result, not full
+provider history. Drafts are searchable locally but do not accept message labels.
