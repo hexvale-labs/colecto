@@ -22,7 +22,7 @@ serves the built UI and API from the same origin.
 Use **Compose** to write a note, then **Save draft**. Open **Drafts** to resume it.
 Leaving an edited draft asks before discarding unsaved changes. Saving failures
 keep the editor text, and never report success. Without account configuration, sending is disabled. With an account configured,
-**Send** submits plain-text mail through SMTP.
+**Send** submits plain-text mail through SMTP or JMAP.
 
 The Host saves drafts to `.colecto-demo/drafts.json`, using format version 1.
 This directory is ignored by git. Drafts are plain text on disk and are not
@@ -58,7 +58,7 @@ Run `just` for all recipes. After editing UI source, `just demo` rebuilds it.
 ## Prototype boundaries
 
 - `colecto-extension-api`: version 1 wire types for the operations used today.
-- `colecto-core`: TLS IMAP/SMTP, MIME plain-text decoding, sample messages, draft
+- `colecto-core`: TLS IMAP/SMTP, prototype JMAP, MIME plain-text decoding, sample messages, draft
   validation, IDs, and atomic JSON storage.
 - `colecto-host`: loopback HTTP/static adapter; validates Host/origin and built-in
   module grants scoped to the demo account. API bodies are bounded to 128000 bytes.
@@ -131,3 +131,31 @@ package script; bare `bun test` invokes Bun's own runner instead.
 The project uses `ui/bun.lock` and frozen installs. No npm installation is needed.
 These failures were reproduced locally; without your original error output,
 they do not establish which failure occurred on your machine.
+
+## Prototype JMAP account
+
+Instead of IMAP/SMTP, set `COLECTO_JMAP_SESSION_URL` to your provider's HTTPS
+session resource (often `https://provider.example/.well-known/jmap`),
+`COLECTO_JMAP_TOKEN` to a provider-issued bearer token, and
+`COLECTO_MAIL_ADDRESS` to an address advertised by that account's JMAP identities.
+Run `just demo`. Do not also set IMAP/SMTP variables. Partial configuration fails
+startup; server authentication and capability checks happen on first use.
+Tokens remain in memory; do not put them in source control. OAuth login and token
+refresh are not implemented. Redirects are rejected; supply the final session URL.
+
+This is an experimental transport following [RFC 8620](https://www.rfc-editor.org/rfc/rfc8620)
+and [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621), not a full sync client.
+It uses the primary mail account, fetches the latest 100 Inbox messages without
+marking them seen, displays plain text (up to 100000 bytes per body part), and
+keeps drafts local. HTTP responses are limited to 8000000 bytes, with 30-second
+request timeouts. HTML, attachments, changes/push, and pagination are unsupported.
+The existing extension API and UI are shared by both transports.
+
+Sending requires submission capability, a matching identity, and mailboxes with
+`drafts` and `sent` roles. It creates a server draft and submits it, requesting a
+move to Sent after success. Submission acceptance is not final delivery or a
+guarantee that the subsequent mailbox update succeeded. Failure can leave a
+server draft or an uncertain send; check Sent and Drafts before retrying. There
+are no automatic retries or local draft deletions. Provider interoperability has
+not been verified against a live account; use a test account and separate data
+directory for this prototype.

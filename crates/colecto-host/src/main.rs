@@ -1,4 +1,4 @@
-use colecto_core::{MailAccount, MailStore};
+use colecto_core::{JmapAccount, MailAccount, MailStore};
 use std::{env, path::PathBuf};
 
 #[tokio::main]
@@ -23,7 +23,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "COLECTO_MAIL_PASSWORD",
         "COLECTO_MAIL_ADDRESS",
     ];
-    if keys.iter().any(|key| env::var_os(key).is_some()) {
+    let jmap_keys = ["COLECTO_JMAP_SESSION_URL", "COLECTO_JMAP_TOKEN"];
+    let jmap = jmap_keys.iter().any(|key| env::var_os(key).is_some());
+    let imap = keys[..6].iter().any(|key| env::var_os(key).is_some());
+    if jmap && imap {
+        return Err("Configure either JMAP or IMAP/SMTP, not both".into());
+    }
+    if jmap {
+        let required = |key: &str| env::var(key).map_err(|_| format!("Missing {key}"));
+        store.connect_jmap(JmapAccount {
+            session_url: required("COLECTO_JMAP_SESSION_URL")?,
+            token: required("COLECTO_JMAP_TOKEN")?,
+            address: required("COLECTO_MAIL_ADDRESS")?,
+        })?;
+    } else if keys.iter().any(|key| env::var_os(key).is_some()) {
         let required = |key: &str| env::var(key).map_err(|_| format!("Missing {key}"));
         store.connect_account(MailAccount {
             imap_host: required("COLECTO_IMAP_HOST")?,
