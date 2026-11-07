@@ -236,6 +236,13 @@ fn parse_message(value: &Value) -> Result<Message, Error> {
     })
 }
 
+impl Drop for JmapAccount {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.token.zeroize();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

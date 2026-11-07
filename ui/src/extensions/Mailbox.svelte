@@ -9,9 +9,9 @@
 
 <section class="mailbox" aria-label={`${folder} messages`} aria-busy={loading}>
   <header class="mailbox-header">
-    <div class="eyebrow">YOUR SPACE</div>
+    <div class="eyebrow">MAILBOX</div>
     <div class="title-row"><h1>{folder}</h1><span class="count">{loading ? '…' : items.length}</span></div>
-    <p>{folder === 'Inbox' ? 'A little room to catch up.' : 'Good words take their time.'}</p>
+    <p>{folder === 'Inbox' ? 'Latest messages in this account.' : 'Saved locally in this account.'}</p>
   </header>
   <div class="message-list">
     {#if loading}
@@ -25,10 +25,10 @@
         <button class="mail-item" class:selected={selected === item.id} aria-pressed={selected === item.id} {disabled} onclick={() => onopen(item.id)}>
           <span class="item-top"><strong>{item.name}</strong><span class="item-date">{item.date}</span></span>
           <span class="item-subject">{item.subject || '(No subject)'}</span>
-          <span class="item-preview">{item.preview || 'An unwritten possibility.'}</span>
+          <span class="item-preview">{item.preview || 'No preview'}</span>
         </button>
       {/each}
     {/if}
   </div>
-  <footer class="list-footer">{folder === 'Inbox' ? 'Sample mail. A real moment of calm.' : 'Your drafts stay on this computer.'}</footer>
+  <footer class="list-footer">{folder === 'Inbox' ? 'Reopen Inbox to refresh.' : 'Your drafts stay on this computer.'}</footer>
 </section>

@@ -1,4 +1,5 @@
-use colecto_core::{JmapAccount, MailAccount, MailStore};
+use colecto_core::{Accounts, Error, JmapAccount, MailAccount, MailStore, SecretStore};
+use std::sync::Arc;
 use std::{env, path::PathBuf};
 
 #[tokio::main]
@@ -52,14 +53,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             address: required("COLECTO_MAIL_ADDRESS")?,
         })?;
     }
+    let namespace = format!("Colecto:{}", std::fs::canonicalize(&directory)?.display());
+    let accounts = Accounts::open(store, Arc::new(SystemSecrets(namespace)))?;
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     let authority = listener.local_addr()?.to_string();
     println!("Colecto local demo: http://{authority}");
     println!("Draft directory: {}", directory.display());
-    axum::serve(listener, colecto_host::app(store, authority, assets))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
+    axum::serve(
+        listener,
+        colecto_host::app_with_accounts(accounts, authority, assets),
+    )
+    .with_graceful_shutdown(async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await?;
     Ok(())
+}
+
+struct SystemSecrets(String);
+fn credential_error(_: keyring::Error) -> Error {
+    Error::Invalid("System credential store unavailable or locked. Unlock your desktop keychain, or enable master password protection before adding accounts.".into())
+}
+impl SystemSecrets {
+    fn entry(&self, id: &str) -> Result<keyring::Entry, Error> {
+        if !cfg!(any(
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "freebsd",
+            target_os = "openbsd"
+        )) {
+            return Err(Error::Invalid("System credential storage is not supported on this platform; use master password protection".into()));
+        }
+        keyring::Entry::new(&self.0, id).map_err(credential_error)
+    }
+}
+impl SecretStore for SystemSecrets {
+    fn get(&self, id: &str) -> Result<String, Error> {
+        self.entry(id)?.get_password().map_err(credential_error)
+    }
+    fn set(&self, id: &str, value: &str) -> Result<(), Error> {
+        self.entry(id)?
+            .set_password(value)
+            .map_err(credential_error)
+    }
+    fn delete(&self, id: &str) -> Result<(), Error> {
+        match self.entry(id)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(credential_error(e)),
+        }
+    }
 }

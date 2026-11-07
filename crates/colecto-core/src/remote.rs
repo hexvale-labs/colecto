@@ -172,6 +172,13 @@ fn parse_message(raw: &[u8], validity: u32, uid: u32) -> Result<Message, Error> 
     })
 }
 
+impl Drop for MailAccount {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.password.zeroize();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

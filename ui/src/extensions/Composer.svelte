@@ -1,8 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { Draft, composerService } from '../lib/api';
-  let { connected, draft, service, onback, ondirty, onbusy, onsaved }: {
-    connected: boolean; draft: Draft | null; service: typeof composerService; onback: () => void;
+  import type { Draft, ComposerService } from '../lib/api';
+  let { connected, sender, draft, service, onback, ondirty, onbusy, onsaved }: {
+    connected: boolean; sender: string; draft: Draft | null; service: ComposerService; onback: () => void;
     ondirty: (dirty: boolean) => void; onbusy: (busy: boolean) => void; onsaved: (draft: Draft) => void;
   } = $props();
   // The shell keys each editor instance; take a snapshot only when it opens.
@@ -43,9 +43,10 @@
 
 </script>
 <section class="detail composer" aria-label="Draft editor">
-  <header class="detail-toolbar"><button class="text-button back" disabled={saving} onclick={onback}>← Back to list</button><span class="toolbar-label">A THOUGHT IN PROGRESS</span><span class="pill">Draft</span></header>
+  <header class="detail-toolbar"><button class="text-button back" disabled={saving} onclick={onback}>← Back to list</button><span class="toolbar-label">COMPOSE</span><span class="pill">Draft</span></header>
   <form class="compose-form" onsubmit={save}>
-    <div class="compose-heading"><div class="eyebrow">MAKE A LITTLE CONNECTION</div><h2>{id ? 'Your draft' : 'A fresh page.'}</h2><p>Take your time. Find the words.</p></div>
+    <div class="compose-heading"><div class="eyebrow">NEW MESSAGE</div><h2>{id ? 'Your draft' : 'New message'}</h2><p>Write, save, or send.</p></div>
+    <div class="sender-account"><span>From</span><strong>{sender}</strong></div>
     <fieldset disabled={saving || sent}>
       <div class="input-row"><label for="recipient">To</label><input id="recipient" autocomplete="email" autocapitalize="none" type="text" inputmode="email" placeholder="someone@example.com" maxlength="320" bind:value={recipient} /></div>
       <div class="input-row"><label for="subject">Subject</label><input id="subject" placeholder="What’s on your mind?" maxlength="998" bind:value={subject} /></div>

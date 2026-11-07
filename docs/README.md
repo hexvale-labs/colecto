@@ -104,3 +104,14 @@ and ask only when the answer materially changes the work.
 Keep checks proportional: test behavior, boundaries, and meaningful regression
 risks; run relevant existing checks. Report what was verified and what remains
 unimplemented. Never describe a planned sandbox or platform as working.
+
+
+## Multi-account slice
+
+The approved [multi-account design](superpowers/specs/2026-11-07-multi-account-design.md)
+adds per-account stores and account-bound bundled service clients. The core owns
+registry/vault rules; the Host supplies the operating system SecretStore adapter.
+Only trusted host controls manage accounts or credential protection. Existing
+mail operations retain their module grants and explicit account identifier.
+Secrets never cross into read APIs or bundled extensions. This continues to be a
+local prototype, not a sandbox or a remote multi-user service.

@@ -1,0 +1,389 @@
+//! Account ownership and isolated stores. Network work uses account-local locks.
+use crate::{
+    Account, Error, JmapAccount, MailAccount, MailStore,
+    credentials::{Secret, SecretStore, Vault, identifier},
+};
+use colecto_extension_api::{
+    AccountInfo, AccountInput, AccountSettings, DEMO_ACCOUNT, Protocol, SecurityInfo,
+};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::{Arc, Mutex},
+};
+
+pub struct Accounts {
+    vault: Vault,
+    directory: std::path::PathBuf,
+    stores: BTreeMap<String, Arc<Mutex<MailStore>>>,
+}
+fn invalid(message: &str) -> Error {
+    Error::Invalid(message.into())
+}
+fn busy() -> Error {
+    invalid("Mail operation in progress. Try again when it finishes.")
+}
+fn connect(store: &mut MailStore, settings: &AccountSettings, secret: &str) -> Result<(), Error> {
+    match settings.protocol {
+        Protocol::Imap => store.connect_account(MailAccount {
+            imap_host: settings.imap_host.clone(),
+            imap_port: settings.imap_port,
+            smtp_host: settings.smtp_host.clone(),
+            smtp_port: settings.smtp_port,
+            username: settings.username.clone(),
+            password: secret.into(),
+            address: settings.address.clone(),
+        }),
+        Protocol::Jmap => store.connect_jmap(JmapAccount {
+            session_url: settings.session_url.clone(),
+            token: secret.into(),
+            address: settings.address.clone(),
+        }),
+    }
+}
+impl Accounts {
+    pub fn open(mut legacy: MailStore, backend: Arc<dyn SecretStore>) -> Result<Self, Error> {
+        let directory = legacy.directory.clone();
+        let mut vault = Vault::open(directory.clone(), backend)?;
+        let mut ids = HashSet::new();
+        for account in vault.accounts() {
+            if (account.id != DEMO_ACCOUNT
+                && (account.id.len() != 32 || !account.id.bytes().all(|b| b.is_ascii_hexdigit())))
+                || !ids.insert(account.id.clone())
+            {
+                return Err(invalid("Invalid or duplicate account identifier"));
+            }
+        }
+        // Import legacy environment credentials only when unlocked. The legacy
+        // draft store keeps its identity and is never assigned to another account.
+        if !vault.locked() && !ids.contains(DEMO_ACCOUNT) {
+            let input = match &legacy.account {
+                Some(Account::Imap(a)) => Some(AccountInput {
+                    id: Some(DEMO_ACCOUNT.into()),
+                    settings: AccountSettings {
+                        name: a.address.clone(),
+                        address: a.address.clone(),
+                        protocol: Protocol::Imap,
+                        imap_host: a.imap_host.clone(),
+                        imap_port: a.imap_port,
+                        smtp_host: a.smtp_host.clone(),
+                        smtp_port: a.smtp_port,
+                        username: a.username.clone(),
+                        session_url: String::new(),
+                    },
+                    secret: a.password.clone(),
+                }),
+                Some(Account::Jmap(a)) => Some(AccountInput {
+                    id: Some(DEMO_ACCOUNT.into()),
+                    settings: AccountSettings {
+                        name: a.address.clone(),
+                        address: a.address.clone(),
+                        protocol: Protocol::Jmap,
+                        imap_host: String::new(),
+                        imap_port: 993,
+                        smtp_host: String::new(),
+                        smtp_port: 587,
+                        username: String::new(),
+                        session_url: a.session_url.clone(),
+                    },
+                    secret: a.token.clone(),
+                }),
+                None => None,
+            };
+            if let Some(mut input) = input {
+                let mut records = vault.accounts().to_vec();
+                records.push(crate::credentials::SavedAccount {
+                    id: DEMO_ACCOUNT.into(),
+                    settings: input.settings.clone(),
+                    configured: true,
+                });
+                let mut secrets = vault.secrets.as_ref().expect("unlocked").clone();
+                secrets.insert(
+                    DEMO_ACCOUNT.into(),
+                    Secret(std::mem::take(&mut input.secret)),
+                );
+                vault.commit(records, secrets)?;
+            }
+        }
+        if vault.locked() {
+            legacy.disconnect();
+        }
+        let mut stores = BTreeMap::new();
+        stores.insert(DEMO_ACCOUNT.into(), Arc::new(Mutex::new(legacy)));
+        for account in vault.accounts() {
+            if account.id != DEMO_ACCOUNT {
+                stores.insert(
+                    account.id.clone(),
+                    Arc::new(Mutex::new(MailStore::open(
+                        directory.join("accounts").join(&account.id),
+                    )?)),
+                );
+            }
+        }
+        let mut accounts = Self {
+            vault,
+            stores,
+            directory,
+        };
+        accounts.reconnect()?;
+        Ok(accounts)
+    }
+    fn reconnect(&mut self) -> Result<(), Error> {
+        for (id, store) in &self.stores {
+            let mut store = store.try_lock().map_err(|_| busy())?;
+            if let Some(record) = self.vault.accounts().iter().find(|a| &a.id == id) {
+                store.disconnect();
+                if record.configured
+                    && let Some(secret) = self.vault.secrets.as_ref().and_then(|s| s.get(id))
+                {
+                    connect(&mut store, &record.settings, &secret.0)?;
+                }
+            } else if self.vault.locked() {
+                store.disconnect();
+            }
+        }
+        Ok(())
+    }
+    pub fn list(&self) -> Vec<AccountInfo> {
+        self.stores
+            .iter()
+            .map(|(id, store)| {
+                let record = self.vault.accounts().iter().find(|a| &a.id == id);
+                AccountInfo {
+                    id: id.clone(),
+                    settings: record.map(|a| a.settings.clone()),
+                    configured: record.is_some_and(|a| a.configured),
+                    connected: store.try_lock().map(|s| s.connected()).unwrap_or_else(|_| {
+                        !self.vault.locked() && record.is_some_and(|a| a.configured)
+                    }),
+                }
+            })
+            .collect()
+    }
+    pub fn store(&self, id: &str) -> Result<Arc<Mutex<MailStore>>, Error> {
+        self.stores.get(id).cloned().ok_or(Error::Missing)
+    }
+    pub fn upsert(&mut self, mut input: AccountInput) -> Result<AccountInfo, Error> {
+        let secret = Secret(std::mem::take(&mut input.secret));
+        let settings = input.settings;
+        if settings.name.trim().is_empty()
+            || settings.name.len() > 100
+            || settings.address.len() > 320
+            || settings.imap_host.len() > 253
+            || settings.smtp_host.len() > 253
+            || settings.username.len() > 320
+            || settings.session_url.len() > 2048
+            || secret.0.len() > 8192
+        {
+            return Err(invalid("Check account name, address and server settings"));
+        }
+        let id = input.id.unwrap_or_else(identifier);
+        let existing = self.vault.accounts().iter().find(|a| a.id == id);
+        if self.stores.contains_key(&id) && existing.is_none() {
+            return Err(invalid(
+                "The sample account cannot be replaced. Add a new account instead.",
+            ));
+        }
+        if existing.is_none() && self.vault.accounts().len() >= 50 {
+            return Err(invalid("Account limit reached (50)"));
+        }
+        if existing.is_none() && (id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit())) {
+            return Err(invalid("Invalid account identifier"));
+        }
+        let mut secrets = self
+            .vault
+            .secrets
+            .as_ref()
+            .ok_or_else(|| invalid("Unlock credentials first"))?
+            .clone();
+        let secret = if secret.0.is_empty() {
+            secrets
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| invalid("Enter a password or token"))?
+        } else {
+            secret
+        };
+        if self
+            .vault
+            .accounts()
+            .iter()
+            .any(|a| a.id != id && a.settings.address.eq_ignore_ascii_case(&settings.address))
+        {
+            return Err(invalid(
+                "This email address already has an account. Reconnect it instead.",
+            ));
+        }
+        let handle = match self.stores.get(&id) {
+            Some(store) => store.clone(),
+            None => Arc::new(Mutex::new(MailStore::open(
+                self.directory.clone().join("accounts").join(&id),
+            )?)),
+        };
+        let mut store = handle.try_lock().map_err(|_| busy())?;
+        // Validate without changing the active transport before persistence.
+        validate(&settings, &secret.0)?;
+        let mut records = self.vault.accounts().to_vec();
+        records.retain(|a| a.id != id);
+        records.push(crate::credentials::SavedAccount {
+            id: id.clone(),
+            settings: settings.clone(),
+            configured: true,
+        });
+        secrets.insert(id.clone(), secret.clone());
+        let result = self.vault.commit(records, secrets);
+        if self
+            .vault
+            .accounts()
+            .iter()
+            .any(|a| a.id == id && a.configured && a.settings == settings)
+            && self
+                .vault
+                .secrets
+                .as_ref()
+                .and_then(|s| s.get(&id))
+                .is_some_and(|s| s.0 == secret.0)
+        {
+            connect(&mut store, &settings, &secret.0)?;
+            drop(store);
+            self.stores.insert(id.clone(), handle);
+        }
+        result?;
+        Ok(self
+            .list()
+            .into_iter()
+            .find(|a| a.id == id)
+            .expect("stored account"))
+    }
+    pub fn disconnect(&mut self, id: &str) -> Result<(), Error> {
+        let handle = self.store(id)?;
+        let mut store = handle.try_lock().map_err(|_| busy())?;
+        let mut records = self.vault.accounts().to_vec();
+        let record = records
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or_else(|| invalid("Sample account has no credentials"))?;
+        let mut secrets = self
+            .vault
+            .secrets
+            .as_ref()
+            .ok_or_else(|| invalid("Unlock credentials first"))?
+            .clone();
+        record.configured = false;
+        secrets.remove(id);
+        let result = self.vault.commit(records, secrets);
+        if self
+            .vault
+            .accounts()
+            .iter()
+            .any(|a| a.id == id && !a.configured)
+        {
+            store.disconnect();
+        }
+        result
+    }
+    pub fn security(&self) -> SecurityInfo {
+        SecurityInfo {
+            cleanup_pending: self.vault.cleanup_pending(),
+            protected: self.vault.protected(),
+            locked: self.vault.locked(),
+        }
+    }
+    pub fn protect(&mut self, password: &str) -> Result<(), Error> {
+        let handles: Vec<_> = self.stores.values().cloned().collect();
+        let _guards: Vec<_> = handles
+            .iter()
+            .map(|s| s.try_lock().map_err(|_| busy()))
+            .collect::<Result<_, _>>()?;
+        self.vault.protect(password)
+    }
+    pub fn unprotect(&mut self) -> Result<(), Error> {
+        let handles: Vec<_> = self.stores.values().cloned().collect();
+        let _guards: Vec<_> = handles
+            .iter()
+            .map(|s| s.try_lock().map_err(|_| busy()))
+            .collect::<Result<_, _>>()?;
+        self.vault.unprotect()
+    }
+    pub fn lock(&mut self) -> Result<(), Error> {
+        let handles: Vec<_> = self.stores.values().cloned().collect();
+        let mut guards: Vec<_> = handles
+            .iter()
+            .map(|s| s.try_lock().map_err(|_| busy()))
+            .collect::<Result<_, _>>()?;
+        self.vault.lock()?;
+        for store in &mut guards {
+            store.disconnect();
+        }
+        Ok(())
+    }
+    pub fn unlock(&mut self, password: &str) -> Result<(), Error> {
+        let entries: Vec<_> = self
+            .stores
+            .iter()
+            .map(|(id, store)| (id.clone(), store.clone()))
+            .collect();
+        let mut guards: Vec<_> = entries
+            .iter()
+            .map(|(_, store)| store.try_lock().map_err(|_| busy()))
+            .collect::<Result<_, _>>()?;
+        self.vault.unlock(password)?;
+        let result = entries
+            .iter()
+            .zip(guards.iter_mut())
+            .try_for_each(|((id, _), store)| {
+                if let Some(record) = self.vault.accounts().iter().find(|a| &a.id == id) {
+                    store.disconnect();
+                    if record.configured
+                        && let Some(secret) = self.vault.secrets.as_ref().and_then(|s| s.get(id))
+                    {
+                        connect(store, &record.settings, &secret.0)?;
+                    }
+                }
+                Ok(())
+            });
+        if result.is_err() {
+            for store in &mut guards {
+                store.disconnect();
+            }
+            self.vault.lock()?;
+        }
+        result
+    }
+    pub fn cleanup(&mut self) -> Result<(), Error> {
+        self.vault.cleanup()
+    }
+    pub fn reset(&mut self) -> Result<(), Error> {
+        let handles: Vec<_> = self.stores.values().cloned().collect();
+        let mut guards: Vec<_> = handles
+            .iter()
+            .map(|s| s.try_lock().map_err(|_| busy()))
+            .collect::<Result<_, _>>()?;
+        let result = self.vault.reset();
+        if !self.vault.protected() {
+            for store in &mut guards {
+                store.disconnect();
+            }
+        }
+        result
+    }
+}
+fn validate(settings: &AccountSettings, secret: &str) -> Result<(), Error> {
+    match settings.protocol {
+        Protocol::Imap => MailAccount {
+            imap_host: settings.imap_host.clone(),
+            imap_port: settings.imap_port,
+            smtp_host: settings.smtp_host.clone(),
+            smtp_port: settings.smtp_port,
+            username: settings.username.clone(),
+            password: secret.into(),
+            address: settings.address.clone(),
+        }
+        .validate(),
+        Protocol::Jmap => JmapAccount {
+            session_url: settings.session_url.clone(),
+            token: secret.into(),
+            address: settings.address.clone(),
+        }
+        .validate(),
+    }
+}

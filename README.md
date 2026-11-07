@@ -8,7 +8,7 @@ create, save, reopen, and edit drafts. Drafts survive restarting the Host.
 
 Install stable Rust (1.89 or newer) with `rustfmt` and `clippy`, `just`, and
 Bun 1.4.4 or newer. Linux also needs OpenSSL development libraries and pkg-config
-(for example, `libssl-dev` and `pkg-config` on Debian/Ubuntu). From the repository root:
+(for example, `libssl-dev`, `libdbus-1-dev`, and `pkg-config` on Debian/Ubuntu). From the repository root:
 
 ```sh
 just setup-ui
@@ -61,7 +61,7 @@ Run `just` for all recipes. After editing UI source, `just demo` rebuilds it.
 - `colecto-core`: TLS IMAP/SMTP, prototype JMAP, MIME plain-text decoding, sample messages, draft
   validation, IDs, and atomic JSON storage.
 - `colecto-host`: loopback HTTP/static adapter; validates Host/origin and built-in
-  module grants scoped to the demo account. API bodies are bounded to 128000 bytes.
+  module grants scoped to an explicitly selected account. API bodies are bounded to 128000 bytes.
 - `ui/src/extensions`: replaceable bundled mailbox, reader, and composer views.
   The Host supplies their service clients; views cannot access storage directly.
 
@@ -82,7 +82,20 @@ See [project direction and architecture](docs/README.md), the
 ## Connect a mail account
 
 IMAP receives mail; SMTP sends mail. **POP3 will not be supported.**
-One account is supported per Host process. Configure these environment variables
+Use **Manage accounts** inside the app to add IMAP/SMTP or JMAP accounts, edit
+settings, reconnect, and disconnect. The account selector stays available on
+narrow screens. Inbox, drafts, and the compose sender belong to the selected
+account. Saving settings does not verify the provider connection: open Inbox to
+check it. Connection errors keep local drafts available.
+
+Passwords/tokens persist as authenticated ciphertext, protected by a random key
+in your operating system credential store: macOS Keychain, Windows Credential
+Manager, or a running Secret Service on Linux. Linux builds
+need `libdbus-1-dev`. If the store is missing or locked, Colecto reports an error;
+there is no plaintext fallback. Account management requires the local trusted
+Host; it is not a hosted multi-user authentication system.
+
+For an existing environment-based setup, the following variables remain supported
 before `just demo` (set secrets in your local environment, never in source control):
 
 | Variable | Meaning |
@@ -97,21 +110,28 @@ before `just demo` (set secrets in your local environment, never in source contr
 
 Any mail variable enables account mode; missing or invalid settings stop startup.
 Certificates and hostnames are verified; plaintext authentication is unavailable.
-Credentials remain in process memory and are never returned through the API or
-saved in the draft store. OAuth-only providers are not supported yet.
+When unlocked, a legacy environment account is imported once into persistent
+account settings and the system credential store, retaining its existing `demo`
+identity and drafts. Saved settings then take precedence; use Manage accounts to
+update them. A password-protected vault suppresses environment credentials while
+locked; reconnect/import through the UI after unlocking. Secrets are never
+returned through the API or saved in the draft store. OAuth-only providers are not supported yet.
 
 Opening Inbox fetches the latest 100 messages, read-only, without marking them
 seen. Reopen Inbox to refresh. Messages larger than 2000000 bytes are skipped;
 HTML-only messages show a placeholder. The inbox cache is in memory, so mail is
-fetched again after restart. Drafts remain local. Use a separate `COLECTO_DATA_DIR`
-for each account: local drafts are not account-scoped or encrypted.
+fetched again after restart. Drafts remain local and unencrypted. New accounts have separate stores beneath
+`COLECTO_DATA_DIR/accounts/<account-id>/`; the existing root draft store keeps its
+legacy identity and is never assigned to a new account automatically. Disconnect
+forgets the saved credential and retains settings/drafts for reconnecting.
 
 Send success means SMTP acceptance, not final delivery. A failed or interrupted
 send can have an uncertain outcome: check the provider's Sent folder before
 retrying. No automatic retry, SMTP Sent-folder append, or saved-draft deletion is
 performed. The editor preserves text on failure and disables sending again after
-success. Server/network operations run outside the async executor, but serialize
-with other mail operations and have 30-second socket timeouts.
+success. Server/network operations run outside the async executor and serialize per
+account, with 30-second socket timeouts. Another account can continue independently.
+Credential changes and locking report busy while an account operation is active.
 
 Transport libraries follow the [imap client documentation](https://docs.rs/imap/2.4.1/imap/)
 and [lettre SMTP documentation](https://docs.rs/lettre/0.11.23/lettre/transport/smtp/).
@@ -140,7 +160,7 @@ session resource (often `https://provider.example/.well-known/jmap`),
 `COLECTO_MAIL_ADDRESS` to an address advertised by that account's JMAP identities.
 Run `just demo`. Do not also set IMAP/SMTP variables. Partial configuration fails
 startup; server authentication and capability checks happen on first use.
-Tokens remain in memory; do not put them in source control. OAuth login and token
+Tokens use the same credential storage as IMAP passwords; do not put them in source control. OAuth login and token
 refresh are not implemented. Redirects are rejected; supply the final session URL.
 
 This is an experimental transport following [RFC 8620](https://www.rfc-editor.org/rfc/rfc8620)
@@ -159,3 +179,45 @@ server draft or an uncertain send; check Sent and Drafts before retrying. There
 are no automatic retries or local draft deletions. Provider interoperability has
 not been verified against a live account; use a test account and separate data
 directory for this prototype.
+
+
+## Optional master password
+
+In **Manage accounts → Credential protection**, enable password protection with a
+master password of at least 12 bytes. This is optional: the default is your
+system credential store. Password mode also works when no desktop keychain is
+available. Keep the password somewhere safe: Colecto cannot recover it.
+
+Password protection encrypts **credentials only**, not email bodies, local drafts,
+or connection metadata. The version 1 `accounts.json` registry contains settings
+and an encrypted credential vault. Default mode references an OS entry holding a
+fixed-size random encryption key, so long provider tokens do not exceed Windows
+credential blob limits. Password mode derives its key from your master password. OS entries are
+namespaced by the canonical data directory. Moving that directory requires
+reconnecting accounts in system-store mode; retain a backup before moving it.
+
+The vault uses Argon2id v19 (64 MiB, 3 iterations, 1 lane) and XChaCha20Poly1305,
+with random salt/nonces and authenticated account metadata. The password and
+derived key are not saved. It locks on Host restart; **Lock credentials** also
+removes active mail credentials from memory. Local drafts remain accessible.
+Unlocking is shared by tabs using the same local Host. A tab that changes account
+security elsewhere may need to reopen Manage accounts to refresh its status.
+
+You can change the password while unlocked or return to the system credential
+store. Credential transitions journal replacement entries before switching the
+registry and retry obsolete-entry cleanup after interruption. If cleanup fails,
+the UI reports pending cleanup; unlock the OS store and retry. A startup cleanup
+failure stops the Host with an actionable error rather than silently leaving a
+protection transition incomplete. Preserve `accounts.json` on corruption; Colecto
+does not overwrite unsupported or malformed files.
+
+**Reset saved credentials** forgets credentials for all accounts without deleting
+local drafts. It requires confirmation and every account must then be reconnected.
+This is the recovery path for a forgotten password, not password recovery.
+
+The implementation follows the official [keyring API](https://docs.rs/keyring/3.6.3/keyring/),
+[Argon2 API](https://docs.rs/argon2/0.5.3/argon2/), and
+[authenticated encryption API](https://docs.rs/chacha20poly1305/0.10.1/chacha20poly1305/).
+OS-keychain behavior on macOS/Windows, live provider connections, and real phone
+interaction require platform testing; automated tests use an injected credential
+store or a password vault with sample connection settings.

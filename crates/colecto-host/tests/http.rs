@@ -201,3 +201,73 @@ async fn send_is_scoped_and_demo_never_reports_delivery() {
         b"false"
     );
 }
+
+#[tokio::test]
+async fn management_is_host_only_and_password_mode_needs_no_keychain() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    );
+    let denied = router
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/accounts",
+            "inbox",
+            "http://127.0.0.1:4173",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    let response = router
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/security",
+            "host",
+            "http://127.0.0.1:4173",
+            r#"{"action":"protect","password":"a strong master password"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = router.clone().oneshot(request("POST", "/api/v1/accounts", "host", "http://127.0.0.1:4173", r#"{"name":"Work","address":"work@example.test","protocol":"imap","imap_host":"imap.example.test","smtp_host":"smtp.example.test","username":"work","secret":"never-return-this"}"#)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), 200000).await.unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains("never-return-this"));
+    let info: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let account = info["id"].as_str().unwrap();
+    let mut req = request(
+        "POST",
+        "/api/v1/drafts",
+        "composer",
+        "http://127.0.0.1:4173",
+        r#"{"subject":"Private draft","recipient":"","body":""}"#,
+    );
+    req.headers_mut()
+        .insert("x-colecto-account", account.parse().unwrap());
+    assert_eq!(
+        router.clone().oneshot(req).await.unwrap().status(),
+        StatusCode::OK
+    );
+    let response = router
+        .oneshot(request(
+            "GET",
+            "/api/v1/drafts",
+            "inbox",
+            "http://127.0.0.1:4173",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        to_bytes(response.into_body(), 200000)
+            .await
+            .unwrap()
+            .as_ref(),
+        b"[]"
+    );
+}

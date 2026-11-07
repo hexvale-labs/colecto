@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { Message, readerService } from '../lib/api';
-  let { id, service, onback }: { id: string; service: typeof readerService; onback: () => void } = $props();
+  import type { Message, ReaderService } from '../lib/api';
+  let { id, service, accountLabel, onback }: { id: string; accountLabel: string; service: ReaderService; onback: () => void } = $props();
   let message = $state<Message | null>(null);
   let error = $state('');
   let loading = $state(true);
@@ -14,12 +14,12 @@
   onMount(() => { void load(); });
 </script>
 <section class="detail" aria-label="Message reader" aria-busy={loading}>
-  <header class="detail-toolbar"><button class="text-button back" onclick={onback}>← Back to list</button><span class="toolbar-label">READING ROOM</span><span class="pill">Sample mail</span></header>
+  <header class="detail-toolbar"><button class="text-button back" onclick={onback}>← Back to list</button><span class="toolbar-label">MESSAGE</span><span class="pill">{accountLabel}</span></header>
   {#if loading}<div class="detail-state">Opening message…</div>
   {:else if error}<div class="detail-state"><p role="alert">{error}</p><button class="secondary" onclick={load}>Try again</button></div>
   {:else if message}
     <article class="letter">
-      <div class="eyebrow">{message.date} · DEMO INBOX</div>
+      <div class="eyebrow">{message.date} · INBOX</div>
       <h2>{message.subject || '(No subject)'}</h2>
       <div class="sender-row"><span class="avatar" aria-hidden="true">{message.sender.charAt(0)}</span><div><strong>{message.sender}</strong><span class="address">{message.address}</span></div><span class="to-me">to you</span></div>
       <div class="letter-body">{message.body}</div>

@@ -1,4 +1,8 @@
 //! Platform-independent email business logic and core services.
+mod accounts;
+mod credentials;
+pub use accounts::Accounts;
+pub use credentials::SecretStore;
 mod jmap;
 mod remote;
 pub use jmap::JmapAccount;
@@ -108,6 +112,10 @@ impl MailStore {
         self.account = Some(Account::Jmap(account));
         self.messages.clear();
         Ok(())
+    }
+    pub fn disconnect(&mut self) {
+        self.account = None;
+        self.messages.clear();
     }
     pub fn connected(&self) -> bool {
         self.account.is_some()

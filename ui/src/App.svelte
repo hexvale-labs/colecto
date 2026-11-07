@@ -3,10 +3,43 @@
   import Mailbox from './extensions/Mailbox.svelte';
   import Reader from './extensions/Reader.svelte';
   import Composer from './extensions/Composer.svelte';
-  import { inboxService, readerService, composerService } from './lib/api';
-  import type { Draft, MailItem } from './lib/api';
+  import AccountSettings from './AccountSettings.svelte';
+  import { createServices, hostService } from './lib/api';
+  import type { Draft, MailItem, AccountInfo, SecurityInfo } from './lib/api';
   type View = { kind: 'message'; id: string } | { kind: 'draft'; draft: Draft | null } | null;
   let connected = $state(false);
+  let initialized = $state(false);
+  let accounts = $state<AccountInfo[]>([]);
+  let security = $state<SecurityInfo>({ protected: false, locked: false, cleanup_pending: false });
+  let accountId = $state('demo');
+  let settingsOpen = $state(false);
+  let accountError = $state('');
+  let services = $derived(createServices(accountId));
+  let activeAccount = $derived(accounts.find(a => a.id === accountId));
+  let sender = $derived(activeAccount?.settings?.address ?? 'Demo account · sending unavailable');
+  let accountLabel = $derived(activeAccount?.settings?.name ?? 'Demo account');
+  async function refreshAccounts() {
+    const [nextAccounts, nextSecurity] = await Promise.all([hostService.accounts(), hostService.security()]);
+    accounts = nextAccounts; security = nextSecurity;
+    connected = nextAccounts.find(a => a.id === accountId)?.connected ?? false;
+  }
+  function changeAccount(event: Event) {
+    const select = event.currentTarget as HTMLSelectElement;
+    const next = select.value;
+    if (!canLeave()) { select.value = accountId; return; }
+    clearView(); ++listGeneration; items = [];
+    accountId = next; try { localStorage.setItem('colecto.account', next); } catch { /* Selection persistence is optional. */ } connected = accounts.find(a => a.id === next)?.connected ?? false;
+    settingsOpen = false; folder = 'Inbox'; void loadList();
+  }
+  function manageAccounts() {
+    if (!canLeave()) return;
+    clearView(); ++listGeneration; settingsOpen = true;
+    void refreshAccounts().catch(e => accountError = (e as Error).message);
+  }
+  function closeSettings() {
+    if (!canLeave()) return;
+    clearView(); settingsOpen = false; void loadList();
+  }
   let folder = $state<'Inbox' | 'Drafts'>('Inbox');
   let items = $state<MailItem[]>([]);
   let view = $state<View>(null);
@@ -22,6 +55,7 @@
   async function loadList() {
     const generation = ++listGeneration;
     const requestedFolder = folder;
+    const inboxService = services.inbox;
     loading = true; error = ''; openError = '';
     try {
       const result: MailItem[] = requestedFolder === 'Inbox'
@@ -31,13 +65,13 @@
     } catch (e) { if (generation === listGeneration) error = (e as Error).message; }
     finally { if (generation === listGeneration) loading = false; }
   }
-  function canLeave() { return !busy && (!dirty || window.confirm('Discard unsaved changes? Your last saved draft will be kept.')); }
+  function canLeave() { return initialized && !busy && (!dirty || window.confirm('Discard unsaved changes? Your last saved draft will be kept.')); }
   function clearView() { ++openGeneration; view = null; dirty = false; openError = ''; opening = false; }
   function navigate(next: 'Inbox' | 'Drafts') {
     if (!canLeave()) return;
-    clearView(); folder = next; void loadList();
+    clearView(); settingsOpen = false; folder = next; void loadList();
   }
-  function compose() { if (!canLeave()) return; clearView(); view = { kind: 'draft', draft: null }; }
+  function compose() { if (!canLeave()) return; clearView(); settingsOpen = false; view = { kind: 'draft', draft: null }; }
   function back() { if (!canLeave()) return; clearView(); }
   async function open(id: string) {
     if (!canLeave()) return;
@@ -46,7 +80,7 @@
     const generation = ++openGeneration;
     opening = true;
     try {
-      const draft = await composerService.read(id);
+      const draft = await services.composer.read(id);
       if (generation === openGeneration) view = { kind: 'draft', draft };
     } catch (e) { if (generation === openGeneration) openError = (e as Error).message; }
     finally { if (generation === openGeneration) opening = false; }
@@ -57,31 +91,38 @@
     if (folder === 'Drafts') void loadList();
   }
   function beforeUnload(event: BeforeUnloadEvent) { if (dirty || busy) { event.preventDefault(); event.returnValue = ''; } }
-  onMount(() => { void loadList(); void inboxService.connected().then(value => connected = value).catch(() => {}); });
+  onMount(() => {
+    void refreshAccounts().then(() => {
+      let remembered = ''; try { remembered = localStorage.getItem('colecto.account') ?? ''; } catch { /* Storage can be disabled. */ }
+      if (accounts.some(a => a.id === remembered)) accountId = remembered;
+      connected = accounts.find(a => a.id === accountId)?.connected ?? false;
+    }).catch(e => accountError = (e as Error).message).finally(() => { initialized = true; void loadList(); });
+  });
 </script>
 
 <svelte:window onbeforeunload={beforeUnload} />
 <div class="app-shell" class:detail-open={view !== null}>
   <aside class="sidebar">
     <a class="brand" href="/" onclick={(event) => { event.preventDefault(); navigate('Inbox'); }} aria-label="Colecto home"><span class="brand-mark" aria-hidden="true">c</span>colecto<span class="brand-dot">.</span></a>
-    <button class="compose-button" disabled={busy} onclick={compose}><span aria-hidden="true">＋</span> Compose</button>
+    <button class="compose-button" disabled={busy || !initialized} onclick={compose}><span aria-hidden="true">＋</span> Compose</button>
     <nav aria-label="Mail folders">
-      <button class:active={folder === 'Inbox'} aria-current={folder === 'Inbox' ? 'page' : undefined} disabled={busy} onclick={() => navigate('Inbox')}><span class="nav-icon" aria-hidden="true">▤</span>Inbox<span class="nav-dot" aria-hidden="true"></span></button>
-      <button class:active={folder === 'Drafts'} aria-current={folder === 'Drafts' ? 'page' : undefined} disabled={busy} onclick={() => navigate('Drafts')}><span class="nav-icon" aria-hidden="true">✎</span>Drafts</button>
+      <button class:active={folder === 'Inbox'} aria-current={folder === 'Inbox' ? 'page' : undefined} disabled={busy || !initialized} onclick={() => navigate('Inbox')}><span class="nav-icon" aria-hidden="true">▤</span>Inbox<span class="nav-dot" aria-hidden="true"></span></button>
+      <button class:active={folder === 'Drafts'} aria-current={folder === 'Drafts' ? 'page' : undefined} disabled={busy || !initialized} onclick={() => navigate('Drafts')}><span class="nav-icon" aria-hidden="true">✎</span>Drafts</button>
     </nav>
-    <div class="sidebar-note"><span class="small-leaf" aria-hidden="true">✳</span><p>A quieter place<br />for your mail.</p></div>
-    <div class="account"><span class="account-avatar" aria-hidden="true">D</span><div><strong>{connected ? 'Mail account' : 'Demo account'}</strong><span>{connected ? 'Connected mail' : 'Local to this computer'}</span></div><span class="online-dot" aria-label="Local demo"></span></div>
+    <div class="account-controls"><label for="current-account">Account</label><select id="current-account" aria-label="Current account" value={accountId} disabled={busy || !initialized} onchange={changeAccount}>{#if !accounts.length}<option value="demo">Demo account</option>{/if}{#each accounts as account (account.id)}<option value={account.id}>{account.settings ? `${account.settings.name} · ${account.settings.address}` : 'Demo account'}</option>{/each}</select><button class="manage-button" disabled={busy || !initialized} onclick={manageAccounts}>Manage accounts</button><span class="account-state">{security.locked ? 'Credentials locked' : activeAccount?.configured ? 'Configured account' : 'Local sample mail'}</span></div>
   </aside>
   <main class="workspace">
-    <Mailbox {items} {selected} {folder} {loading} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} />
+    {#if accountError}<div class="account-error error-box" role="alert">{accountError}<button class="text-button" onclick={() => { accountError = ''; void refreshAccounts().catch(e => accountError = (e as Error).message); }}>Retry account settings</button></div>{/if}
+    {#if settingsOpen}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} onback={closeSettings} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} />
+    {:else}<Mailbox {items} {selected} {folder} {loading} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} />
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${view.id}` : view}
-        {#if view?.kind === 'message'}<Reader id={view.id} service={readerService} onback={back} />
-        {:else if view?.kind === 'draft'}<Composer {connected} draft={view.draft} service={composerService} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
+        {#if view?.kind === 'message'}<Reader id={view.id} service={services.reader} {accountLabel} onback={back} />
+        {:else if view?.kind === 'draft'}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
         {:else}
-          <section class="welcome"><div class="welcome-art" aria-hidden="true"><span class="envelope">⌑</span><span class="art-star">✳</span></div><div class="eyebrow">LESS NOISE. MORE ROOM.</div><h2>Mail, with room<br />to think.</h2><p>{opening ? 'Opening your draft…' : 'Pick a message. Settle into a conversation.\nEverything else can wait a moment.'}</p><span class="welcome-caption">COLECTO · LOCAL DEMO</span></section>
+          <section class="welcome"><div class="eyebrow">{accountLabel}</div><h2>Your mail, in focus.</h2><p>{opening ? 'Opening your draft…' : 'Select a message to read, or compose a new one.'}</p><button class="secondary" disabled={busy || !initialized} onclick={compose}>New message</button></section>
         {/if}
       {/key}
-    </div>
+    </div>{/if}
   </main>
 </div>
