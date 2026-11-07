@@ -16,3 +16,4 @@ imap.workspace = true
 native-tls.workspace = true
 lettre.workspace = true
 mailparse.workspace = true
+reqwest.workspace = true

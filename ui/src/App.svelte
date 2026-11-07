@@ -70,7 +70,7 @@
       <button class:active={folder === 'Drafts'} aria-current={folder === 'Drafts' ? 'page' : undefined} disabled={busy} onclick={() => navigate('Drafts')}><span class="nav-icon" aria-hidden="true">✎</span>Drafts</button>
     </nav>
     <div class="sidebar-note"><span class="small-leaf" aria-hidden="true">✳</span><p>A quieter place<br />for your mail.</p></div>
-    <div class="account"><span class="account-avatar" aria-hidden="true">D</span><div><strong>{connected ? 'Mail account' : 'Demo account'}</strong><span>{connected ? 'IMAP · SMTP' : 'Local to this computer'}</span></div><span class="online-dot" aria-label="Local demo"></span></div>
+    <div class="account"><span class="account-avatar" aria-hidden="true">D</span><div><strong>{connected ? 'Mail account' : 'Demo account'}</strong><span>{connected ? 'Connected mail' : 'Local to this computer'}</span></div><span class="online-dot" aria-label="Local demo"></span></div>
   </aside>
   <main class="workspace">
     <Mailbox {items} {selected} {folder} {loading} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} />

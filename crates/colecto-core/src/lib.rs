@@ -1,5 +1,7 @@
 //! Platform-independent email business logic and core services.
+mod jmap;
 mod remote;
+pub use jmap::JmapAccount;
 pub use remote::MailAccount;
 
 use colecto_extension_api::{Draft, DraftInput, Message};
@@ -40,12 +42,17 @@ struct SavedMail {
     drafts: Vec<Draft>,
 }
 
+enum Account {
+    Imap(MailAccount),
+    Jmap(JmapAccount),
+}
+
 pub struct MailStore {
     directory: PathBuf,
     drafts: Vec<Draft>,
     messages: Vec<Message>,
     _lock: File,
-    account: Option<MailAccount>,
+    account: Option<Account>,
 }
 
 impl MailStore {
@@ -92,7 +99,13 @@ impl MailStore {
     }
     pub fn connect_account(&mut self, account: MailAccount) -> Result<(), Error> {
         account.validate()?;
-        self.account = Some(account);
+        self.account = Some(Account::Imap(account));
+        self.messages.clear();
+        Ok(())
+    }
+    pub fn connect_jmap(&mut self, account: JmapAccount) -> Result<(), Error> {
+        account.validate()?;
+        self.account = Some(Account::Jmap(account));
         self.messages.clear();
         Ok(())
     }
@@ -101,15 +114,22 @@ impl MailStore {
     }
     pub fn refresh(&mut self) -> Result<Vec<Message>, Error> {
         if let Some(account) = &self.account {
-            self.messages = account.receive()?;
+            self.messages = match account {
+                Account::Imap(account) => account.receive()?,
+                Account::Jmap(account) => account.receive()?,
+            };
         }
         Ok(self.messages.clone())
     }
     pub fn send(&self, input: DraftInput) -> Result<(), Error> {
-        self.account
+        match self
+            .account
             .as_ref()
-            .ok_or_else(|| Error::Invalid("Connect an IMAP/SMTP account before sending".into()))?
-            .send(&input)
+            .ok_or_else(|| Error::Invalid("Connect a mail account before sending".into()))?
+        {
+            Account::Imap(account) => account.send(&input),
+            Account::Jmap(account) => account.send(&input),
+        }
     }
     pub fn messages(&self) -> &[Message] {
         &self.messages
