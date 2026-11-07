@@ -159,3 +159,45 @@ async fn host_rejects_cross_origin_ungranted_and_malformed_requests() {
         StatusCode::FORBIDDEN
     );
 }
+
+#[tokio::test]
+async fn send_is_scoped_and_demo_never_reports_delivery() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    );
+    for (extension, origin, expected) in [
+        ("inbox", "http://127.0.0.1:4173", StatusCode::FORBIDDEN),
+        ("composer", "https://evil.test", StatusCode::FORBIDDEN),
+        ("composer", "http://127.0.0.1:4173", StatusCode::BAD_REQUEST),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/api/v1/send",
+                extension,
+                origin,
+                r#"{"recipient":"friend@example.test","subject":"Hello","body":"Keep this"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+    let response = router
+        .oneshot(request(
+            "GET",
+            "/api/v1/account",
+            "inbox",
+            "http://127.0.0.1:4173",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        to_bytes(response.into_body(), 100).await.unwrap().as_ref(),
+        b"false"
+    );
+}

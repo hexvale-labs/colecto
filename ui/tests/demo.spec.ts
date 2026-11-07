@@ -81,3 +81,27 @@ test('shows a failed draft-open error and recovery on a narrow screen', async ({
   await page.getByRole('button', { name: /Open failure example/ }).click();
   await expect(page.getByLabel('Message', { exact: true })).toHaveValue('Still saved');
 });
+
+test('sending preserves edits on failure and prevents duplicate submission after acceptance', async ({ page }) => {
+  await page.route('**/api/v1/account', route => route.fulfill({ json: true }));
+  let sends = 0;
+  await page.route('**/api/v1/send', async route => {
+    sends++;
+    expect(route.request().postDataJSON()).toEqual({ recipient: 'friend@example.test', subject: 'Hello', body: 'Keep this text' });
+    await route.fulfill(sends === 1
+      ? { status: 502, json: { error: 'Mail server unavailable' } }
+      : { json: true });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  await page.getByLabel('To', { exact: true }).fill('friend@example.test');
+  await page.getByLabel('Subject', { exact: true }).fill('Hello');
+  await page.getByLabel('Message', { exact: true }).fill('Keep this text');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Mail server unavailable');
+  await expect(page.getByLabel('Message', { exact: true })).toHaveValue('Keep this text');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Accepted by mail server');
+  await expect(page.getByRole('button', { name: 'Sent', exact: true })).toBeDisabled();
+  expect(sends).toBe(2);
+});

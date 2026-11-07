@@ -31,19 +31,19 @@ verify: fmt-check check lint test ui-check ui-build
 
 # Install the locked frontend dependencies.
 setup-ui:
-    npm --prefix ui ci
+    cd ui && bun install --frozen-lockfile
 
 # Install Chromium for the browser tests (once per machine).
 setup-browser:
-    cd ui && npx playwright install chromium
+    cd ui && bunx playwright install chromium
 
 # Check Svelte components and TypeScript.
 ui-check:
-    npm --prefix ui run check
+    cd ui && bun run --bun check
 
 # Build the bundled UI for the local Host.
 ui-build:
-    npm --prefix ui run build
+    cd ui && bun run --bun build
 
 # Run the local demo at http://127.0.0.1:4173 (Ctrl+C to stop).
 demo: build ui-build
@@ -51,5 +51,5 @@ demo: build ui-build
 
 # Verify UI flows and restart persistence with an isolated temporary data directory.
 ui-test: build ui-build
-    node --test ui/tests/restart.mjs
-    npm --prefix ui test
+    bun test ./ui/tests/restart.test.mjs
+    cd ui && bun run --bun test

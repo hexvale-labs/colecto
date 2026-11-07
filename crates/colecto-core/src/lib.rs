@@ -1,4 +1,7 @@
 //! Platform-independent email business logic and core services.
+mod remote;
+pub use remote::MailAccount;
+
 use colecto_extension_api::{Draft, DraftInput, Message};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -11,13 +14,16 @@ use std::{
 #[derive(Debug)]
 pub enum Error {
     Storage(String),
+    Transport(String),
     Invalid(String),
     Missing,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Storage(message) | Self::Invalid(message) => f.write_str(message),
+            Self::Transport(message) | Self::Storage(message) | Self::Invalid(message) => {
+                f.write_str(message)
+            }
             Self::Missing => f.write_str("Mail item not found"),
         }
     }
@@ -39,6 +45,7 @@ pub struct MailStore {
     drafts: Vec<Draft>,
     messages: Vec<Message>,
     _lock: File,
+    account: Option<MailAccount>,
 }
 
 impl MailStore {
@@ -80,7 +87,29 @@ impl MailStore {
             drafts,
             messages: sample_messages(),
             _lock: lock,
+            account: None,
         })
+    }
+    pub fn connect_account(&mut self, account: MailAccount) -> Result<(), Error> {
+        account.validate()?;
+        self.account = Some(account);
+        self.messages.clear();
+        Ok(())
+    }
+    pub fn connected(&self) -> bool {
+        self.account.is_some()
+    }
+    pub fn refresh(&mut self) -> Result<Vec<Message>, Error> {
+        if let Some(account) = &self.account {
+            self.messages = account.receive()?;
+        }
+        Ok(self.messages.clone())
+    }
+    pub fn send(&self, input: DraftInput) -> Result<(), Error> {
+        self.account
+            .as_ref()
+            .ok_or_else(|| Error::Invalid("Connect an IMAP/SMTP account before sending".into()))?
+            .send(&input)
     }
     pub fn messages(&self) -> &[Message] {
         &self.messages

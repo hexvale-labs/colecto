@@ -31,6 +31,7 @@ impl IntoResponse for Failure {
 impl From<Error> for Failure {
     fn from(error: Error) -> Self {
         match error {
+            Error::Transport(_) => Self(StatusCode::BAD_GATEWAY, error.to_string()),
             Error::Missing => Self(StatusCode::NOT_FOUND, error.to_string()),
             Error::Invalid(_) => Self(StatusCode::BAD_REQUEST, error.to_string()),
             Error::Storage(_) => {
@@ -58,6 +59,8 @@ pub fn app(store: MailStore, authority: String, assets: PathBuf) -> Router {
         authority,
     };
     let api = Router::new()
+        .route("/account", get(account))
+        .route("/send", axum::routing::post(send))
         .route("/messages", get(messages))
         .route("/messages/{id}", get(message))
         .route("/drafts", get(drafts).post(save_draft))
@@ -120,12 +123,16 @@ fn grant(headers: &HeaderMap, operation: &str) -> Result<(), Failure> {
     if account != Some(DEMO_ACCOUNT) {
         return Err(forbidden());
     }
-    let allowed = matches!(
-        (extension, operation),
-        (Some("inbox"), "messages.list" | "drafts.list")
-            | (Some("reader"), "messages.read")
-            | (Some("composer"), "drafts.read" | "drafts.write")
-    );
+    let allowed = (operation == "account.read" && extension == Some("inbox"))
+        || matches!(
+            (extension, operation),
+            (Some("inbox"), "messages.list" | "drafts.list")
+                | (Some("reader"), "messages.read")
+                | (
+                    Some("composer"),
+                    "drafts.read" | "drafts.write" | "messages.send"
+                )
+        );
     if allowed { Ok(()) } else { Err(forbidden()) }
 }
 
@@ -155,9 +162,7 @@ async fn messages(
     headers: HeaderMap,
 ) -> Result<Json<Vec<Message>>, Failure> {
     grant(&headers, "messages.list")?;
-    with_store(host, |s| Ok(s.messages().to_vec()))
-        .await
-        .map(Json)
+    with_store(host, |s| s.refresh()).await.map(Json)
 }
 async fn message(
     State(host): State<Host>,
@@ -195,4 +200,23 @@ async fn save_draft(
     with_store(host, move |s| s.save_draft(input))
         .await
         .map(Json)
+}
+
+async fn account(State(host): State<Host>, headers: HeaderMap) -> Result<Json<bool>, Failure> {
+    grant(&headers, "account.read")?;
+    with_store(host, |s| Ok(s.connected())).await.map(Json)
+}
+async fn send(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    input: Result<Json<DraftInput>, JsonRejection>,
+) -> Result<Json<bool>, Failure> {
+    grant(&headers, "messages.send")?;
+    let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
+    with_store(host, move |s| {
+        s.send(input)?;
+        Ok(true)
+    })
+    .await
+    .map(Json)
 }

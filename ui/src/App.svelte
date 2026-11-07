@@ -6,6 +6,7 @@
   import { inboxService, readerService, composerService } from './lib/api';
   import type { Draft, MailItem } from './lib/api';
   type View = { kind: 'message'; id: string } | { kind: 'draft'; draft: Draft | null } | null;
+  let connected = $state(false);
   let folder = $state<'Inbox' | 'Drafts'>('Inbox');
   let items = $state<MailItem[]>([]);
   let view = $state<View>(null);
@@ -56,7 +57,7 @@
     if (folder === 'Drafts') void loadList();
   }
   function beforeUnload(event: BeforeUnloadEvent) { if (dirty || busy) { event.preventDefault(); event.returnValue = ''; } }
-  onMount(() => { void loadList(); });
+  onMount(() => { void loadList(); void inboxService.connected().then(value => connected = value).catch(() => {}); });
 </script>
 
 <svelte:window onbeforeunload={beforeUnload} />
@@ -69,14 +70,14 @@
       <button class:active={folder === 'Drafts'} aria-current={folder === 'Drafts' ? 'page' : undefined} disabled={busy} onclick={() => navigate('Drafts')}><span class="nav-icon" aria-hidden="true">✎</span>Drafts</button>
     </nav>
     <div class="sidebar-note"><span class="small-leaf" aria-hidden="true">✳</span><p>A quieter place<br />for your mail.</p></div>
-    <div class="account"><span class="account-avatar" aria-hidden="true">D</span><div><strong>Demo account</strong><span>Local to this computer</span></div><span class="online-dot" aria-label="Local demo"></span></div>
+    <div class="account"><span class="account-avatar" aria-hidden="true">D</span><div><strong>{connected ? 'Mail account' : 'Demo account'}</strong><span>{connected ? 'IMAP · SMTP' : 'Local to this computer'}</span></div><span class="online-dot" aria-label="Local demo"></span></div>
   </aside>
   <main class="workspace">
     <Mailbox {items} {selected} {folder} {loading} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} />
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${view.id}` : view}
         {#if view?.kind === 'message'}<Reader id={view.id} service={readerService} onback={back} />
-        {:else if view?.kind === 'draft'}<Composer draft={view.draft} service={composerService} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
+        {:else if view?.kind === 'draft'}<Composer {connected} draft={view.draft} service={composerService} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
         {:else}
           <section class="welcome"><div class="welcome-art" aria-hidden="true"><span class="envelope">⌑</span><span class="art-star">✳</span></div><div class="eyebrow">LESS NOISE. MORE ROOM.</div><h2>Mail, with room<br />to think.</h2><p>{opening ? 'Opening your draft…' : 'Pick a message. Settle into a conversation.\nEverything else can wait a moment.'}</p><span class="welcome-caption">COLECTO · LOCAL DEMO</span></section>
         {/if}
