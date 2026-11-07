@@ -61,9 +61,11 @@ support now. Credentials need a separate explicit security policy before sync.
 
 ## Repository and daily work
 
-All Rust crates live under `crates/`, in one root Cargo workspace. The initial
-`colecto-core` and `colecto-extension-api` libraries reserve the core and public
-contract boundaries; they intentionally contain no invented runtime APIs.
+All Rust crates live under `crates/`, in one root Cargo workspace. The first local prototype implements `colecto-core` mail services and
+`colecto-extension-api` version 1 contracts, consumed by `colecto-host` and the
+Svelte bundled UI. This browser slice uses a loopback Rust HTTP backend; native
+Tauri hosts and untrusted extension isolation remain future work. See the root
+README for run commands and the exact prototype limits.
 
 Use justfiles as the entry point for repeatable operations. Keep shared tasks in
 the root `justfile`; introduce component justfiles only when useful. `just` lists
