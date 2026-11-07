@@ -25,11 +25,13 @@ async function request<T>(extension: string, path: string, input?: DraftInput): 
 
 // Supplied service clients are the only mail access used by bundled UI modules.
 export const inboxService = {
+  connected: () => request<boolean>('inbox', '/account'),
   messages: () => request<Message[]>('inbox', '/messages'),
   drafts: () => request<Draft[]>('inbox', '/drafts'),
 };
 export const readerService = { read: (id: string) => request<Message>('reader', `/messages/${encodeURIComponent(id)}`) };
 export const composerService = {
+  send: (draft: DraftInput) => request<boolean>('composer', '/send', draft),
   read: (id: string) => request<Draft>('composer', `/drafts/${encodeURIComponent(id)}`),
   save: (draft: DraftInput) => request<Draft>('composer', '/drafts', draft),
 };

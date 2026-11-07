@@ -1,4 +1,4 @@
-use colecto_core::MailStore;
+use colecto_core::{MailAccount, MailStore};
 use std::{env, path::PathBuf};
 
 #[tokio::main]
@@ -13,7 +13,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !assets.join("index.html").is_file() {
         return Err("Frontend build missing; run just ui-build first".into());
     }
-    let store = MailStore::open(&directory)?;
+    let mut store = MailStore::open(&directory)?;
+    let keys = [
+        "COLECTO_IMAP_HOST",
+        "COLECTO_IMAP_PORT",
+        "COLECTO_SMTP_HOST",
+        "COLECTO_SMTP_PORT",
+        "COLECTO_MAIL_USERNAME",
+        "COLECTO_MAIL_PASSWORD",
+        "COLECTO_MAIL_ADDRESS",
+    ];
+    if keys.iter().any(|key| env::var_os(key).is_some()) {
+        let required = |key: &str| env::var(key).map_err(|_| format!("Missing {key}"));
+        store.connect_account(MailAccount {
+            imap_host: required("COLECTO_IMAP_HOST")?,
+            imap_port: env::var("COLECTO_IMAP_PORT")
+                .unwrap_or_else(|_| "993".into())
+                .parse()?,
+            smtp_host: required("COLECTO_SMTP_HOST")?,
+            smtp_port: env::var("COLECTO_SMTP_PORT")
+                .unwrap_or_else(|_| "587".into())
+                .parse()?,
+            username: required("COLECTO_MAIL_USERNAME")?,
+            password: required("COLECTO_MAIL_PASSWORD")?,
+            address: required("COLECTO_MAIL_ADDRESS")?,
+        })?;
+    }
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     let authority = listener.local_addr()?.to_string();
     println!("Colecto local demo: http://{authority}");

@@ -12,3 +12,7 @@ colecto-extension-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+imap.workspace = true
+native-tls.workspace = true
+lettre.workspace = true
+mailparse.workspace = true

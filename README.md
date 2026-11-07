@@ -7,7 +7,8 @@ create, save, reopen, and edit drafts. Drafts survive restarting the Host.
 ## Run the local demo
 
 Install stable Rust (1.89 or newer) with `rustfmt` and `clippy`, `just`, and
-Node.js 22.12 or newer with npm. From the repository root:
+Bun 1.4.4 or newer. Linux also needs OpenSSL development libraries and pkg-config
+(for example, `libssl-dev` and `pkg-config` on Debian/Ubuntu). From the repository root:
 
 ```sh
 just setup-ui
@@ -20,8 +21,8 @@ serves the built UI and API from the same origin.
 
 Use **Compose** to write a note, then **Save draft**. Open **Drafts** to resume it.
 Leaving an edited draft asks before discarding unsaved changes. Saving failures
-keep the editor text, and never report success. There is no send button: no mail
-leaves your computer.
+keep the editor text, and never report success. Without account configuration, sending is disabled. With an account configured,
+**Send** submits plain-text mail through SMTP.
 
 The Host saves drafts to `.colecto-demo/drafts.json`, using format version 1.
 This directory is ignored by git. Drafts are plain text on disk and are not
@@ -57,7 +58,8 @@ Run `just` for all recipes. After editing UI source, `just demo` rebuilds it.
 ## Prototype boundaries
 
 - `colecto-extension-api`: version 1 wire types for the operations used today.
-- `colecto-core`: sample messages, draft validation, IDs, and atomic JSON storage.
+- `colecto-core`: TLS IMAP/SMTP, MIME plain-text decoding, sample messages, draft
+  validation, IDs, and atomic JSON storage.
 - `colecto-host`: loopback HTTP/static adapter; validates Host/origin and built-in
   module grants scoped to the demo account. API bodies are bounded to 128000 bytes.
 - `ui/src/extensions`: replaceable bundled mailbox, reader, and composer views.
@@ -65,14 +67,67 @@ Run `just` for all recipes. After editing UI source, `just demo` rebuilds it.
 
 Built-in module identities are not an authentication or sandbox mechanism.
 Third-party code is never loaded. There is no extension discovery/lifecycle
-runtime, native Tauri host, real account connection, receiving/sending, attachment
-support, sync, or tested mobile platform build yet. Tauri v2 remains the intended
+runtime, native Tauri host, attachment support, sync, or tested mobile platform
+build yet. Tauri v2 remains the intended
 native host; this slice chooses a local Rust HTTP backend for the browser.
 
 The frontend build currently inherits a low-severity `deepmerge` advisory from
-`@sveltejs/vite-plugin-svelte`, with no npm-provided fix. The merge runs on trusted
+`@sveltejs/vite-plugin-svelte`, with no upstream fix. The merge runs on trusted
 build configuration, not email or API input; track upstream before adding
 untrusted build configuration.
 
 See [project direction and architecture](docs/README.md), the
 [approved prototype design](docs/prototype-design.md), and [agent instructions](AGENTS.md).
+
+## Connect a mail account
+
+IMAP receives mail; SMTP sends mail. **POP3 will not be supported.**
+One account is supported per Host process. Configure these environment variables
+before `just demo` (set secrets in your local environment, never in source control):
+
+| Variable | Meaning |
+| --- | --- |
+| `COLECTO_IMAP_HOST` | IMAP server hostname |
+| `COLECTO_IMAP_PORT` | Implicit TLS port, default `993` |
+| `COLECTO_SMTP_HOST` | SMTP server hostname |
+| `COLECTO_SMTP_PORT` | `587` (required STARTTLS, default) or `465` (implicit TLS) |
+| `COLECTO_MAIL_USERNAME` | Login for both servers |
+| `COLECTO_MAIL_PASSWORD` | Password or provider app password for both servers |
+| `COLECTO_MAIL_ADDRESS` | Sender email address |
+
+Any mail variable enables account mode; missing or invalid settings stop startup.
+Certificates and hostnames are verified; plaintext authentication is unavailable.
+Credentials remain in process memory and are never returned through the API or
+saved in the draft store. OAuth-only providers are not supported yet.
+
+Opening Inbox fetches the latest 100 messages, read-only, without marking them
+seen. Reopen Inbox to refresh. Messages larger than 2000000 bytes are skipped;
+HTML-only messages show a placeholder. The inbox cache is in memory, so mail is
+fetched again after restart. Drafts remain local. Use a separate `COLECTO_DATA_DIR`
+for each account: local drafts are not account-scoped or encrypted.
+
+Send success means SMTP acceptance, not final delivery. A failed or interrupted
+send can have an uncertain outcome: check the provider's Sent folder before
+retrying. No automatic retry, SMTP Sent-folder append, or saved-draft deletion is
+performed. The editor preserves text on failure and disables sending again after
+success. Server/network operations run outside the async executor, but serialize
+with other mail operations and have 30-second socket timeouts.
+
+Transport libraries follow the [imap client documentation](https://docs.rs/imap/2.4.1/imap/)
+and [lettre SMTP documentation](https://docs.rs/lettre/0.11.23/lettre/transport/smtp/).
+
+## Bun troubleshooting
+
+Run repository tasks with `just`, or run UI scripts from `ui/`, for example
+`cd ui && bun run --bun build`. There is no root `package.json`; `bun run build`
+from the repository root fails with `Script not found "build"`.
+
+`bun run` is not a test runner: executing the restart test that way fails with
+`Cannot use test outside of the test runner`. `just ui-test` runs that test with
+`bun test`, then runs Playwright separately. Playwright matches only `*.spec.ts`
+to avoid collecting Bun tests. `bun run --bun test` explicitly runs the Playwright
+package script; bare `bun test` invokes Bun's own runner instead.
+
+The project uses `ui/bun.lock` and frozen installs. No npm installation is needed.
+These failures were reproduced locally; without your original error output,
+they do not establish which failure occurred on your machine.
