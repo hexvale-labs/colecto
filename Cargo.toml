@@ -1,0 +1,15 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+colecto-core = { path = "crates/colecto-core" }
+colecto-extension-api = { path = "crates/colecto-extension-api" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
