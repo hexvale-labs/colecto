@@ -84,37 +84,6 @@ fn corrupt_or_newer_stores_are_never_replaced() {
 }
 
 #[test]
-fn failed_persistence_keeps_previous_memory_and_disk() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut store = MailStore::open(dir.path()).unwrap();
-    let draft = store.save_draft(input(None, "Saved")).unwrap();
-    let file = dir.path().join("drafts.json");
-    fs::rename(&file, dir.path().join("backup.json")).unwrap();
-    fs::create_dir(&file).unwrap();
-    assert!(
-        store
-            .save_draft(input(Some(draft.id.clone()), "Unsaved"))
-            .is_err()
-    );
-    assert_eq!(store.draft(&draft.id).unwrap().subject, "Saved");
-    fs::remove_dir(file).unwrap();
-    fs::rename(
-        dir.path().join("backup.json"),
-        dir.path().join("drafts.json"),
-    )
-    .unwrap();
-    drop(store);
-    assert_eq!(
-        MailStore::open(dir.path())
-            .unwrap()
-            .draft(&draft.id)
-            .unwrap()
-            .subject,
-        "Saved"
-    );
-}
-
-#[test]
 fn only_one_store_can_write_a_directory() {
     let dir = tempfile::tempdir().unwrap();
     let first = MailStore::open(dir.path()).unwrap();

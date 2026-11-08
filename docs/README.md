@@ -138,16 +138,32 @@ Remote access uses an explicit HTTPS public origin and an owner bearer token,
 with TLS termination at a trusted reverse proxy. Local Unix HTTP sockets use
 private directories and ownership-safe cleanup. See [deployment](daemon.md).
 
-Inbox and Sent snapshots persist in an account-local embedded Turso database,
+Core accounts, the encrypted credential vault, drafts, local labels, and Inbox/Sent
+snapshots persist in one owner-local embedded Turso database, `colecto.db`.
+Account identifiers namespace records and snapshots inside that file; child mail
+stores share its connection handle. Host policy/settings consolidation follows this
+Core storage migration. The OS keyring, password-derived keys and process locks
+retain their roles outside Turso. Credential AAD and cleanup journals are preserved.
+
+Snapshots are
 bounded together to 100 messages and 12 MB serialized content per account.
 Provider identities remain isolated; a successful new-provider refresh evicts the
 previous provider snapshot in the same transaction. Both folders remain cached
 while within that budget; refreshing a folder evicts the
-other folder only when needed to meet the aggregate bound. Valid legacy
-`mail-cache.json` files import once transactionally and remain available for rollback.
+other folder only when needed to meet the aggregate bound. Valid legacy `accounts.json`, `drafts.json`, `labels.json`, account-local
+`mail-cache.db` and `mail-cache.json` sources import once after validation.
+Record initialization and migration markers commit transactionally; original files
+remain as rollback evidence and are never updated. Canonical database state wins
+over stale sources. Missing initialized credential records, unsupported versions
+and corrupt vaults fail closed. Database rows and retained initialization markers
+prevent stale imports from restoring removed state. A rollback to an older binary
+requires a deliberate export/restore: preserved sources do not contain later edits.
+See [storage](storage.md) for the API and migration boundary.
 Cached lists and retained message reads use independent snapshots during network
 refresh. Provider searches remain online and do not replace full-folder snapshots. They are not encrypted. Provider-backed Inbox/Sent search and a bounded
-reader cache preserve open-message access when changing views. This is polling
+reader cache preserve open-message access when changing views. A successful IMAP
+UIDVALIDITY change invalidates the affected mailbox snapshot and retained reader
+data, including empty/search responses; failed provider queries preserve data. This is polling
 and caching, not a complete incremental sync engine. Provider flags, labels,
 full-history pagination, and offline mutations still need explicit contracts.
 

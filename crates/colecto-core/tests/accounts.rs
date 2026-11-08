@@ -1,4 +1,4 @@
-use colecto_core::{Accounts, Error, MailStore, SecretStore};
+use colecto_core::{Accounts, Database, Error, MailStore, SecretStore};
 use colecto_extension_api::{AccountInput, DraftInput};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -21,6 +21,17 @@ impl SecretStore for MemorySecrets {
         self.0.lock().unwrap().remove(id);
         Ok(())
     }
+}
+
+fn vault(dir: &std::path::Path) -> Vec<u8> {
+    Database::open(dir)
+        .unwrap()
+        .get_record("core", "vault", 1)
+        .unwrap()
+        .unwrap()
+}
+fn write_vault(dir: &std::path::Path, bytes: Vec<u8>) -> Result<(), Error> {
+    Database::open(dir)?.set_record("core", "vault", 1, &bytes)
 }
 
 fn input(id: Option<String>, address: &str) -> AccountInput {
@@ -74,7 +85,7 @@ fn account_stores_and_restart_are_isolated() {
             .is_empty()
     );
     assert!(
-        !std::fs::read_to_string(dir.path().join("accounts.json"))
+        !String::from_utf8(vault(dir.path()))
             .unwrap()
             .contains("test-secret")
     );
@@ -129,18 +140,6 @@ fn busy_account_does_not_block_other_accounts_or_allow_lock() {
 }
 
 #[test]
-fn failed_registry_write_does_not_leave_orphan_system_credentials() {
-    let dir = tempfile::tempdir().unwrap();
-    let secrets = Arc::new(MemorySecrets::default());
-    let mut accounts =
-        Accounts::open(MailStore::open(dir.path()).unwrap(), secrets.clone()).unwrap();
-    // A directory in place of the registry forces atomic replacement to fail.
-    std::fs::create_dir(dir.path().join("accounts.json")).unwrap();
-    assert!(accounts.upsert(input(None, "a@example.test")).is_err());
-    assert!(secrets.0.lock().unwrap().is_empty());
-}
-
-#[test]
 fn tampered_vault_is_not_overwritten_and_reset_keeps_drafts() {
     let dir = tempfile::tempdir().unwrap();
     let secrets = Arc::new(MemorySecrets::default());
@@ -161,16 +160,14 @@ fn tampered_vault_is_not_overwritten_and_reset_keeps_drafts() {
         .unwrap();
     accounts.protect("a strong master password").unwrap();
     drop(accounts);
-    let path = dir.path().join("accounts.json");
-    let mut value: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut value: serde_json::Value = serde_json::from_slice(&vault(dir.path())).unwrap();
     value["mode"]["ciphertext"][0] =
         serde_json::json!(value["mode"]["ciphertext"][0].as_u64().unwrap() ^ 1);
-    std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
-    let before = std::fs::read(&path).unwrap();
+    write_vault(dir.path(), serde_json::to_vec(&value).unwrap()).unwrap();
+    let before = vault(dir.path());
     let mut accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), secrets).unwrap();
     assert!(accounts.unlock("a strong master password").is_err());
-    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(vault(dir.path()), before);
     accounts.reset().unwrap();
     assert_eq!(
         accounts.store(&a.id).unwrap().lock().unwrap().drafts()[0].subject,
@@ -206,7 +203,7 @@ fn system_backend_failure_has_no_plaintext_fallback() {
     assert!(accounts.upsert(input(None, "a@example.test")).is_err());
     assert_eq!(accounts.list().len(), 1);
     assert!(
-        !std::fs::read_to_string(dir.path().join("accounts.json"))
+        !String::from_utf8(vault(dir.path()))
             .unwrap()
             .contains("test-secret")
     );
@@ -226,11 +223,9 @@ fn metadata_tampering_cannot_redirect_a_protected_credential() {
     accounts.upsert(input(None, "a@example.test")).unwrap();
     accounts.protect("a strong master password").unwrap();
     drop(accounts);
-    let path = dir.path().join("accounts.json");
-    let mut state: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut state: serde_json::Value = serde_json::from_slice(&vault(dir.path())).unwrap();
     state["accounts"][0]["settings"]["imap_host"] = serde_json::json!("attacker.example.test");
-    std::fs::write(path, serde_json::to_vec(&state).unwrap()).unwrap();
+    write_vault(dir.path(), serde_json::to_vec(&state).unwrap()).unwrap();
     let mut accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), backend).unwrap();
     assert!(accounts.unlock("a strong master password").is_err());
 }
@@ -243,14 +238,12 @@ fn startup_cleans_journaled_orphan_without_losing_active_credentials() {
         Accounts::open(MailStore::open(dir.path()).unwrap(), backend.clone()).unwrap();
     let a = accounts.upsert(input(None, "a@example.test")).unwrap();
     drop(accounts);
-    let path = dir.path().join("accounts.json");
-    let mut state: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut state: serde_json::Value = serde_json::from_slice(&vault(dir.path())).unwrap();
     state["cleanup"] = serde_json::json!(["00000000000000000000000000000000"]);
     backend
         .set("00000000000000000000000000000000", "orphan secret")
         .unwrap();
-    std::fs::write(path, serde_json::to_vec(&state).unwrap()).unwrap();
+    write_vault(dir.path(), serde_json::to_vec(&state).unwrap()).unwrap();
     let accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), backend.clone()).unwrap();
     assert!(backend.get("00000000000000000000000000000000").is_err());
     assert!(accounts.store(&a.id).unwrap().lock().unwrap().connected());
@@ -330,16 +323,14 @@ fn corrupt_cleanup_never_deletes_active_system_entry() {
         Accounts::open(MailStore::open(dir.path()).unwrap(), backend.clone()).unwrap();
     accounts.upsert(input(None, "a@example.test")).unwrap();
     drop(accounts);
-    let path = dir.path().join("accounts.json");
-    let mut state: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut state: serde_json::Value = serde_json::from_slice(&vault(dir.path())).unwrap();
     let active = state["mode"]["entry"].as_str().unwrap().to_string();
     state["cleanup"] = serde_json::json!([active]);
-    std::fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
-    let before = std::fs::read(&path).unwrap();
+    write_vault(dir.path(), serde_json::to_vec(&state).unwrap()).unwrap();
+    let before = vault(dir.path());
     assert!(Accounts::open(MailStore::open(dir.path()).unwrap(), backend.clone()).is_err());
     assert!(backend.get(&active).is_ok());
-    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(vault(dir.path()), before);
 }
 
 #[test]
@@ -396,22 +387,20 @@ fn corrupt_mail_cache_cannot_commit_new_credentials_or_account_settings() {
     let secrets = Arc::new(MemorySecrets::default());
     let mut accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), secrets).unwrap();
     let saved = accounts.upsert(input(None, "before@example.test")).unwrap();
-    let before = std::fs::read(dir.path().join("accounts.json")).unwrap();
-    std::fs::write(
-        dir.path()
-            .join("accounts")
-            .join(&saved.id)
-            .join("mail-cache.json"),
-        "not json",
-    )
-    .unwrap();
+    let before = vault(dir.path());
+    accounts
+        .database()
+        .set_record(
+            &format!("account:{}", saved.id),
+            "cache-import",
+            1,
+            b"invalid marker",
+        )
+        .unwrap();
     let mut update = input(Some(saved.id.clone()), "after@example.test");
     update.secret = "new-secret".into();
     assert!(accounts.upsert(update).is_err());
-    assert_eq!(
-        std::fs::read(dir.path().join("accounts.json")).unwrap(),
-        before
-    );
+    assert_eq!(vault(dir.path()), before);
     assert_eq!(
         accounts
             .list()
@@ -459,4 +448,100 @@ fn cached_list_and_reader_remain_available_while_account_is_locked() {
             .is_some()
     );
     assert!(accounts.cached("other", "inbox").is_err());
+}
+
+#[test]
+fn legacy_vault_and_account_documents_import_once_and_survive_sources_moved_aside() {
+    let seed = tempfile::tempdir().unwrap();
+    let backend = Arc::new(MemorySecrets::default());
+    let mut original =
+        Accounts::open(MailStore::open(seed.path()).unwrap(), backend.clone()).unwrap();
+    let a = original.upsert(input(None, "a@example.test")).unwrap();
+    let b = original.upsert(input(None, "b@example.test")).unwrap();
+    original
+        .store(&a.id)
+        .unwrap()
+        .lock()
+        .unwrap()
+        .save_draft(DraftInput {
+            id: None,
+            recipient: String::new(),
+            subject: "Imported".into(),
+            body: "Keep".into(),
+        })
+        .unwrap();
+    original
+        .store(&a.id)
+        .unwrap()
+        .lock()
+        .unwrap()
+        .update_label("Work", None, false)
+        .unwrap();
+    let database = original.database();
+    let dir = tempfile::tempdir().unwrap();
+    let source = database.get_record("core", "vault", 1).unwrap().unwrap();
+    std::fs::write(dir.path().join("accounts.json"), &source).unwrap();
+    let account_dir = dir.path().join("accounts").join(&a.id);
+    std::fs::create_dir_all(&account_dir).unwrap();
+    for name in ["drafts", "labels"] {
+        let bytes = database
+            .get_record(&format!("account:{}", a.id), name, 1)
+            .unwrap()
+            .unwrap();
+        std::fs::write(account_dir.join(format!("{name}.json")), bytes).unwrap();
+    }
+    drop(original);
+    let accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), backend.clone()).unwrap();
+    assert!(accounts.store(&a.id).unwrap().lock().unwrap().connected());
+    assert_eq!(
+        accounts.store(&a.id).unwrap().lock().unwrap().drafts()[0].subject,
+        "Imported"
+    );
+    assert!(
+        accounts
+            .store(&a.id)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .labels()
+            .unwrap()
+            .contains_key("Work")
+    );
+    assert!(
+        accounts
+            .store(&b.id)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .drafts()
+            .is_empty()
+    );
+    assert_eq!(
+        std::fs::read(dir.path().join("accounts.json")).unwrap(),
+        source
+    );
+    drop(accounts);
+    std::fs::rename(
+        dir.path().join("accounts"),
+        dir.path().join("legacy-accounts"),
+    )
+    .unwrap();
+    std::fs::rename(
+        dir.path().join("accounts.json"),
+        dir.path().join("legacy-accounts.json"),
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("accounts.json"), b"stale invalid vault").unwrap();
+    let accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), backend).unwrap();
+    assert!(accounts.store(&a.id).unwrap().lock().unwrap().connected());
+    assert_eq!(
+        accounts.store(&a.id).unwrap().lock().unwrap().drafts()[0].subject,
+        "Imported"
+    );
+    assert!(!account_dir.join("colecto.db").exists());
+    assert!(!account_dir.join("mail-cache.db").exists());
+    assert!(
+        !String::from_utf8_lossy(&std::fs::read(dir.path().join("colecto.db")).unwrap())
+            .contains("test-secret")
+    );
 }

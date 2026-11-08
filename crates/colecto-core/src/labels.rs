@@ -12,17 +12,32 @@ mod tests {
                 .update_label(&format!("Label {index}"), None, false)
                 .unwrap();
         }
-        let before = fs::read(directory.path().join("labels.json")).unwrap();
+        let before = store
+            .database
+            .get_record(&store.namespace, "labels", 1)
+            .unwrap()
+            .unwrap();
         assert!(store.update_label("Extra", None, false).is_err());
         assert!(store.update_label(&"界".repeat(27), None, false).is_err());
         assert_eq!(
-            fs::read(directory.path().join("labels.json")).unwrap(),
+            store
+                .database
+                .get_record(&store.namespace, "labels", 1)
+                .unwrap()
+                .unwrap(),
             before
         );
-        fs::write(directory.path().join("labels.json"), b"invalid metadata").unwrap();
+        store
+            .database
+            .set_record(&store.namespace, "labels", 1, b"invalid metadata")
+            .unwrap();
         assert!(store.update_label("Work", None, false).is_err());
         assert_eq!(
-            fs::read(directory.path().join("labels.json")).unwrap(),
+            store
+                .database
+                .get_record(&store.namespace, "labels", 1)
+                .unwrap()
+                .unwrap(),
             b"invalid metadata"
         );
     }
@@ -69,30 +84,33 @@ fn valid_name(name: &str) -> bool {
 }
 impl MailStore {
     pub fn labels(&self) -> Result<Labels, Error> {
-        let path = self.directory.join("labels.json");
-        let file = match File::open(path) {
-            Ok(file) => file,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Labels::new()),
-            Err(e) => return Err(storage(e)),
-        };
-        if file.metadata().map_err(storage)?.len() > 2_000_000 {
-            return Err(Error::Storage("Label store exceeds its size limit".into()));
-        }
-        let saved: SavedLabels = serde_json::from_reader(file).map_err(storage)?;
-        if saved.version != 1
-            || saved.labels.len() > 50
-            || saved.labels.iter().any(|(name, ids)| {
-                !valid_name(name)
-                    || ids.len() > 1000
-                    || ids.iter().any(|id| {
-                        id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control)
+        let bytes = if self.database.contains_record(&self.namespace, "labels")? {
+            self.database
+                .get_record(&self.namespace, "labels", 1)?
+                .ok_or_else(|| storage("Authoritative labels were removed"))?
+        } else {
+            let path = self.directory.join("labels.json");
+            let bytes = match fs::metadata(&path) {
+                Ok(meta) => {
+                    if meta.len() > 2_000_000 {
+                        return Err(storage("Label store exceeds its size limit"));
+                    }
+                    fs::read(path).map_err(storage)?
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    serde_json::to_vec(&SavedLabels {
+                        version: 1,
+                        labels: Labels::new(),
                     })
-                    || ids.iter().collect::<HashSet<_>>().len() != ids.len()
-            })
-        {
-            return Err(Error::Storage("Invalid label store".into()));
-        }
-        Ok(saved.labels)
+                    .map_err(storage)?
+                }
+                Err(error) => return Err(storage(error)),
+            };
+            validate_labels(&bytes)?;
+            self.database
+                .initialize_record(&self.namespace, "labels", 1, &bytes)?
+        };
+        validate_labels(&bytes)
     }
     pub fn update_label(
         &mut self,
@@ -137,12 +155,29 @@ impl MailStore {
         if bytes.len() > 2_000_000 {
             return Err(Error::Invalid("Label store exceeds its size limit".into()));
         }
-        let mut temporary = tempfile::NamedTempFile::new_in(&self.directory).map_err(storage)?;
-        temporary.write_all(&bytes).map_err(storage)?;
-        temporary.as_file().sync_all().map_err(storage)?;
-        temporary
-            .persist(self.directory.join("labels.json"))
-            .map_err(storage)?;
+        self.database
+            .set_record(&self.namespace, "labels", 1, &bytes)?;
         Ok(saved.labels)
     }
+}
+
+fn validate_labels(bytes: &[u8]) -> Result<Labels, Error> {
+    if bytes.len() > 2_000_000 {
+        return Err(storage("Label store exceeds its size limit"));
+    }
+    let saved: SavedLabels = serde_json::from_slice(bytes).map_err(storage)?;
+    if saved.version != 1
+        || saved.labels.len() > 50
+        || saved.labels.iter().any(|(name, ids)| {
+            !valid_name(name)
+                || ids.len() > 1000
+                || ids
+                    .iter()
+                    .any(|id| id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control))
+                || ids.iter().collect::<HashSet<_>>().len() != ids.len()
+        })
+    {
+        return Err(Error::Storage("Invalid label store".into()));
+    }
+    Ok(saved.labels)
 }

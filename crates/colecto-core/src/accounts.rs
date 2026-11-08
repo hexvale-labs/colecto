@@ -13,6 +13,7 @@ use std::{
 
 pub struct Accounts {
     vault: Vault,
+    database: crate::Database,
     directory: std::path::PathBuf,
     stores: BTreeMap<String, Arc<Mutex<MailStore>>>,
     snapshots: BTreeMap<String, crate::SnapshotHandle>,
@@ -54,13 +55,18 @@ fn connect(store: &mut MailStore, settings: &AccountSettings, secret: &str) -> R
 
 impl Accounts {
     /// Host-owned data, including extension policy, lives beside account stores.
+    pub fn database(&self) -> crate::Database {
+        self.database.clone()
+    }
+
     pub fn data_directory(&self) -> &std::path::Path {
         &self.directory
     }
 
     pub fn open(mut legacy: MailStore, backend: Arc<dyn SecretStore>) -> Result<Self, Error> {
         let directory = legacy.directory.clone();
-        let mut vault = Vault::open(directory.clone(), backend)?;
+        let database = legacy.database.clone();
+        let mut vault = Vault::open(directory.clone(), database.clone(), backend)?;
         let mut ids = HashSet::new();
         for account in vault.accounts() {
             if (account.id != DEMO_ACCOUNT
@@ -130,8 +136,10 @@ impl Accounts {
             if account.id != DEMO_ACCOUNT {
                 stores.insert(
                     account.id.clone(),
-                    Arc::new(Mutex::new(MailStore::open(
+                    Arc::new(Mutex::new(MailStore::open_with_database(
                         directory.join("accounts").join(&account.id),
+                        database.clone(),
+                        &account.id,
                     )?)),
                 );
             }
@@ -142,6 +150,7 @@ impl Accounts {
             .collect();
         let mut accounts = Self {
             snapshots,
+            database,
             vault,
             stores,
             directory,
@@ -271,8 +280,10 @@ impl Accounts {
         }
         let handle = match self.stores.get(&id) {
             Some(store) => store.clone(),
-            None => Arc::new(Mutex::new(MailStore::open(
+            None => Arc::new(Mutex::new(MailStore::open_with_database(
                 self.directory.clone().join("accounts").join(&id),
+                self.database.clone(),
+                &id,
             )?)),
         };
         let mut store = handle.try_lock().map_err(|_| busy())?;
@@ -422,5 +433,43 @@ impl Accounts {
             }
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+    #[test]
+    fn failed_registry_transaction_never_stages_a_system_key() {
+        struct NoKeys;
+        impl SecretStore for NoKeys {
+            fn get(&self, _: &str) -> Result<String, Error> {
+                panic!("No key should exist")
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), Error> {
+                panic!("Failed database write must precede keyring writes")
+            }
+            fn delete(&self, _: &str) -> Result<(), Error> {
+                panic!("No key should exist")
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut accounts =
+            Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(NoKeys)).unwrap();
+        let before = accounts.database.get_record("core", "vault", 1).unwrap();
+        futures_executor::block_on(
+            accounts
+                .database
+                .connection()
+                .unwrap()
+                .execute("PRAGMA query_only=1", ()),
+        )
+        .unwrap();
+        let input = serde_json::from_value(serde_json::json!({"id":null,"name":"A","address":"a@example.test","protocol":"imap","imap_host":"imap.example.test","imap_port":993,"smtp_host":"smtp.example.test","smtp_port":587,"username":"a","secret":"secret"})).unwrap();
+        assert!(accounts.upsert(input).is_err());
+        assert_eq!(
+            accounts.database.get_record("core", "vault", 1).unwrap(),
+            before
+        );
     }
 }

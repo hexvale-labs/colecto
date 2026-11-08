@@ -82,6 +82,14 @@ impl MailAccount {
     }
 
     pub fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
+        self.query_with_identity(folder, search)
+            .map(|(messages, _)| messages)
+    }
+    pub(crate) fn query_with_identity(
+        &self,
+        folder: &str,
+        search: &str,
+    ) -> Result<(Vec<Message>, String), Error> {
         self.validate()?;
         crate::validate_query(folder, search)?;
         let timeout = Duration::from_secs(30);
@@ -114,7 +122,7 @@ impl MailAccount {
                 ),
                 error => imap_error(error),
             })?;
-        let result = query_session(&mut session, folder, search);
+        let result = query_session_with_identity(&mut session, folder, search);
         let _ = session.logout();
         result
     }
@@ -156,11 +164,19 @@ impl MailAccount {
     }
 }
 
+#[cfg(test)]
 fn query_session<T: std::io::Read + std::io::Write>(
     session: &mut imap::Session<T>,
     folder: &str,
     search: &str,
 ) -> Result<Vec<Message>, Error> {
+    query_session_with_identity(session, folder, search).map(|(messages, _)| messages)
+}
+fn query_session_with_identity<T: std::io::Read + std::io::Write>(
+    session: &mut imap::Session<T>,
+    folder: &str,
+    search: &str,
+) -> Result<(Vec<Message>, String), Error> {
     let name = if folder == "inbox" {
         "INBOX".to_owned()
     } else {
@@ -171,8 +187,14 @@ fn query_session<T: std::io::Read + std::io::Write>(
     let validity = mailbox
         .uid_validity
         .ok_or_else(|| remote("Missing UIDVALIDITY"))?;
+    let identity = if folder == "inbox" {
+        format!("imap-{validity}-")
+    } else {
+        let namespace: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
+        format!("imap-{namespace}-{validity}-")
+    };
     if mailbox.exists == 0 {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), identity));
     }
     let headers = if search.is_empty() {
         let range = format!("{}:*", mailbox.exists.saturating_sub(99).max(1));
@@ -193,7 +215,7 @@ fn query_session<T: std::io::Read + std::io::Write>(
             .map(|id| id.to_string())
             .collect();
         if selected.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), identity));
         }
         session
             .uid_fetch(selected.join(","), "(UID RFC822.SIZE)")
@@ -218,7 +240,7 @@ fn query_session<T: std::io::Read + std::io::Write>(
             messages.push(message);
         }
     }
-    Ok(messages)
+    Ok((messages, identity))
 }
 
 fn search_expression(search: &str) -> String {
@@ -288,6 +310,46 @@ impl Drop for MailAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn empty_mailbox_reports_successful_uidvalidity_changes() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = BufReader::new(socket.try_clone().unwrap());
+            write!(socket, "* OK ready\r\n").unwrap();
+            for (expected, response) in [
+                ("LOGIN", String::new()),
+                (
+                    "EXAMINE",
+                    "* 0 EXISTS\r\n* OK [UIDVALIDITY 7] stable\r\n".into(),
+                ),
+                (
+                    "EXAMINE",
+                    "* 0 EXISTS\r\n* OK [UIDVALIDITY 8] changed\r\n".into(),
+                ),
+            ] {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let (tag, command) = line.split_once(' ').unwrap();
+                assert!(command.starts_with(expected));
+                write!(socket, "{response}{tag} OK complete\r\n").unwrap();
+            }
+        });
+        let mut client = imap::Client::new(TcpStream::connect(address).unwrap());
+        client.read_greeting().unwrap();
+        let mut session = client.login("me", "secret").unwrap();
+        for (search, identity) in [("", "imap-7-"), ("needle", "imap-8-")] {
+            let result = query_session_with_identity(&mut session, "inbox", search).unwrap();
+            assert!(result.0.is_empty());
+            assert_eq!(result.1, identity);
+        }
+        server.join().unwrap();
+    }
     #[test]
     fn server_status_errors_never_include_protocol_text() {
         for (error, expected) in [
