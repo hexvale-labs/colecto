@@ -64,12 +64,12 @@ Tasks execute sequentially because they share contracts and service wiring. Task
 
 **Interfaces:** `MailCacheStore` provides account/provider-bound snapshot load/store with folder and fetched-time metadata. Preserve existing core synchronous consumers with a narrow owned adapter if the embedded API is async; do not introduce nested-runtime panics or unbounded workers. Add cached listing separately from explicit provider refresh while retaining compatible existing message-list responses. Add fetch state and stable safe error categories.
 
-- [ ] Write failing tests for one-time JSON import, provider identity mismatch, rollback source preservation, future schema rejection, transactional failed writes, bounds, and failed refresh preserving latest snapshot. Add non-JSON proxy and typed-safe error UI/HTTP tests.
-- [ ] Run focused tests for RED.
-- [ ] Embed the current official Rust Turso engine locally; no `rusqlite` substitution or cloud credentials. Migrate valid legacy cache once transactionally and preserve source. Keep account stores and secrets isolated; store only original encrypted content, never decrypted results.
-- [ ] Expose cached mail promptly and explicit refreshing/last-fetched/stale state; preserve cached results on fetch errors and allow retry without losing current reader/draft state. Keep list/search/folder semantics explicit.
-- [ ] Map known provider failures to readable categories and safe bounded details; do not expose raw protocol bodies/secrets or uncertain sends as safe-to-retry failures.
-- [ ] Run focused cache/HTTP/UI tests and `just verify`, update documentation and commit.
+- [x] Write failing tests for one-time JSON import, provider identity mismatch, rollback source preservation, future schema rejection, transactional failed writes, bounds, and failed refresh preserving latest snapshot. Add non-JSON proxy and typed-safe error UI/HTTP tests.
+- [x] Run focused tests for RED.
+- [x] Embed the current official Rust Turso engine locally; no `rusqlite` substitution or cloud credentials. Migrate valid legacy cache once transactionally and preserve source. Keep account stores and secrets isolated; store only original encrypted content, never decrypted results.
+- [x] Expose cached mail promptly and explicit refreshing/last-fetched/stale state; preserve cached results on fetch errors and allow retry without losing current reader/draft state. Keep list/search/folder semantics explicit.
+- [x] Map known provider failures to readable categories and safe bounded details; do not expose raw protocol bodies/secrets or uncertain sends as safe-to-retry failures.
+- [x] Run focused cache/HTTP/UI tests and `just verify`, update documentation and commit.
 
 ### Task 4: Safe HTML reading and complete composer MIME fields
 
