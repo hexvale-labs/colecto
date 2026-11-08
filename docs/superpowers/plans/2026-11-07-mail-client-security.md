@@ -31,7 +31,7 @@
 
 ## File ownership and order
 
-Tasks execute sequentially because they share contracts and service wiring. Task 1 owns scoped principals and key controls; Task 2 owns pending sends and MCP. Task 3 owns cache and refresh/error contracts. Task 4 extends message/draft MIME contracts and composer. Task 5 adds crypto and sender verification on those contracts. Task 6 measures integrated native/resource behavior. All tasks may update their focused tests and documentation; no whole-repo cleanup.
+Tasks execute sequentially because they share contracts and service wiring. Task 1 owns scoped principals and key controls; Task 2 owns pending sends and MCP. Task 3 owns cache and refresh/error contracts. Task 4 extends message/draft MIME contracts and composer. Task 5 adds crypto on those contracts. Task 6 validates company sender evidence. Task 7 measures integrated native/resource behavior. All tasks may update their focused tests and documentation; no whole-repo cleanup.
 
 ### Task 1: Scoped API keys and owner controls
 
@@ -39,11 +39,11 @@ Tasks execute sequentially because they share contracts and service wiring. Task
 
 **Interfaces:** Produce authenticated `Principal` (owner or API key), `ApiKeys` persistent policy, and key lookup/authorization methods that take current time, account, and existing `Capability`. UI controls use `/api/v1/api-keys` (GET/POST) and `/api/v1/api-keys/{id}` (DELETE). Scoped HTTP authorization is determined from the principal, never supplied extension headers. Reserve scoped `messages.send` for Task 2 approval requests: deny direct delivery until integrated.
 
-- [ ] Write failing tests named for key secret nonpersistence, expiry/revocation, explicit account grants, forged Host headers, missing/invalid authentication, and restart persistence. Assert metadata never includes verifier/secret.
-- [ ] Run focused Host tests and retain expected RED evidence.
-- [ ] Implement random secret generation, constant-time verifier checks, atomic private policy storage with schema validation, expiry/last-used metadata and bounded names/counts. Owner controls mint keys; keys cannot manage policy or create owner sessions. Preserve remote owner bootstrap, protect local owner controls using a Host-owned session plus Origin/Host checks; no key can downgrade into anonymous loopback privileges.
-- [ ] Add usable Settings UI with selected accounts/capabilities, optional expiry, copy-once secret and revoke actions. Follow Emil design skill, accessible errors, existing appearance/mobile patterns.
-- [ ] Run focused tests, `just verify`, and relevant existing UI tests. Update daemon/extension documentation; commit the complete slice.
+- [x] Write failing tests named for key secret nonpersistence, expiry/revocation, explicit account grants, forged Host headers, missing/invalid authentication, and restart persistence. Assert metadata never includes verifier/secret.
+- [x] Run focused Host tests and retain expected RED evidence.
+- [x] Implement random secret generation, constant-time verifier checks, atomic private policy storage with schema validation, expiry/last-used metadata and bounded names/counts. Owner controls mint keys; keys cannot manage policy or create owner sessions. Preserve remote owner bootstrap, protect local owner controls using a Host-owned session plus Origin/Host checks; no key can downgrade into anonymous loopback privileges.
+- [x] Add usable Settings UI with selected accounts/capabilities, optional expiry, copy-once secret and revoke actions. Follow Emil design skill, accessible errors, existing appearance/mobile patterns.
+- [x] Run focused tests, `just verify`, and relevant existing UI tests. Update daemon/extension documentation; commit the complete slice.
 
 ### Task 2: Pending delivery approval and MCP
 
@@ -51,12 +51,12 @@ Tasks execute sequentially because they share contracts and service wiring. Task
 
 **Interfaces:** Consume Task 1 principals and account/capability checks. Produce durable `PendingSend` snapshots and request/status/owner approve/reject service operations, with `pending`, `rejected`, `expired`, `submitting`, `sent`, `uncertain` states. Owner approval performs one submission; scoped `/send` creates pending state instead of direct sending. MCP tools invoke the same services and respect authenticated principals on every call. Add bounded local stdio adapter and authenticated HTTP MCP endpoint, documenting supported stable protocol version.
 
-- [ ] Write failing tests for immutable content, approval replay/restart, 10-minute expiry, revocation/removal between request and approval, cross-key request access, client disconnect, and provider-error uncertainty. Use controlled transport/fixture behavior, never real mail.
-- [ ] Run focused tests to capture RED.
-- [ ] Implement bounded persistent approval state with atomic transitions before submission. Authenticated owner-only decisions cannot be represented by agent-supplied approval flags. Recheck key/account policy before initiation. Crash during submission becomes uncertain on restart. No automatic retries.
-- [ ] Implement real MCP initialization/tool discovery/calls with input validation, structured errors, account scoping and size limits, using a maintained SDK if appropriate. stdio must not print secrets/protocol noise; connect with a scoped key through a private credential file or environment and never command-line secret arguments. Prefer quick pending IDs over a long blocking approval request; optional elicitation cannot grant authority.
-- [ ] Build accessible approval UI showing the exact outgoing snapshot and requester. Add status/rejection handling for API/MCP callers.
-- [ ] Run focused tests plus a real MCP SDK client interoperability test and `just verify`; document setup/key use and static-token compatibility limits. Commit.
+- [x] Write failing tests for immutable content, approval replay/restart, 10-minute expiry, revocation/removal between request and approval, cross-key request access, client disconnect, and provider-error uncertainty. Use controlled transport/fixture behavior, never real mail.
+- [x] Run focused tests to capture RED.
+- [x] Implement bounded persistent approval state with atomic transitions before submission. Authenticated owner-only decisions cannot be represented by agent-supplied approval flags. Recheck key/account policy before initiation. Crash during submission becomes uncertain on restart. No automatic retries.
+- [x] Implement real MCP initialization/tool discovery/calls with input validation, structured errors, account scoping and size limits, using a maintained SDK if appropriate. stdio must not print secrets/protocol noise; connect with a scoped key through a private credential file or environment and never command-line secret arguments. Prefer quick pending IDs over a long blocking approval request; optional elicitation cannot grant authority.
+- [x] Build accessible approval UI showing the exact outgoing snapshot and requester. Add status/rejection handling for API/MCP callers.
+- [x] Run focused tests plus a real MCP SDK client interoperability test and `just verify`; document setup/key use and static-token compatibility limits. Commit.
 
 ### Task 3: Embedded Turso cache, immediate cached reads, and readable errors
 
@@ -84,20 +84,31 @@ Tasks execute sequentially because they share contracts and service wiring. Task
 - [ ] Add accessible controls, dirty-state/error/loading handling, and mobile layouts using existing patterns. Update approval review for all new delivery fields.
 - [ ] Run focused provider/core/UI tests and `just verify`; document limits, commit.
 
-### Task 5: OpenPGP/S/MIME and evidence-based verified senders
+### Task 5: OpenPGP and S/MIME
 
-**Files:** Create core `crypto.rs` and `verification.rs` (split further only by actual responsibility), tests/fixtures; modify credentials/account APIs, MIME parsers/senders, Host owner controls, contracts and reader/composer/Settings/approval UI, workspace manifests/lock, docs.
+**Files:** Create core `crypto.rs` and focused format helpers/tests/fixtures; modify credentials/account APIs, MIME parsers/senders, Host owner controls, contracts and reader/composer/Settings/approval UI, workspace manifests/lock, docs.
 
-**Interfaces:** Owner-controlled import/fingerprint/sign/encrypt/decrypt services use the existing protected-secret boundary. API keys/Wasm guests cannot export secrets or obtain automatic decrypted plaintext. Automated sign/encrypt is permitted only within a human-approved immutable send snapshot naming the identity and recipient fingerprints. Sender evidence validation produces explicit verified/unknown/failed state with explanation; only validated BIMI/VMC plus aligned authenticated sender identity can yield a company checkmark.
+**Interfaces:** Owner-controlled import/fingerprint/sign/encrypt/decrypt services use the existing protected-secret boundary. API keys/Wasm guests cannot export secrets or obtain automatic decrypted plaintext. Automated sign/encrypt is permitted only within a human-approved immutable send snapshot naming the identity and recipient fingerprints. Preserve raw canonical MIME and produce signature/encryption/trust metadata separately from later company verification.
 
-- [ ] Write failing interoperability fixture tests for PGP/MIME and S/MIME signatures/encrypted messages, wrong/untrusted keys, vault lock, key-export denial, requested-encryption failure, and decrypted-cache exclusion. Add forged header/logo/name, invalid certificate/DMARC alignment, unsafe DNS/URL redirects, and valid controlled evidence tests.
+- [ ] Write failing interoperability fixture tests for PGP/MIME and S/MIME signatures/encrypted messages, wrong/untrusted keys, vault lock, key-export denial, requested-encryption failure, and decrypted-cache exclusion.
 - [ ] Run focused tests for RED.
-- [ ] Use maintained libraries for standard MIME crypto and certificate/path verification; no bespoke cryptographic primitives. Import/display keys and certificates, preserve originals, bound parsing, and report lock/trust/signature failures clearly. Never downgrade encryption silently.
-- [ ] Implement trusted receiving-authentication configuration plus bounded SSRF-safe evidence fetching/validation. If evidence cannot be established, show no checkmark and explain why; never trust sender-supplied Authentication-Results blindly.
-- [ ] Wire owner UI controls, reader trust states, composer signing/encryption and immutable approval summary without exposing key material. Test the public service boundary.
+- [ ] Use maintained libraries for standard MIME crypto and certificate/path verification; no bespoke cryptographic primitives. Import/display keys and certificates, preserve originals, bound parsing/decompression, and report lock/trust/signature failures clearly. Never downgrade encryption silently.
+- [ ] Wire owner UI controls, reader trust states, composer signing/encryption and immutable approval summary without exposing key material. Test API-key/Wasm denial and approved single-use signing at the public service boundary.
 - [ ] Run focused tests and `just verify`, document actual supported formats/trust limits and commit.
 
-### Task 6: Native resource measurement, justified optimizations, integrated checks
+### Task 6: Evidence-based verified company senders
+
+**Files:** Create core `verification.rs` and controlled DNS/certificate/provider fixtures; modify account trust configuration, owner settings, provider metadata extraction, reader/contract verification fields and safe networking helpers, manifests/lock and docs.
+
+**Interfaces:** Consume original receiving metadata from Task 4/5 without conflating personal signatures with company identity. Produce verified/unknown/failed evidence state with checked/expiry times and explanation; only validated BIMI/VMC plus aligned authenticated sender identity yields a company checkmark. Default is no badge; scope/API-key responses cannot inject verification results.
+
+- [ ] Write failing tests for forged name/logo/Authentication-Results, missing or non-enforcing DMARC/alignment, invalid/expired/untrusted VMC, domain/logo mismatch, private DNS targets/redirects and valid controlled evidence. Test trust-policy changes and evidence expiry invalidate cached badges.
+- [ ] Run focused tests for RED.
+- [ ] Implement explicit trusted receiving-authentication configuration and bounded SSRF-safe DNS/HTTPS evidence fetching, certificate chain/policy/domain/logotype validation using maintained libraries. Never trust a sender-controlled header alone or equate a regular TLS certificate with VMC.
+- [ ] Wire readable verification details and company checkmarks into reader with accessible/mobile layout. Unknown or unsupported evidence gets no checkmark. Owner-only trust configuration cannot be altered by scoped keys/guests.
+- [ ] Run focused boundary/UI tests and `just verify`, document supported evidence/trust/revocation limitations honestly and commit.
+
+### Task 7: Native resource measurement, justified optimizations, integrated checks
 
 **Files:** Modify `scripts/resource_bench.py`, recorder tests/workloads, justfile, Tauri/runtime/core hot paths only where measurements support a change, docs/performance.md and baseline. Create `docs/performance-investigation.md` for sources, experiments, retained/rejected decisions.
 
