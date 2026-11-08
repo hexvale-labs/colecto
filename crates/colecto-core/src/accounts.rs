@@ -15,6 +15,7 @@ pub struct Accounts {
     vault: Vault,
     directory: std::path::PathBuf,
     stores: BTreeMap<String, Arc<Mutex<MailStore>>>,
+    snapshots: BTreeMap<String, crate::SnapshotHandle>,
 }
 fn invalid(message: &str) -> Error {
     Error::Invalid(message.into())
@@ -23,7 +24,7 @@ fn busy() -> Error {
     invalid("Mail operation in progress. Try again when it finishes.")
 }
 fn prepare_connection(
-    store: &MailStore,
+    store: &mut MailStore,
     settings: &AccountSettings,
     secret: &str,
 ) -> Result<crate::PreparedConnection, Error> {
@@ -135,7 +136,12 @@ impl Accounts {
                 );
             }
         }
+        let snapshots = stores
+            .iter()
+            .map(|(id, store)| (id.clone(), store.lock().unwrap().snapshot_handle()))
+            .collect();
         let mut accounts = Self {
+            snapshots,
             vault,
             stores,
             directory,
@@ -174,6 +180,39 @@ impl Accounts {
                 }
             })
             .collect()
+    }
+    pub fn cached_message(
+        &self,
+        id: &str,
+        message_id: &str,
+    ) -> Result<Option<colecto_extension_api::Message>, Error> {
+        let snapshots = self
+            .snapshots
+            .get(id)
+            .ok_or(Error::Missing)?
+            .read()
+            .map_err(crate::storage)?;
+        Ok(snapshots
+            .values()
+            .flat_map(|s| &s.messages)
+            .find(|m| m.id == message_id)
+            .cloned())
+    }
+    pub fn cached(&self, id: &str, folder: &str) -> Result<crate::MailSnapshot, Error> {
+        crate::validate_query(folder, "")?;
+        let snapshot = self
+            .snapshots
+            .get(id)
+            .ok_or(Error::Missing)?
+            .read()
+            .map_err(crate::storage)?;
+        Ok(snapshot
+            .get(folder)
+            .cloned()
+            .unwrap_or_else(|| crate::MailSnapshot {
+                folder: folder.into(),
+                ..Default::default()
+            }))
     }
     pub fn store(&self, id: &str) -> Result<Arc<Mutex<MailStore>>, Error> {
         self.stores.get(id).cloned().ok_or(Error::Missing)
@@ -238,7 +277,7 @@ impl Accounts {
         };
         let mut store = handle.try_lock().map_err(|_| busy())?;
         // Validate without changing the active transport before persistence.
-        let prepared = prepare_connection(&store, &settings, &secret.0)?;
+        let prepared = prepare_connection(&mut store, &settings, &secret.0)?;
         let mut records = self.vault.accounts().to_vec();
         records.retain(|a| a.id != id);
         records.push(crate::credentials::SavedAccount {
@@ -261,6 +300,7 @@ impl Accounts {
                 .is_some_and(|s| s.0 == secret.0)
         {
             store.apply_connection(prepared);
+            self.snapshots.insert(id.clone(), store.snapshot_handle());
             drop(store);
             self.stores.insert(id.clone(), handle);
         }

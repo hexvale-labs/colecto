@@ -45,7 +45,44 @@ struct Host {
 struct Failure(StatusCode, String);
 impl IntoResponse for Failure {
     fn into_response(self) -> Response {
-        (self.0, Json(ApiError { error: self.1 })).into_response()
+        let category = self.category();
+        (
+            self.0,
+            Json(ApiError {
+                error: self.1,
+                category,
+            }),
+        )
+            .into_response()
+    }
+}
+impl Failure {
+    fn category(&self) -> colecto_extension_api::ErrorCategory {
+        use colecto_extension_api::ErrorCategory::*;
+        if self.1.contains("uncertain outcome") {
+            DeliveryUncertain
+        } else if self.1.starts_with("Mail server rejected authentication")
+            || self.1.starts_with("JMAP HTTP 401:")
+            || self.1.starts_with("JMAP HTTP 403:")
+        {
+            ProviderAuthentication
+        } else if self.1.starts_with("Mail server timed out") {
+            ProviderTimeout
+        } else if self.1.starts_with("Mail server TLS") {
+            ProviderTls
+        } else if self.1.starts_with("JMAP HTTP 429:") {
+            ProviderRateLimited
+        } else {
+            match self.0 {
+                StatusCode::UNAUTHORIZED => Authentication,
+                StatusCode::FORBIDDEN => Forbidden,
+                StatusCode::BAD_REQUEST => InvalidRequest,
+                StatusCode::NOT_FOUND => NotFound,
+                StatusCode::BAD_GATEWAY => Provider,
+                StatusCode::CONFLICT => Conflict,
+                _ => StorageOrService,
+            }
+        }
     }
 }
 impl From<Error> for Failure {
@@ -113,6 +150,8 @@ fn build_app(host: Host, assets: PathBuf) -> Router {
         )
         .route("/labels", get(labels).post(update_label))
         .route("/messages", get(messages))
+        .route("/messages/cache", get(cached_messages))
+        .route("/messages/refresh", axum::routing::post(messages))
         .route("/messages/{id}", get(message))
         .route("/drafts", get(drafts).post(save_draft))
         .route("/drafts/{id}", get(draft))
@@ -357,6 +396,28 @@ fn extension_service(
     }
     // Already authorized operations may finish after a later revocation.
     drop(extensions);
+    if request.operation == Capability::MessagesRead
+        && let Some(message) = host
+            .accounts
+            .lock()
+            .map_err(|_| "Account service unavailable")?
+            .cached_message(account, request.id.as_deref().ok_or("Message ID required")?)
+            .map_err(|_| "Mail cache unavailable")?
+    {
+        return serde_json::to_value(message)
+            .map_err(|_| "Cannot serialize service response".into());
+    }
+    if request.operation == Capability::MessagesList {
+        return serde_json::to_value(
+            host.accounts
+                .lock()
+                .map_err(|_| "Account service unavailable")?
+                .cached(account, "inbox")
+                .map_err(|_| "Mail cache unavailable")?
+                .messages,
+        )
+        .map_err(|_| "Cannot serialize service response".into());
+    }
     let handle = host
         .accounts
         .lock()
@@ -462,6 +523,48 @@ async fn update_label(
     .await
     .map(Json)
 }
+fn redact_list_bodies(
+    host: &Host,
+    principal: &Principal,
+    account: &str,
+    messages: &mut [Message],
+) -> Result<(), Failure> {
+    if let Principal::ApiKey(id) = principal
+        && !host.keys.lock().map_err(|_| forbidden())?.allows(
+            id,
+            account,
+            Capability::MessagesRead,
+            api_keys::now(),
+        )
+    {
+        for message in messages {
+            message.body.clear();
+        }
+    }
+    Ok(())
+}
+async fn cached_messages(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    Query(query): Query<MessageQuery>,
+) -> Result<Json<colecto_core::MailSnapshot>, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
+    if !query.q.is_empty() {
+        return Err(Failure(
+            StatusCode::BAD_REQUEST,
+            "Cached snapshots do not run provider searches".into(),
+        ));
+    }
+    let mut snapshot = host
+        .accounts
+        .lock()
+        .map_err(|_| forbidden())?
+        .cached(&account, &query.folder)
+        .map_err(Failure::from)?;
+    redact_list_bodies(&host, &principal, &account, &mut snapshot.messages)?;
+    Ok(Json(snapshot))
+}
 async fn messages(
     State(host): State<Host>,
     axum::Extension(principal): axum::Extension<Principal>,
@@ -469,9 +572,12 @@ async fn messages(
     Query(query): Query<MessageQuery>,
 ) -> Result<Json<Vec<Message>>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
-    with_store(host, account, move |s| s.query(&query.folder, &query.q))
-        .await
-        .map(Json)
+    let mut messages = with_store(host.clone(), account.clone(), move |s| {
+        s.query(&query.folder, &query.q)
+    })
+    .await?;
+    redact_list_bodies(&host, &principal, &account, &mut messages)?;
+    Ok(Json(messages))
 }
 async fn message(
     State(host): State<Host>,
@@ -480,6 +586,15 @@ async fn message(
     Path(id): Path<String>,
 ) -> Result<Json<Message>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesRead)?;
+    if let Some(message) = host
+        .accounts
+        .lock()
+        .map_err(|_| forbidden())?
+        .cached_message(&account, &id)
+        .map_err(Failure::from)?
+    {
+        return Ok(Json(message));
+    }
     with_store(host, account, move |s| {
         s.message(&id).cloned().ok_or(Error::Missing)
     })
@@ -492,9 +607,20 @@ async fn drafts(
     headers: HeaderMap,
 ) -> Result<Json<Vec<Draft>>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::DraftsList)?;
-    with_store(host, account, |s| Ok(s.drafts().to_vec()))
-        .await
-        .map(Json)
+    let mut drafts = with_store(host.clone(), account.clone(), |s| Ok(s.drafts().to_vec())).await?;
+    if let Principal::ApiKey(id) = &principal
+        && !host.keys.lock().map_err(|_| forbidden())?.allows(
+            id,
+            &account,
+            Capability::DraftsRead,
+            api_keys::now(),
+        )
+    {
+        for draft in &mut drafts {
+            draft.body.clear();
+        }
+    }
+    Ok(Json(drafts))
 }
 async fn draft(
     State(host): State<Host>,

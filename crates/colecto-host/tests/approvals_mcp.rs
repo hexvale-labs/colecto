@@ -417,6 +417,25 @@ async fn sdk_interop(expire: bool) {
         .await
         .unwrap();
     assert!(!result.is_error.unwrap_or(false));
+    let body = result.structured_content.as_ref().unwrap();
+    assert!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .all(|message| message["body"] == "")
+    );
+    let cached = http
+        .call_tool(CallToolRequestParams::new("messages.cached").with_arguments(arguments.clone()))
+        .await
+        .unwrap();
+    assert!(!cached.is_error.unwrap_or(false));
+    assert!(
+        cached.structured_content.as_ref().unwrap()["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|message| message["body"] == "")
+    );
     let denied = http
         .call_tool(
             CallToolRequestParams::new("messages.list").with_arguments(

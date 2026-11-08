@@ -138,8 +138,15 @@ Remote access uses an explicit HTTPS public origin and an owner bearer token,
 with TLS termination at a trusted reverse proxy. Local Unix HTTP sockets use
 private directories and ownership-safe cleanup. See [deployment](daemon.md).
 
-Inbox snapshots persist per account, bounded to 100 messages and 12 MB serialized
-storage. They are not encrypted. Provider-backed Inbox/Sent search and a bounded
+Inbox and Sent snapshots persist in an account-local embedded Turso database,
+bounded together to 100 messages and 12 MB serialized content per account.
+Provider identities remain isolated; a successful new-provider refresh evicts the
+previous provider snapshot in the same transaction. Both folders remain cached
+while within that budget; refreshing a folder evicts the
+other folder only when needed to meet the aggregate bound. Valid legacy
+`mail-cache.json` files import once transactionally and remain available for rollback.
+Cached lists and retained message reads use independent snapshots during network
+refresh. Provider searches remain online and do not replace full-folder snapshots. They are not encrypted. Provider-backed Inbox/Sent search and a bounded
 reader cache preserve open-message access when changing views. This is polling
 and caching, not a complete incremental sync engine. Provider flags, labels,
 full-history pagination, and offline mutations still need explicit contracts.

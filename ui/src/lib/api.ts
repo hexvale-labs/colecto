@@ -1,6 +1,8 @@
 // Version 1 wire contracts mirror colecto-extension-api. Rust validates all input.
 export type Labels = Record<string, string[]>;
 export interface Message { id: string; sender: string; address: string; subject: string; body: string; date: string }
+export interface MailSnapshot { folder: string; messages: Message[]; fetched_at: number | null }
+export class ServiceError extends Error { constructor(message: string, readonly category: string, readonly status?: number) { super(message); this.name = 'ServiceError'; } }
 export interface Draft { id: string; recipient: string; subject: string; body: string }
 export interface DraftInput { id?: string; recipient: string; subject: string; body: string }
 export interface MailItem { id: string; name: string; subject: string; preview: string; date: string }
@@ -26,11 +28,12 @@ async function request<T>(extension: string, account: string, path: string, inpu
       ...(input === undefined ? {} : { body: JSON.stringify(input) }),
     });
   } catch {
-    throw new Error('Cannot reach Colecto. Check that your mail service is running, then try again.');
+    throw new ServiceError(path === '/send' ? 'Delivery status is unknown. Check Sent and delivery requests before sending again.' : 'Cannot reach Colecto. Check that your mail service is running, then try again.', path === '/send' ? 'delivery_uncertain' : 'network');
   }
   if (response.status === 401) window.dispatchEvent(new Event('colecto-auth-required'));
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status}). Please try again.`);
+  if (!response.ok) throw new ServiceError(typeof data?.error === 'string' ? data.error : `Mail service returned HTTP ${response.status}. ${path === '/send' ? 'Check delivery status before sending again.' : 'Try again when the service is available.'}`, typeof data?.category === 'string' ? data.category : 'server', response.status);
+  if (data === null) throw new ServiceError('Mail service returned an unreadable response. Check your connection and try again.', 'invalid_response', response.status);
   return data as T;
 }
 
@@ -38,9 +41,10 @@ async function request<T>(extension: string, account: string, path: string, inpu
 export function createServices(account: string) {
   return {
     inbox: {
+      cached: (folder: 'inbox' | 'sent' = 'inbox') => request<MailSnapshot>('inbox', account, `/messages/cache?folder=${folder}`),
       labels: () => request<Labels>('inbox', account, '/labels'),
       connected: () => request<boolean>('inbox', account, '/account'),
-      messages: (folder: 'inbox' | 'sent' = 'inbox', query = '') => { const params = new URLSearchParams(); if (folder !== 'inbox') params.set('folder', folder); if (query) params.set('q', query); return request<Message[]>('inbox', account, `/messages${params.size ? `?${params}` : ''}`); },
+      messages: (folder: 'inbox' | 'sent' = 'inbox', query = '') => { const params = new URLSearchParams(); if (folder !== 'inbox') params.set('folder', folder); if (query) params.set('q', query); return request<Message[]>('inbox', account, `/messages/refresh${params.size ? `?${params}` : ''}`, {}); },
       drafts: () => request<Draft[]>('inbox', account, '/drafts'),
     },
     reader: { label: (name: string, message_id?: string, remove = false) => request<Labels>('reader', account, '/labels', { name, message_id, remove }), read: (id: string) => request<Message>('reader', account, `/messages/${encodeURIComponent(id)}`) },

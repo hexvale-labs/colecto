@@ -44,6 +44,8 @@ struct Input {
 const TOOLS: &[&str] = &[
     "account.read",
     "messages.list",
+    "messages.cached",
+    "messages.refresh",
     "messages.read",
     "drafts.list",
     "drafts.read",
@@ -58,6 +60,10 @@ fn tool(name: &str) -> Tool {
         "Request human approval to deliver an immutable message. Returns pending ID immediately. Never sends directly; only the owner can approve in Colecto."
     } else if name == "send.status" {
         "Read your own delivery request status. Poll at most once per second. Uncertain means do not retry automatically."
+    } else if name == "messages.cached" {
+        "Read the last successful local folder snapshot immediately, without provider access. Search is unsupported. Includes fetched_at; null means freshness is unknown."
+    } else if matches!(name, "messages.list" | "messages.refresh") {
+        "Query the provider for Inbox or Sent and optional search. Empty searches update the bounded local folder cache. Requires messages.list; full bodies also require messages.read."
     } else {
         "Access this account using the authenticated key's current grants."
     };
@@ -127,7 +133,16 @@ impl MailMcp {
         }
         match name {
             "account.read" => value!(crate::account(state, identity, headers)),
-            "messages.list" => value!(crate::messages(
+            "messages.list" | "messages.refresh" => value!(crate::messages(
+                state,
+                identity,
+                headers,
+                axum::extract::Query(crate::MessageQuery {
+                    folder: input.folder,
+                    q: input.q
+                })
+            )),
+            "messages.cached" => value!(crate::cached_messages(
                 state,
                 identity,
                 headers,
@@ -251,7 +266,8 @@ impl ServerHandler for MailMcp {
         Ok(match result {
             Ok(value) => CallToolResult::structured(value),
             Err(error) => {
-                let value = json!({"error":error.1,"status":error.0.as_u16()});
+                let value =
+                    json!({"category":error.category(),"error":error.1,"status":error.0.as_u16()});
                 CallToolResult::structured_error(value)
             }
         }

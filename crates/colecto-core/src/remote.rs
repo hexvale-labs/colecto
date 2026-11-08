@@ -22,8 +22,44 @@ pub struct MailAccount {
 }
 
 fn remote(_: impl std::fmt::Display) -> Error {
-    // Protocol responses may contain credentials or message content.
-    Error::Transport("Mail server operation failed. Check server settings and credentials. Sending failures may have an uncertain outcome; check Sent before retrying.".into())
+    Error::Transport(
+        "Mail server operation failed. Check server settings and connection, then refresh again."
+            .into(),
+    )
+}
+fn imap_error(error: imap::error::Error) -> Error {
+    let message = match error {
+        imap::error::Error::No(_) => {
+            "Mail server rejected the request (IMAP NO). Check mailbox access and account settings."
+        }
+        imap::error::Error::Bad(_) => {
+            "Mail server rejected the request (IMAP BAD). Check server compatibility and settings."
+        }
+        imap::error::Error::Io(ref error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ) =>
+        {
+            "Mail server timed out. Your cached mail is still available; try refreshing again."
+        }
+        _ => return remote(error),
+    };
+    Error::Transport(message.into())
+}
+fn smtp_error(error: lettre::transport::smtp::Error) -> Error {
+    let detail = if let Some(status) = error.status() {
+        format!("SMTP {}", u16::from(status))
+    } else if error.is_timeout() {
+        "SMTP timeout".into()
+    } else if error.is_tls() {
+        "SMTP TLS negotiation failed".into()
+    } else {
+        "SMTP connection failed".into()
+    };
+    Error::Transport(format!(
+        "Mail delivery failed ({detail}) and may have an uncertain outcome; check Sent and delivery status before sending again."
+    ))
 }
 
 impl MailAccount {
@@ -63,12 +99,21 @@ impl MailAccount {
         socket.set_read_timeout(Some(timeout)).map_err(remote)?;
         socket.set_write_timeout(Some(timeout)).map_err(remote)?;
         let tls = native_tls::TlsConnector::new().map_err(remote)?;
-        let stream = tls.connect(&self.imap_host, socket).map_err(remote)?;
+        let stream = tls.connect(&self.imap_host, socket).map_err(|_| {
+            Error::Transport(
+                "Mail server TLS negotiation failed. Check the server name and certificate.".into(),
+            )
+        })?;
         let mut client = imap::Client::new(stream);
-        client.read_greeting().map_err(remote)?;
+        client.read_greeting().map_err(imap_error)?;
         let mut session = client
             .login(&self.username, &self.password)
-            .map_err(|(error, _)| remote(error))?;
+            .map_err(|(error, _)| match error {
+                imap::error::Error::No(_) => Error::Transport(
+                    "Mail server rejected authentication. Check your username and password.".into(),
+                ),
+                error => imap_error(error),
+            })?;
         let result = query_session(&mut session, folder, search);
         let _ = session.logout();
         result
@@ -106,7 +151,7 @@ impl MailAccount {
             ))
             .build()
             .send(&email)
-            .map_err(remote)?;
+            .map_err(smtp_error)?;
         Ok(())
     }
 }
@@ -119,10 +164,10 @@ fn query_session<T: std::io::Read + std::io::Write>(
     let name = if folder == "inbox" {
         "INBOX".to_owned()
     } else {
-        let names = session.list(Some(""), Some("*")).map_err(remote)?;
+        let names = session.list(Some(""), Some("*")).map_err(imap_error)?;
         sent_mailbox(&names)?
     };
-    let mailbox = session.examine(&name).map_err(remote)?;
+    let mailbox = session.examine(&name).map_err(imap_error)?;
     let validity = mailbox
         .uid_validity
         .ok_or_else(|| remote("Missing UIDVALIDITY"))?;
@@ -131,11 +176,13 @@ fn query_session<T: std::io::Read + std::io::Write>(
     }
     let headers = if search.is_empty() {
         let range = format!("{}:*", mailbox.exists.saturating_sub(99).max(1));
-        session.fetch(&range, "(UID RFC822.SIZE)").map_err(remote)?
+        session
+            .fetch(&range, "(UID RFC822.SIZE)")
+            .map_err(imap_error)?
     } else {
         let mut ids: Vec<_> = session
             .uid_search(search_expression(search))
-            .map_err(remote)?
+            .map_err(imap_error)?
             .into_iter()
             .collect();
         ids.sort_unstable();
@@ -150,7 +197,7 @@ fn query_session<T: std::io::Read + std::io::Write>(
         }
         session
             .uid_fetch(selected.join(","), "(UID RFC822.SIZE)")
-            .map_err(remote)?
+            .map_err(imap_error)?
     };
     let mut messages = Vec::new();
     for header in headers.iter().rev() {
@@ -160,7 +207,7 @@ fn query_session<T: std::io::Read + std::io::Write>(
         }
         let fetched = session
             .uid_fetch(uid.to_string(), "(UID BODY.PEEK[])")
-            .map_err(remote)?;
+            .map_err(imap_error)?;
         for item in fetched.iter() {
             let raw = item.body().ok_or_else(|| remote("Missing body"))?;
             let mut message = parse_message(raw, validity, uid)?;
@@ -241,6 +288,21 @@ impl Drop for MailAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn server_status_errors_never_include_protocol_text() {
+        for (error, expected) in [
+            (
+                imap::error::Error::No("password=secret private mail".into()),
+                "IMAP NO",
+            ),
+            (imap::error::Error::Bad("private mail".into()), "IMAP BAD"),
+        ] {
+            let message = imap_error(error).to_string();
+            assert!(message.contains(expected));
+            assert!(!message.contains("secret"));
+            assert!(!message.contains("private mail"));
+        }
+    }
     #[test]
     fn uses_provider_sent_role_and_search_without_marking_mail_seen() {
         use std::io::{BufRead, BufReader, Write};

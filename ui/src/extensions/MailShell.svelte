@@ -97,7 +97,7 @@
   }
   function selectAccount(next: string) {
     if (!accounts.some(account => account.id === next) || !canLeave()) return;
-    clearView(); ++listGeneration; items = []; labels = {}; labelFilter = ''; labelError = '';
+    clearView(); ++listGeneration; items = []; fetchedAt = null; labels = {}; labelFilter = ''; labelError = '';
     accountId = next; try { localStorage.setItem('colecto.account', next); } catch { /* Selection persistence is optional. */ } connected = accounts.find(a => a.id === next)?.connected ?? false;
     settingsOpen = false; query = ''; folder = 'Inbox'; void loadList();
   }
@@ -114,6 +114,8 @@
   let items = $state<MailItem[]>([]);
   let view = $state<View>(null);
   let loading = $state(true);
+  let fetching = $state(false);
+  let fetchedAt = $state<number | null>(null);
   let error = $state('');
   let openError = $state('');
   let dirty = $state(false);
@@ -148,8 +150,14 @@
     const requestedQuery = query.trim();
     const requestedAccount = accountId;
     const inboxService = services.inbox;
-    loading = true; error = ''; openError = '';
+    loading = items.length === 0; fetching = true; error = ''; openError = '';
     try {
+      if (requestedFolder !== 'Drafts' && !requestedQuery) {
+        const snapshot = await inboxService.cached(requestedFolder === 'Sent' ? 'sent' : 'inbox');
+        if (generation !== listGeneration || requestedAccount !== accountId) return;
+        items = snapshot.messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date }));
+        fetchedAt = snapshot.fetched_at; loading = false;
+      }
       const normalizedQuery = requestedQuery.toLocaleLowerCase();
       const [nextLabels, result] = await Promise.all([
         inboxService.labels(),
@@ -157,15 +165,17 @@
           ? inboxService.messages(requestedFolder === 'Sent' ? 'sent' : 'inbox', requestedQuery).then(messages => messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date })))
           : inboxService.drafts().then(drafts => drafts.filter(draft => [draft.recipient, draft.subject, draft.body].some(text => text.toLocaleLowerCase().includes(normalizedQuery))).slice().reverse().map(d => ({ id: d.id, name: d.recipient || 'No recipient', subject: d.subject, preview: d.body, date: 'Draft' }))),
       ]);
-      if (generation === listGeneration && requestedAccount === accountId) { items = result; labels = nextLabels; appliedQuery = requestedQuery; }
+      if (generation === listGeneration && requestedAccount === accountId) { items = result; labels = nextLabels; appliedQuery = requestedQuery; fetchedAt = Math.floor(Date.now() / 1000); }
     } catch (e) { if (generation === listGeneration) error = (e as Error).message; }
-    finally { if (generation === listGeneration) loading = false; }
+    finally { if (generation === listGeneration) { loading = false; fetching = false; } }
   }
   function canLeave() { return initialized && !busy && !labeling && (!dirty || window.confirm('Discard unsaved changes? Your last saved draft will be kept.')); }
   function clearView() { panelId = null; ++openGeneration; view = null; dirty = false; openError = ''; opening = false; }
   function navigate(next: 'Inbox' | 'Drafts' | 'Sent') {
     if (!canLeave()) return;
-    clearView(); settingsOpen = false; query = ''; labelFilter = ''; folder = next; void loadList();
+    clearView(); settingsOpen = false; query = ''; labelFilter = '';
+    if (next !== folder) { items = []; fetchedAt = null; appliedQuery = ''; }
+    folder = next; void loadList();
   }
   function compose() { if (!Composer || !canLeave()) return; clearView(); settingsOpen = false; view = { kind: 'draft', draft: null }; }
   function back() { if (!canLeave()) return; clearView(); }
@@ -247,7 +257,7 @@
       {#if labelFilter}<button class="text-button" disabled={labeling || loading || busy} aria-label={`Delete label ${labelFilter}`} onclick={() => { if (window.confirm(`Delete label “${labelFilter}”? Messages will be kept.`)) void label(labelFilter, undefined, true); }}>Delete label</button>{/if}
       <form onsubmit={(event) => { event.preventDefault(); void label(labelName); }}><input id="new-label" aria-label="New label" placeholder="New label" maxlength="80" bind:value={labelName} /><button class="text-button" aria-label="Create label" disabled={!labelName.trim() || labeling || loading || busy}>Add</button></form></div>
       {#if labelError}<p class="error-box" role="alert">{labelError}</p>{/if}
-      <Mailbox items={visibleItems} searching={!!appliedQuery || !!labelFilter} {selected} {folder} {loading} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} /></div>{:else}<p class="error-box">Mailbox extension disabled. Open Extensions to enable it.</p>{/if}
+      <Mailbox items={visibleItems} searching={!!appliedQuery || !!labelFilter} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} /></div>{:else}<p class="error-box">Mailbox extension disabled. Open Extensions to enable it.</p>{/if}
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
         {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} folder={view.folder} {accountLabel} {labels} labeling={labeling || loading || busy} {labelError} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />

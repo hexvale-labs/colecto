@@ -167,3 +167,26 @@ API keys use explicit account/capability grants independent of extension headers
 and cannot invoke Host controls or directly send mail. Wasm service calls retain
 their existing Host-bound extension grants.
 See [daemon authentication](daemon.md#owner-bearers-and-scoped-api-keys).
+
+### Cached folders and error categories
+
+`GET /api/v1/messages` retains its provider-query behavior.
+`POST /api/v1/messages/refresh?folder=inbox|sent&q=...` explicitly queries the
+provider; an empty search updates that folder's bounded snapshot.
+`GET /api/v1/messages/cache?folder=inbox|sent` reads without provider access and
+returns `{folder, messages, fetched_at}`; `fetched_at` is Unix seconds or null
+for unknown freshness. Cached searches are rejected rather than mistaken for
+complete provider search results. Failed refreshes preserve prior snapshots.
+Network outages keep cached readers available. Explicit owner Disconnect and
+vault Lock clear active snapshots; on-disk snapshots remain for identity-checked
+reconnect. They do not make cached messages accessible while locked/disconnected.
+MCP exposes `messages.cached` and `messages.refresh` alongside compatible
+`messages.list`. All require `messages.list`.
+
+For API keys, message-list bodies require the same account's `messages.read`;
+draft-list bodies require `drafts.read`. Without the read grant, bodies are empty
+strings and metadata remains available. Owner, bundled, and existing Wasm grant
+semantics remain unchanged. HTTP and MCP errors include a stable `category` plus
+a readable `error`. Known provider status codes are safe bounded details; raw
+server descriptions, URLs and credentials are never copied into errors.
+`delivery_uncertain` means check Sent and request status before sending again.

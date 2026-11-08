@@ -8,6 +8,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+turso.workspace = true
+futures-executor.workspace = true
 colecto-extension-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true

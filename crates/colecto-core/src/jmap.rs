@@ -17,7 +17,17 @@ pub struct JmapAccount {
 
 fn failed() -> Error {
     // Never expose server responses, tokens, URLs, or message contents.
-    Error::Transport("JMAP operation failed. Check settings and credentials. Sending may have an uncertain outcome; check Sent and Drafts before retrying.".into())
+    Error::Transport("JMAP operation failed. Check settings, credentials, and connection.".into())
+}
+fn http_error(error: reqwest::Error) -> Error {
+    if error.is_timeout() {
+        Error::Transport(
+            "Mail server timed out. Your cached mail is still available; try refreshing again."
+                .into(),
+        )
+    } else {
+        failed()
+    }
 }
 fn secure_url(value: &str) -> Result<Url, Error> {
     let url = Url::parse(value).map_err(|_| failed())?;
@@ -39,7 +49,16 @@ fn list(value: &Value) -> Result<&Vec<Value>, Error> {
     value["list"].as_array().ok_or_else(failed)
 }
 fn decode(response: reqwest::blocking::Response) -> Result<Value, Error> {
-    let response = response.error_for_status().map_err(|_| failed())?;
+    if !response.status().is_success() {
+        let code = response.status().as_u16();
+        let detail = match code {
+            401 | 403 => "authentication or mailbox access was rejected",
+            429 => "too many requests; wait before refreshing",
+            500..=599 => "the provider is temporarily unavailable",
+            _ => "the provider rejected the request",
+        };
+        return Err(Error::Transport(format!("JMAP HTTP {code}: {detail}.")));
+    }
     let mut bytes = Vec::new();
     response
         .take(8_000_001)
@@ -81,7 +100,7 @@ impl JmapAccount {
                 .get(secure_url(&self.session_url)?)
                 .bearer_auth(&self.token)
                 .send()
-                .map_err(|_| failed())?,
+                .map_err(http_error)?,
         )?;
         let id = field(&data["primaryAccounts"], MAIL)?.to_owned();
         if !data["accounts"][&id]["accountCapabilities"][MAIL].is_object() {
@@ -100,6 +119,12 @@ impl JmapAccount {
         self.session()?.query(folder, search)
     }
     pub fn send(&self, input: &DraftInput) -> Result<(), Error> {
+        self.send_inner(input).map_err(|error| match error {
+            Error::Transport(message) => Error::Transport(format!("{message} Sending may have an uncertain outcome; check Sent and delivery status before sending again.")),
+            error => error,
+        })
+    }
+    fn send_inner(&self, input: &DraftInput) -> Result<(), Error> {
         self.validate()?;
         validate(&input.recipient, &input.subject, &input.body)?;
         input
@@ -185,7 +210,7 @@ impl Session<'_> {
                 .bearer_auth(&self.account.token)
                 .json(&json!({"using":using,"methodCalls":[[method,args,"call"]]}))
                 .send()
-                .map_err(|_| failed())?,
+                .map_err(http_error)?,
         )?;
         method_result(&data, method)
     }
@@ -200,6 +225,18 @@ impl Session<'_> {
 }
 fn method_result(data: &Value, method: &str) -> Result<Value, Error> {
     let responses = data["methodResponses"].as_array().ok_or_else(failed)?;
+    if let Some(error) = responses.iter().find(|v| v[0] == "error" && v[2] == "call") {
+        let detail = match error[1]["type"].as_str() {
+            Some("forbidden") => "JMAP forbidden: mailbox access was rejected",
+            Some("serverUnavailable") => "JMAP serverUnavailable: provider temporarily unavailable",
+            Some("accountReadOnly") => "JMAP accountReadOnly: account does not allow changes",
+            Some("invalidArguments") => {
+                "JMAP invalidArguments: provider rejected the request parameters"
+            }
+            _ => "JMAP provider rejected the request",
+        };
+        return Err(Error::Transport(format!("{detail}.")));
+    }
     let response = responses
         .iter()
         .find(|v| v[0] == method && v[2] == "call")

@@ -25,14 +25,14 @@ test('creates a draft, reloads it, updates it, and reopens it', async ({ page })
   await page.getByLabel('Subject', { exact: true }).fill('Coffee by the river');
   await page.getByLabel('Message', { exact: true }).fill('Saturday sounds lovely. 世界');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
   await page.reload();
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await page.getByRole('button', { name: /Coffee by the river/ }).click();
   await expect(page.getByLabel('Message', { exact: true })).toHaveValue('Saturday sounds lovely. 世界');
   await page.getByLabel('Subject', { exact: true }).fill('Sunday by the river');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
   await page.reload();
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await page.getByRole('button', { name: /Sunday by the river/ }).click();
@@ -58,7 +58,7 @@ test('keeps unsaved edits when navigation is canceled or saving fails', async ({
 });
 
 test('recovers from a mailbox load failure and handles an empty folder', async ({ page }) => {
-  await page.route('**/api/v1/messages', route => route.fulfill({ status: 503, json: { error: 'Mailbox unavailable' } }), { times: 1 });
+  await page.route('**/api/v1/messages/refresh*', route => route.fulfill({ status: 503, json: { error: 'Mailbox unavailable' } }), { times: 1 });
   await page.goto('/');
   await expect(page.getByRole('alert')).toContainText('Mailbox unavailable');
   await page.getByRole('button', { name: 'Try again' }).click();
@@ -115,7 +115,7 @@ test('sending preserves edits on failure and prevents duplicate submission after
 
 test('manages encrypted accounts, switches drafts and protects unsaved changes', async ({ page }) => {
   test.setTimeout(90000);
-  await page.route('**/api/v1/messages', route => route.request().headers()['x-colecto-account'] !== 'demo' ? route.fulfill({ json: [] }) : route.continue());
+  await page.route('**/api/v1/messages/refresh*', route => route.request().headers()['x-colecto-account'] !== 'demo' ? route.fulfill({ json: [] }) : route.continue());
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -143,7 +143,7 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
   await page.getByLabel('Current account').selectOption('demo');
   await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Work only');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
   await page.getByLabel('Current account').selectOption('demo');
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await expect(page.getByRole('button', { name: /Work only/ })).toHaveCount(0);
@@ -168,7 +168,7 @@ test('late account responses cannot replace the selected inbox', async ({ page }
   const gate = new Promise<void>(resolve => release = resolve);
   let started!: () => void;
   const pending = new Promise<void>(resolve => started = resolve);
-  await page.route('**/api/v1/messages', async route => {
+  await page.route('**/api/v1/messages/refresh*', async route => {
     const id = route.request().headers()['x-colecto-account'];
     if (id === 'a') { started(); await gate; }
     await route.fulfill({ json: id === 'demo' ? [] : [{ id: 'same-id', sender: id, address: `${id}@example.test`, subject: `Inbox ${id}`, body: 'Preview', date: 'Today' }] });
@@ -178,7 +178,7 @@ test('late account responses cannot replace the selected inbox', async ({ page }
   await pending;
   await page.getByLabel('Current account').selectOption('b');
   await expect(page.getByRole('button', { name: /Inbox b/ })).toBeVisible();
-  const late = page.waitForResponse(response => response.url().endsWith('/api/v1/messages') && response.request().headers()['x-colecto-account'] === 'a');
+  const late = page.waitForResponse(response => response.url().includes('/api/v1/messages/refresh') && response.request().headers()['x-colecto-account'] === 'a');
   release();
   await (await late).finished();
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -195,7 +195,7 @@ test('waits for restored account before allowing compose', async ({ page }) => {
     await gate;
     await route.fulfill({ json: [{ id: 'remembered', settings: { name: 'Remembered', address: 'remembered@example.test', protocol: 'imap', imap_host: '', imap_port: 993, smtp_host: '', smtp_port: 587, username: '', session_url: '' }, connected: true, configured: true }] });
   });
-  await page.route('**/api/v1/messages', route => route.fulfill({ json: [] }));
+  await page.route('**/api/v1/messages/refresh*', route => route.fulfill({ json: [] }));
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Compose', exact: true })).toBeDisabled();
   release();
@@ -285,7 +285,7 @@ test('a rejected owner bearer preserves draft edits until the owner reconnects',
   await page.getByLabel('Daemon access token').fill(ownerToken);
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
   await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Keep edits through owner reconnect');
 });
 

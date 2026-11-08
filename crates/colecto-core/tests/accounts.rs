@@ -89,6 +89,14 @@ fn password_vault_locks_restarts_and_rejects_wrong_password() {
     let a = accounts.upsert(input(None, "a@example.test")).unwrap();
     accounts.protect("a strong master password").unwrap();
     accounts.lock().unwrap();
+    assert!(accounts.cached(&a.id, "inbox").unwrap().messages.is_empty());
+    assert!(
+        accounts
+            .cached("demo", "inbox")
+            .unwrap()
+            .messages
+            .is_empty()
+    );
     assert!(!accounts.store(&a.id).unwrap().lock().unwrap().connected());
     assert!(accounts.unlock("wrong password").is_err());
     assert!(accounts.security().locked);
@@ -430,4 +438,25 @@ fn address_longer_than_profile_limit_can_be_edited_without_a_profile_name() {
     let mut edit = input(Some(saved.id.clone()), &address);
     edit.settings = saved.settings.unwrap();
     assert!(accounts.upsert(edit).is_ok());
+}
+
+#[test]
+fn cached_list_and_reader_remain_available_while_account_is_locked() {
+    let dir = tempfile::tempdir().unwrap();
+    let accounts = Accounts::open(
+        MailStore::open(dir.path()).unwrap(),
+        Arc::new(MemorySecrets::default()),
+    )
+    .unwrap();
+    let handle = accounts.store("demo").unwrap();
+    let _network_work = handle.lock().unwrap();
+    let snapshot = accounts.cached("demo", "inbox").unwrap();
+    assert_eq!(snapshot.messages.len(), 4);
+    assert!(
+        accounts
+            .cached_message("demo", &snapshot.messages[0].id)
+            .unwrap()
+            .is_some()
+    );
+    assert!(accounts.cached("other", "inbox").is_err());
 }

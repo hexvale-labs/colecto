@@ -825,3 +825,135 @@ async fn cookie_only_owner_requests_are_rejected_even_after_valid_bearer_validat
     }
     assert!(!response.headers().contains_key("set-cookie"));
 }
+
+#[tokio::test]
+async fn scoped_list_responses_require_read_grants_for_message_and_draft_bodies() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = MailStore::open(dir.path()).unwrap();
+    store
+        .save_draft(colecto_extension_api::DraftInput {
+            id: None,
+            recipient: "a@example.test".into(),
+            subject: "Metadata".into(),
+            body: "Private draft body".into(),
+        })
+        .unwrap();
+    let router = app(store, "127.0.0.1:4173".into(), dir.path().into());
+    let owner = owner_bearer(&router).await;
+    for reads in [false, true] {
+        let capabilities = if reads {
+            r#"["messages.list","messages.read","drafts.list","drafts.read"]"#
+        } else {
+            r#"["messages.list","drafts.list"]"#
+        };
+        let mut mint = request(
+            "POST",
+            "/api/v1/api-keys",
+            "host",
+            "http://127.0.0.1:4173",
+            &format!(r#"{{"name":"List test","accounts":["demo"],"capabilities":{capabilities}}}"#),
+        );
+        mint.headers_mut()
+            .insert("authorization", owner.parse().unwrap());
+        let response = router.clone().oneshot(mint).await.unwrap();
+        let minted: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+        let token = format!("Bearer {}", minted["secret"].as_str().unwrap());
+        for (method, path) in [
+            ("GET", "/api/v1/messages"),
+            ("GET", "/api/v1/messages/cache"),
+            ("POST", "/api/v1/messages/refresh"),
+            ("GET", "/api/v1/drafts"),
+        ] {
+            let mut req = request(method, path, "host", "http://127.0.0.1:4173", "{}");
+            req.headers_mut()
+                .insert("authorization", token.parse().unwrap());
+            let response = router.clone().oneshot(req).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            let body: serde_json::Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap())
+                    .unwrap();
+            let list = if path.contains("cache") {
+                &body["messages"]
+            } else {
+                &body
+            };
+            assert!(!list.as_array().unwrap().is_empty());
+            assert_eq!(
+                list[0]["body"].as_str().unwrap().is_empty(),
+                !reads,
+                "{path}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn owner_vault_lock_clears_cached_folder_and_reader_access() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    );
+    let bearer = owner_bearer(&router).await;
+    let mut cached = request(
+        "GET",
+        "/api/v1/messages/cache",
+        "inbox",
+        "http://127.0.0.1:4173",
+        "",
+    );
+    cached
+        .headers_mut()
+        .insert("authorization", bearer.parse().unwrap());
+    let response = router.clone().oneshot(cached).await.unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+    let id = body["messages"][0]["id"].as_str().unwrap();
+    for input in [
+        r#"{"action":"protect","password":"a strong master password"}"#,
+        r#"{"action":"lock","password":""}"#,
+    ] {
+        let mut req = request(
+            "POST",
+            "/api/v1/security",
+            "host",
+            "http://127.0.0.1:4173",
+            input,
+        );
+        req.headers_mut()
+            .insert("authorization", bearer.parse().unwrap());
+        assert_eq!(
+            router.clone().oneshot(req).await.unwrap().status(),
+            StatusCode::OK
+        );
+    }
+    let mut cached = request(
+        "GET",
+        "/api/v1/messages/cache",
+        "inbox",
+        "http://127.0.0.1:4173",
+        "",
+    );
+    cached
+        .headers_mut()
+        .insert("authorization", bearer.parse().unwrap());
+    let response = router.clone().oneshot(cached).await.unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+    assert!(body["messages"].as_array().unwrap().is_empty());
+    let mut read = request(
+        "GET",
+        &format!("/api/v1/messages/{id}"),
+        "reader",
+        "http://127.0.0.1:4173",
+        "",
+    );
+    read.headers_mut()
+        .insert("authorization", bearer.parse().unwrap());
+    assert_eq!(
+        router.oneshot(read).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+}
