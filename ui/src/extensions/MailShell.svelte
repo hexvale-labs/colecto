@@ -64,7 +64,7 @@
     catch { serverError = 'Enter an HTTPS server address, or HTTP for a local server. Do not include credentials or an access token.'; }
   }
   function settingsTab(next: typeof settingsPage) { if (next === settingsPage || !canLeave()) return; dirty = false; settingsPage = next; if (next === 'Extensions') onsettings(); }
-  function activateTab(tab: typeof tabs[number]) { if (!canLeave()) return; clearView(); ++listGeneration; loading = false; settingsOpen = false; view = { kind: 'message', id: tab.id, folder: tab.folder }; }
+  function activateTab(tab: typeof tabs[number]) { if (!canLeave()) return; clearView(); invalidateList(); settingsOpen = false; view = { kind: 'message', id: tab.id, folder: tab.folder }; }
   async function closeTab(id: string) {
     const index = currentTabs.findIndex(tab => tab.id === id);
     const active = view?.kind === 'message' && view.id === id;
@@ -80,7 +80,7 @@
   }
 
   let panelId = $state<string | null>(null);
-  function openPanel(id: string) { if (!canLeave()) return; clearView(); ++listGeneration; settingsOpen = false; panelId = id; }
+  function openPanel(id: string) { if (!canLeave()) return; clearView(); invalidateList(); settingsOpen = false; panelId = id; }
   let accountError = $state('');
   let services = $derived(createServices(accountId));
   let activeAccount = $derived(accounts.find(a => a.id === accountId));
@@ -97,13 +97,13 @@
   }
   function selectAccount(next: string) {
     if (!accounts.some(account => account.id === next) || !canLeave()) return;
-    clearView(); ++listGeneration; items = []; fetchedAt = null; labels = {}; labelFilter = ''; labelError = '';
+    clearView(); invalidateList(); items = []; fetchedAt = null; labels = {}; labelFilter = ''; labelError = '';
     accountId = next; try { localStorage.setItem('colecto.account', next); } catch { /* Selection persistence is optional. */ } connected = accounts.find(a => a.id === next)?.connected ?? false;
     settingsOpen = false; query = ''; folder = 'Inbox'; void loadList();
   }
   function manageAccounts() {
     if (!canLeave()) return;
-    clearView(); ++listGeneration; settingsOpen = true; settingsPage = 'Accounts';
+    clearView(); invalidateList(); settingsOpen = true; settingsPage = 'Accounts';
     void refreshAccounts().catch(e => accountError = (e as Error).message);
   }
   function closeSettings() {
@@ -142,6 +142,7 @@
     ...(view?.kind === 'draft' ? ['Save draft', ...(connected ? ['Send message'] : [])].map(name => ({ id: name, name, run: () => { document.querySelector<HTMLButtonElement>(`.composer [data-command="${name === 'Save draft' ? 'save' : 'send'}"]`)?.click(); } })) : []),
     ...(view?.kind === 'message' ? [{ id: 'close-tab', name: 'Close current message tab', run: () => { if (view?.kind === 'message') void closeTab(view.id); } }] : []),
   ].map(command => ({ ...command, disabled: command.disabled || busy || labeling || !initialized })));
+  function invalidateList() { ++listGeneration; loading = false; fetching = false; }
   async function loadList() {
     if (labeling) return;
     const generation = ++listGeneration;

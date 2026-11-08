@@ -15,6 +15,8 @@ export function setAccessToken(token: string) { transientToken = token; try { if
 function accessToken() { try { return sessionStorage.getItem('colecto.token') ?? ''; } catch { return transientToken; } }
 
 async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE'): Promise<T> {
+  const delivery = path === '/send' || (path.startsWith('/send-requests/') && path.endsWith('/approve'));
+  const deliveryWarning = 'Delivery status is unknown. Check Sent and delivery requests before sending again.';
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, {
@@ -28,12 +30,12 @@ async function request<T>(extension: string, account: string, path: string, inpu
       ...(input === undefined ? {} : { body: JSON.stringify(input) }),
     });
   } catch {
-    throw new ServiceError(path === '/send' ? 'Delivery status is unknown. Check Sent and delivery requests before sending again.' : 'Cannot reach Colecto. Check that your mail service is running, then try again.', path === '/send' ? 'delivery_uncertain' : 'network');
+    throw new ServiceError(delivery ? deliveryWarning : 'Cannot reach Colecto. Check that your mail service is running, then try again.', delivery ? 'delivery_uncertain' : 'network');
   }
   if (response.status === 401) window.dispatchEvent(new Event('colecto-auth-required'));
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new ServiceError(typeof data?.error === 'string' ? data.error : `Mail service returned HTTP ${response.status}. ${path === '/send' ? 'Check delivery status before sending again.' : 'Try again when the service is available.'}`, typeof data?.category === 'string' ? data.category : 'server', response.status);
-  if (data === null) throw new ServiceError('Mail service returned an unreadable response. Check your connection and try again.', 'invalid_response', response.status);
+  if (!response.ok) throw new ServiceError(typeof data?.error === 'string' ? data.error : `Mail service returned HTTP ${response.status}. ${delivery ? 'Check delivery status before sending again.' : 'Try again when the service is available.'}`, typeof data?.category === 'string' ? data.category : 'server', response.status);
+  if (data === null) throw new ServiceError(delivery ? deliveryWarning : 'Mail service returned an unreadable response. Check your connection and try again.', delivery ? 'delivery_uncertain' : 'invalid_response', response.status);
   return data as T;
 }
 

@@ -234,3 +234,33 @@ test('shows cached mail during refresh and preserves reader and editor after pro
   await expect(page.getByRole('alert')).toContainText('HTTP 502');
   await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Keep unsaved draft');
 });
+
+test('activating an existing message tab clears an invalidated refresh', async ({ page }) => {
+  const messages = [
+    { id: 'first-tab', sender: 'First sender', address: 'first@example.test', subject: 'First retained tab', body: 'First body', date: 'Today' },
+    { id: 'second-tab', sender: 'Second sender', address: 'second@example.test', subject: 'Second retained tab', body: 'Second body', date: 'Today' },
+  ];
+  await page.route('**/api/v1/messages/cache?*', route => route.fulfill({ json: { folder: 'inbox', messages, fetched_at: 1 } }));
+  await page.route('**/api/v1/messages/*-tab', route => route.fulfill({ json: messages.find(message => route.request().url().endsWith(message.id)) }));
+  let refreshes = 0;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => release = resolve);
+  await page.route('**/api/v1/messages/refresh*', async route => {
+    if (++refreshes > 1) await gate;
+    return route.fulfill({ json: messages });
+  });
+  await page.goto('/');
+  const refresh = page.getByRole('button', { name: 'Refresh', exact: true });
+  await expect(refresh).toBeEnabled();
+  await page.getByRole('button', { name: /First sender/ }).click();
+  await page.getByRole('button', { name: /Second sender/ }).click();
+  await refresh.click();
+  await expect(page.getByText('Fetching latest messages…')).toBeVisible();
+  await page.getByRole('navigation', { name: 'Open messages' }).getByRole('button', { name: 'First retained tab', exact: true }).click();
+  const settled = page.waitForResponse(response => response.url().includes('/messages/refresh'));
+  release();
+  await settled;
+  await expect(page.getByText('Fetching latest messages…')).toBeHidden();
+  await expect(refresh).toBeEnabled();
+  await expect(page.getByRole('heading', { name: 'First retained tab' })).toBeVisible();
+});
