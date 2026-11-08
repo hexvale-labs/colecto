@@ -121,9 +121,16 @@ async fn authenticate(
         let path = request.uri().path();
         if !matches!(
             path,
-            "/api/v1/account" | "/api/v1/messages" | "/api/v1/drafts" | "/api/v1/labels"
+            "/api/v1/account"
+                | "/api/v1/messages"
+                | "/api/v1/drafts"
+                | "/api/v1/labels"
+                | "/api/v1/send"
+                | "/api/v1/mcp"
         ) && !path.starts_with("/api/v1/messages/")
             && !path.starts_with("/api/v1/drafts/")
+            && !(request.method() == axum::http::Method::GET
+                && path.starts_with("/api/v1/send-requests/"))
         {
             return crate::forbidden().into_response();
         }
@@ -171,7 +178,13 @@ impl MailService {
             policy: policy.clone(),
             keys: keys.clone(),
         };
+        let approvals = Arc::new(Mutex::new(crate::approvals::Approvals::open(
+            accounts.data_directory(),
+            api_keys::now(),
+        )?));
         let host = Host {
+            approvals,
+            status_polls: Arc::default(),
             keys,
             accounts: Arc::new(Mutex::new(accounts)),
             extensions: Arc::new(Mutex::new(extensions)),
@@ -183,6 +196,7 @@ impl MailService {
         let stream_events = events.clone();
         let (closing, stopped) = tokio::sync::watch::channel(false);
         let router = build_app(host.clone(), assets)
+            .nest_service("/api/v1/mcp", crate::mcp::http(host.clone()))
             .route(
                 "/api/v1/events",
                 get(move |headers: axum::http::HeaderMap| {
@@ -253,6 +267,11 @@ impl MailService {
         self.refresh_until_stopped(receiver).await;
     }
     async fn refresh_until_stopped(&self, stop: tokio::sync::watch::Receiver<bool>) {
+        if let Ok(mut approvals) = self.host.approvals.lock()
+            && approvals.maintain(api_keys::now()).is_err()
+        {
+            eprintln!("Could not expire retained delivery requests");
+        }
         let stores = {
             let Ok(accounts) = self.host.accounts.lock() else {
                 return;

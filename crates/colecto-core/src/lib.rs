@@ -360,6 +360,19 @@ fn validate_query(folder: &str, search: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Validate a full outgoing snapshot without persisting a draft or contacting a provider.
+pub fn validate_draft(input: &DraftInput) -> Result<(), Error> {
+    validate(&input.recipient, &input.subject, &input.body)?;
+    input
+        .recipient
+        .parse::<lettre::Address>()
+        .map_err(|_| Error::Invalid("Enter one valid recipient email address".into()))?;
+    if input.id.as_ref().is_some_and(|id| id.len() > 256) {
+        return Err(Error::Invalid("Invalid draft identifier".into()));
+    }
+    Ok(())
+}
+
 fn validate(recipient: &str, subject: &str, body: &str) -> Result<(), Error> {
     if recipient.len() > 320 || recipient.contains(['\r', '\n']) {
         return Err(Error::Invalid(

@@ -329,3 +329,26 @@ test('another loopback port receives no owner credential after legitimate owner 
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 });
+
+test('owner reviews the complete immutable automation snapshot on a phone and sees uncertain delivery', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const request = { id: 'review-1', requester: 'assistant-key', account: 'demo', from: 'owner@example.test', created_at: 1, expires_at: Math.floor(Date.now() / 1000) + 600, status: 'pending', snapshot: { id: null, recipient: 'recipient@example.test', subject: 'Review exact content', body: '<script>untrusted content</script>\nOriginal message body' } };
+  await page.route('**/api/v1/send-requests', route => route.fulfill({ json: [request] }));
+  await page.route('**/api/v1/api-keys', route => route.fulfill({ json: [{ id: 'assistant-key', name: 'Research assistant' }] }));
+  let approvals = 0;
+  await page.route('**/api/v1/send-requests/review-1/approve', route => { approvals++; return route.fulfill({ json: { ...request, status: 'uncertain' } }); });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Send approvals', exact: true }).click();
+  const review = page.getByRole('article', { name: 'Delivery request: Review exact content' });
+  await expect(review).toContainText('Research assistant');
+  await expect(review).toContainText('owner@example.test');
+  await expect(review).toContainText('recipient@example.test');
+  await expect(review).toContainText('<script>untrusted content</script>');
+  await expect(review).toContainText('Original message body');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await review.getByRole('button', { name: 'Approve and send', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Delivery outcome is uncertain');
+  await expect(review.getByRole('button', { name: 'Approve and send', exact: true })).toHaveCount(0);
+  expect(approvals).toBe(1);
+});

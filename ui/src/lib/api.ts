@@ -54,6 +54,8 @@ export function createServices(account: string) {
 export type ReaderService = ReturnType<typeof createServices>['reader'];
 export type ComposerService = ReturnType<typeof createServices>['composer'];
 export const hostService = {
+  sendRequests: () => request<PendingSend[]>('host', 'demo', '/send-requests'),
+  decideSend: (id: string, decision: 'approve' | 'reject') => request<PendingSend>('host', 'demo', `/send-requests/${encodeURIComponent(id)}/${decision}`, {}),
   apiKeys: () => request<ApiKey[]>('host', 'demo', '/api-keys'),
   mintApiKey: (input: ApiKeyInput) => request<{key: ApiKey; secret: string}>('host', 'demo', '/api-keys', input),
   revokeApiKey: (id: string) => request<boolean>('host', 'demo', `/api-keys/${encodeURIComponent(id)}`, {}, 'DELETE'),
@@ -83,3 +85,5 @@ export const extensionHost = {
 
 export interface ApiKeyInput { name: string; accounts: string[]; capabilities: Capability[]; expires_at?: number }
 export interface ApiKey extends ApiKeyInput { id: string; created_at: number; last_used_at: number | null; revoked_at: number | null }
+
+export interface PendingSend { id: string; requester: string; account: string; from: string; snapshot: DraftInput | null; created_at: number; expires_at: number; status: 'pending' | 'rejected' | 'expired' | 'submitting' | 'sent' | 'uncertain' }

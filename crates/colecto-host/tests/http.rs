@@ -558,7 +558,7 @@ async fn api_keys_reject_missing_invalid_authentication_and_forged_host_headers(
         ("GET", "/api/v1/api-keys", "demo", secret, 403),
         ("GET", "/api/v1/accounts", "demo", secret, 403),
         ("POST", "/api/v1/session", "demo", secret, 403),
-        ("POST", "/api/v1/send", "demo", secret, 403),
+        ("POST", "/api/v1/send", "demo", secret, 400),
         ("GET", "/api/v1/messages", "demo", "invalid", 401),
     ] {
         let mut req = request(method, path, "host", "http://127.0.0.1:4173", "{}");

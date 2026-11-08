@@ -11,7 +11,7 @@
   let error = $state('');
   let status = $state('');
   let busy = $state(false);
-  const operations: Capability[] = ['account.read', 'messages.list', 'messages.read', 'messages.label', 'drafts.list', 'drafts.read', 'drafts.write'];
+  const operations: Capability[] = ['account.read', 'messages.list', 'messages.read', 'messages.label', 'drafts.list', 'drafts.read', 'drafts.write', 'messages.send'];
   async function reload() { keys = await hostService.apiKeys(); }
   onMount(() => { void reload().catch(e => error = e.message); });
   async function create(event: SubmitEvent) {
@@ -36,7 +36,7 @@
 
 <section class="settings-card" aria-labelledby="api-keys-title">
   <h2 id="api-keys-title">API keys</h2>
-  <p>Give automation access to selected accounts and operations. Keys cannot manage settings or send mail directly.</p>
+  <p>Give automation access to selected accounts and operations. Keys cannot manage settings. messages.send requests human approval; it never sends directly.</p>
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   <p role="status">{status}</p>
   {#if secret}<section class="secret" aria-label="New API key"><h3>Copy your key now</h3><p>This secret is shown only here, until you leave or dismiss it.</p><textarea aria-label="API key secret" readonly value={secret} spellcheck="false"></textarea><button class="secondary" onclick={copy}>Copy key</button> <button class="text-button" onclick={() => secret = ''}>Dismiss secret</button></section>{/if}

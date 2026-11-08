@@ -1,5 +1,7 @@
 //! Trusted HTTP adapter for bundled UI and isolated Wasm extensions.
 pub mod api_keys;
+pub mod approvals;
+pub mod mcp;
 use api_keys::{ApiKeys, Principal};
 mod extensions;
 pub mod notifications;
@@ -31,6 +33,8 @@ use tower_http::services::ServeDir;
 #[derive(Clone)]
 struct Host {
     keys: Arc<Mutex<ApiKeys>>,
+    approvals: Arc<Mutex<approvals::Approvals>>,
+    status_polls: Arc<Mutex<std::collections::HashMap<String, std::time::Instant>>>,
     accounts: Arc<Mutex<Accounts>>,
     extensions: Arc<Mutex<extensions::Extensions>>,
     authority: String,
@@ -97,6 +101,16 @@ fn build_app(host: Host, assets: PathBuf) -> Router {
         .route("/security", get(security).post(security_action))
         .route("/account", get(account))
         .route("/send", axum::routing::post(send))
+        .route("/send-requests", get(list_send_requests))
+        .route("/send-requests/{id}", get(send_request))
+        .route(
+            "/send-requests/{id}/approve",
+            axum::routing::post(approve_send),
+        )
+        .route(
+            "/send-requests/{id}/reject",
+            axum::routing::post(reject_send),
+        )
         .route("/labels", get(labels).post(update_label))
         .route("/messages", get(messages))
         .route("/messages/{id}", get(message))
@@ -121,7 +135,7 @@ async fn boundary(State(host): State<Host>, request: Request, next: Next) -> Res
     );
     let origin_ok = match origin {
         Some(value) => value == host.origin,
-        None => !mutation,
+        None => !mutation || request.uri().path() == "/api/v1/mcp",
     };
     let mut response = if !authority_ok || !origin_ok {
         forbidden().into_response()
@@ -160,13 +174,12 @@ fn grant(
         .and_then(|v| v.to_str().ok())
         .ok_or_else(forbidden)?;
     if let Principal::ApiKey(id) = principal {
-        return if operation != Capability::MessagesSend
-            && host.keys.lock().map_err(|_| forbidden())?.allows(
-                id,
-                account,
-                operation,
-                api_keys::now(),
-            ) {
+        return if host.keys.lock().map_err(|_| forbidden())?.allows(
+            id,
+            account,
+            operation,
+            api_keys::now(),
+        ) {
             Ok(account.to_owned())
         } else {
             Err(forbidden())
@@ -524,12 +537,15 @@ async fn send(
     axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     input: Result<Json<DraftInput>, JsonRejection>,
-) -> Result<Json<bool>, Failure> {
+) -> Result<Json<serde_json::Value>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesSend)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
+    if let Principal::ApiKey(id) = principal {
+        return request_delivery(host, id, account, input).await.map(Json);
+    }
     with_store(host, account, move |s| {
         s.send(input)?;
-        Ok(true)
+        Ok(serde_json::json!(true))
     })
     .await
     .map(Json)
@@ -687,6 +703,188 @@ async fn revoke_api_key(
     Ok(Json(true))
 }
 
+fn approval_failure(error: String) -> Failure {
+    Failure(StatusCode::CONFLICT, error)
+}
+fn require_owner(principal: &Principal, headers: &HeaderMap) -> Result<(), Failure> {
+    if !matches!(principal, Principal::Owner) {
+        return Err(forbidden());
+    }
+    host_grant(headers)
+}
+async fn request_delivery(
+    host: Host,
+    key: String,
+    account: String,
+    input: DraftInput,
+) -> Result<serde_json::Value, Failure> {
+    tokio::task::spawn_blocking(move || {
+        let accounts = host.accounts.lock().map_err(|_| forbidden())?;
+        let info = accounts.list().into_iter()
+            .find(|a| a.id == account && a.connected)
+            .ok_or_else(forbidden)?;
+        let from = info.settings.ok_or_else(forbidden)?.address;
+        let mut keys = host.keys.lock().map_err(|_| forbidden())?;
+        if !keys.allows(&key, &account, Capability::MessagesSend, api_keys::now()) {
+            return Err(forbidden());
+        }
+        let request = host.approvals.lock().map_err(|_| forbidden())?
+            .create(&key, &account, &from, input, api_keys::now())
+            .map_err(approval_failure)?;
+        Ok(serde_json::json!({"id":request.id,"status":request.status,"expires_at":request.expires_at}))
+    }).await.map_err(|_| approval_failure("Delivery request service unavailable".into()))?
+}
+
+async fn list_send_requests(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<approvals::PendingSend>>, Failure> {
+    require_owner(&principal, &headers)?;
+    Ok(Json(
+        host.approvals
+            .lock()
+            .map_err(|_| forbidden())?
+            .list(api_keys::now())
+            .map_err(approval_failure)?,
+    ))
+}
+async fn request_status(
+    host: &Host,
+    principal: &Principal,
+    id: &str,
+    account: Option<&str>,
+) -> Result<serde_json::Value, Failure> {
+    if let Principal::ApiKey(key) = principal {
+        let mut polls = host.status_polls.lock().map_err(|_| forbidden())?;
+        if polls
+            .get(key)
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1))
+        {
+            return Err(Failure(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Poll at most once per second".into(),
+            ));
+        }
+        if polls.len() >= 128 {
+            polls.retain(|_, t| t.elapsed() < std::time::Duration::from_secs(1));
+        }
+        polls.insert(key.clone(), std::time::Instant::now());
+    }
+    let request = host
+        .approvals
+        .lock()
+        .map_err(|_| forbidden())?
+        .get(id, api_keys::now())
+        .map_err(|_| Failure(StatusCode::NOT_FOUND, "Delivery request not found".into()))?;
+    if account.is_some_and(|account| request.account != account) {
+        return Err(Failure(
+            StatusCode::NOT_FOUND,
+            "Delivery request not found".into(),
+        ));
+    }
+    if let Principal::ApiKey(key) = principal
+        && (request.requester != *key
+            || !host.keys.lock().map_err(|_| forbidden())?.allows(
+                key,
+                &request.account,
+                Capability::MessagesSend,
+                api_keys::now(),
+            ))
+    {
+        return Err(Failure(
+            StatusCode::NOT_FOUND,
+            "Delivery request not found".into(),
+        ));
+    }
+    Ok(serde_json::json!({"id":request.id,"status":request.status,"expires_at":request.expires_at}))
+}
+async fn send_request(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    request_status(&host, &principal, &id, None).await.map(Json)
+}
+async fn reject_send(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<approvals::PendingSend>, Failure> {
+    require_owner(&principal, &headers)?;
+    host.approvals
+        .lock()
+        .map_err(|_| forbidden())?
+        .reject(&id, api_keys::now())
+        .map(Json)
+        .map_err(approval_failure)
+}
+async fn approve_send(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<approvals::PendingSend>, Failure> {
+    require_owner(&principal, &headers)?;
+    let permit = host.execution.clone().try_acquire_owned().map_err(|_| {
+        Failure(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Mail service busy; try again".into(),
+        )
+    })?;
+    // This worker survives an HTTP client disconnect. Persist submitting before touching transport.
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let accounts = host.accounts.lock().map_err(|_| forbidden())?;
+        let request = host
+            .approvals
+            .lock()
+            .map_err(|_| forbidden())?
+            .get(&id, api_keys::now())
+            .map_err(approval_failure)?;
+        let info = accounts
+            .list()
+            .into_iter()
+            .find(|a| {
+                a.id == request.account
+                    && a.connected
+                    && a.settings
+                        .as_ref()
+                        .is_some_and(|s| s.address == request.from)
+            })
+            .ok_or_else(forbidden)?;
+        let store = accounts.store(&info.id).map_err(Failure::from)?;
+        let store = store.lock().map_err(|_| forbidden())?;
+        let mut keys = host.keys.lock().map_err(|_| forbidden())?;
+        if !keys.allows(
+            &request.requester,
+            &request.account,
+            Capability::MessagesSend,
+            api_keys::now(),
+        ) {
+            return Err(forbidden());
+        }
+        let snapshot = host
+            .approvals
+            .lock()
+            .map_err(|_| forbidden())?
+            .begin(&id, api_keys::now())
+            .map_err(approval_failure)?;
+        drop(keys);
+        drop(accounts);
+        let sent = store.send(snapshot).is_ok();
+        let mut approvals = host.approvals.lock().map_err(|_| forbidden())?;
+        approvals.finish(&id, sent).map_err(approval_failure)?;
+        approvals
+            .get(&id, api_keys::now())
+            .map(Json)
+            .map_err(approval_failure)
+    })
+    .await
+    .map_err(|_| approval_failure("Delivery outcome uncertain; do not retry".into()))?
+}
+
 #[cfg(test)]
 mod extension_service_tests {
     use super::*;
@@ -715,6 +913,10 @@ mod extension_service_tests {
             .unwrap();
         let host = Host {
             keys: Arc::new(Mutex::new(ApiKeys::open(dir.path()).unwrap())),
+            approvals: Arc::new(Mutex::new(
+                approvals::Approvals::open(dir.path(), api_keys::now()).unwrap(),
+            )),
+            status_polls: Arc::default(),
             accounts: Arc::new(Mutex::new(accounts)),
             extensions: Arc::new(Mutex::new(extensions)),
             authority: "127.0.0.1:4173".into(),
