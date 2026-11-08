@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test('local labels can be created, assigned, filtered and removed', async ({ page }) => {
   await page.goto('/');

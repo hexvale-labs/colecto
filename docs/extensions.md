@@ -151,3 +151,16 @@ limit. Writes are atomic; invalid or unreadable stores are never silently reset.
 Labels are local service metadata, unencrypted, and do not sync with providers.
 Filtering applies to the current bounded Inbox/Sent search result, not full
 provider history. Drafts are searchable locally but do not accept message labels.
+
+## HTTP principal authentication
+
+Bundled UI account/module headers route operations only after owner
+authentication. Local clients bootstrap an HttpOnly owner cookie through
+`POST /api/v1/session` with exact Host and Origin plus the owner bearer.
+Local bootstrap uses a private OS-user-owned `owner-token` file; loopback
+headers alone cannot establish ownership. Remote bootstrap uses the configured
+owner bearer. The native shell injects the local owner token only at its exact
+local origin, never into a remote server page. API keys use explicit account/capability grants
+independent of extension headers and cannot invoke Host controls or directly
+send mail. Wasm service calls retain their existing Host-bound extension grants.
+See [daemon authentication](daemon.md#owner-sessions-and-scoped-api-keys).

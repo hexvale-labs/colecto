@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, ownerToken } from './fixtures';
 
 test('defaults dark and remembers explicit and system appearance', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' });
@@ -54,7 +54,9 @@ test('remote access token stays in the session and reconnecting preserves a draf
   const requireToken = true;
   await page.route('**/api/v1/**', route => {
     if (requireToken && route.request().headers().authorization !== 'Bearer sample-owner-token') return route.fulfill({ status: 401, json: { error: 'Enter the daemon access token to connect' } });
-    return route.continue();
+    const headers = { ...route.request().headers() };
+    headers.authorization = `Bearer ${ownerToken}`;
+    return route.continue({ headers });
   });
   await page.goto('/');
   await page.getByLabel('Daemon access token').fill('sample-owner-token');

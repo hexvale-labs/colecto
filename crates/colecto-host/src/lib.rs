@@ -1,4 +1,6 @@
 //! Trusted HTTP adapter for bundled UI and isolated Wasm extensions.
+pub mod api_keys;
+use api_keys::{ApiKeys, Principal};
 mod extensions;
 pub mod notifications;
 pub mod runtime;
@@ -28,6 +30,7 @@ use tower_http::services::ServeDir;
 
 #[derive(Clone)]
 struct Host {
+    keys: Arc<Mutex<ApiKeys>>,
     accounts: Arc<Mutex<Accounts>>,
     extensions: Arc<Mutex<extensions::Extensions>>,
     authority: String,
@@ -78,6 +81,8 @@ pub fn app_with_accounts(accounts: Accounts, authority: String, assets: PathBuf)
 
 fn build_app(host: Host, assets: PathBuf) -> Router {
     let api = Router::new()
+        .route("/api-keys", get(list_api_keys).post(mint_api_key))
+        .route("/api-keys/{id}", axum::routing::delete(revoke_api_key))
         .route("/extensions", get(list_extensions).post(install_extension))
         .route(
             "/extensions/{id}",
@@ -144,11 +149,29 @@ async fn boundary(State(host): State<Host>, request: Request, next: Next) -> Res
 
 // Headers route trusted bundled callers only. Wasm identities are bound by the
 // Host invocation and can never use this direct HTTP service path.
-fn grant(host: &Host, headers: &HeaderMap, operation: Capability) -> Result<String, Failure> {
+fn grant(
+    host: &Host,
+    principal: &Principal,
+    headers: &HeaderMap,
+    operation: Capability,
+) -> Result<String, Failure> {
     let account = headers
         .get("x-colecto-account")
         .and_then(|v| v.to_str().ok())
         .ok_or_else(forbidden)?;
+    if let Principal::ApiKey(id) = principal {
+        return if operation != Capability::MessagesSend
+            && host.keys.lock().map_err(|_| forbidden())?.allows(
+                id,
+                account,
+                operation,
+                api_keys::now(),
+            ) {
+            Ok(account.to_owned())
+        } else {
+            Err(forbidden())
+        };
+    }
     let extension = headers
         .get("x-colecto-extension")
         .and_then(|v| v.to_str().ok())
@@ -406,17 +429,19 @@ fn inbox_folder() -> String {
 }
 async fn labels(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
 ) -> Result<Json<std::collections::BTreeMap<String, Vec<String>>>, Failure> {
-    let account = grant(&host, &headers, Capability::MessagesList)?;
+    let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
     with_store(host, account, |s| s.labels()).await.map(Json)
 }
 async fn update_label(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     input: Result<Json<colecto_extension_api::LabelInput>, JsonRejection>,
 ) -> Result<Json<std::collections::BTreeMap<String, Vec<String>>>, Failure> {
-    let account = grant(&host, &headers, Capability::MessagesLabel)?;
+    let account = grant(&host, &principal, &headers, Capability::MessagesLabel)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
     with_store(host, account, move |s| {
         s.update_label(&input.name, input.message_id.as_deref(), input.remove)
@@ -426,38 +451,45 @@ async fn update_label(
 }
 async fn messages(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Query(query): Query<MessageQuery>,
 ) -> Result<Json<Vec<Message>>, Failure> {
-    let account = grant(&host, &headers, Capability::MessagesList)?;
+    let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
     with_store(host, account, move |s| s.query(&query.folder, &query.q))
         .await
         .map(Json)
 }
 async fn message(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Message>, Failure> {
-    let account = grant(&host, &headers, Capability::MessagesRead)?;
+    let account = grant(&host, &principal, &headers, Capability::MessagesRead)?;
     with_store(host, account, move |s| {
         s.message(&id).cloned().ok_or(Error::Missing)
     })
     .await
     .map(Json)
 }
-async fn drafts(State(host): State<Host>, headers: HeaderMap) -> Result<Json<Vec<Draft>>, Failure> {
-    let account = grant(&host, &headers, Capability::DraftsList)?;
+async fn drafts(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Draft>>, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::DraftsList)?;
     with_store(host, account, |s| Ok(s.drafts().to_vec()))
         .await
         .map(Json)
 }
 async fn draft(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Draft>, Failure> {
-    let account = grant(&host, &headers, Capability::DraftsRead)?;
+    let account = grant(&host, &principal, &headers, Capability::DraftsRead)?;
     with_store(host, account, move |s| {
         s.draft(&id).cloned().ok_or(Error::Missing)
     })
@@ -466,28 +498,34 @@ async fn draft(
 }
 async fn save_draft(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     input: Result<Json<DraftInput>, JsonRejection>,
 ) -> Result<Json<Draft>, Failure> {
-    let account = grant(&host, &headers, Capability::DraftsWrite)?;
+    let account = grant(&host, &principal, &headers, Capability::DraftsWrite)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
     with_store(host, account, move |s| s.save_draft(input))
         .await
         .map(Json)
 }
 
-async fn account(State(host): State<Host>, headers: HeaderMap) -> Result<Json<bool>, Failure> {
-    let account = grant(&host, &headers, Capability::AccountRead)?;
+async fn account(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+) -> Result<Json<bool>, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::AccountRead)?;
     with_store(host, account, |s| Ok(s.connected()))
         .await
         .map(Json)
 }
 async fn send(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     input: Result<Json<DraftInput>, JsonRejection>,
 ) -> Result<Json<bool>, Failure> {
-    let account = grant(&host, &headers, Capability::MessagesSend)?;
+    let account = grant(&host, &principal, &headers, Capability::MessagesSend)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
     with_store(host, account, move |s| {
         s.send(input)?;
@@ -604,6 +642,51 @@ async fn security_action(
     .map(Json)
 }
 
+async fn list_api_keys(
+    State(host): State<Host>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<api_keys::KeyMetadata>>, Failure> {
+    host_grant(&headers)?;
+    Ok(Json(host.keys.lock().map_err(|_| forbidden())?.list()))
+}
+async fn mint_api_key(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    input: Result<Json<api_keys::KeyInput>, JsonRejection>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    let Json(input) =
+        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid API key settings".into()))?;
+    let accounts = host.accounts.lock().map_err(|_| forbidden())?.list();
+    if input
+        .accounts
+        .iter()
+        .any(|id| !accounts.iter().any(|a| &a.id == id))
+    {
+        return Err(forbidden());
+    }
+    let (key, secret) = host
+        .keys
+        .lock()
+        .map_err(|_| forbidden())?
+        .mint(input, api_keys::now())
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+    Ok(Json(serde_json::json!({"key":key,"secret":secret})))
+}
+async fn revoke_api_key(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<bool>, Failure> {
+    host_grant(&headers)?;
+    host.keys
+        .lock()
+        .map_err(|_| forbidden())?
+        .revoke(&id, api_keys::now())
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+    Ok(Json(true))
+}
+
 #[cfg(test)]
 mod extension_service_tests {
     use super::*;
@@ -631,6 +714,7 @@ mod extension_service_tests {
             )
             .unwrap();
         let host = Host {
+            keys: Arc::new(Mutex::new(ApiKeys::open(dir.path()).unwrap())),
             accounts: Arc::new(Mutex::new(accounts)),
             extensions: Arc::new(Mutex::new(extensions)),
             authority: "127.0.0.1:4173".into(),

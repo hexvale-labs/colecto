@@ -9,6 +9,7 @@
   import { onMount, tick } from 'svelte';
   import ExtensionPanel from '../ExtensionPanel.svelte';
   import { mailExtensions } from './registry';
+  import ApiKeys from '../ApiKeys.svelte';
   import AccountSettings from '../AccountSettings.svelte';
   import { createServices, hostService } from '../lib/api';
   import type { Draft, MailItem, AccountInfo, SecurityInfo } from '../lib/api';
@@ -23,7 +24,7 @@
   let security = $state<SecurityInfo>({ protected: false, locked: false, cleanup_pending: false });
   let accountId = $state('demo');
   let settingsOpen = $state(false);
-  let settingsPage = $state<'Accounts' | 'Appearance' | 'Servers' | 'Extensions'>('Accounts');
+  let settingsPage = $state<'Accounts' | 'Appearance' | 'Servers' | 'Extensions' | 'API keys'>('Accounts');
   let tabs = $state<{ account: string; id: string; subject: string; folder: 'Inbox' | 'Sent' }[]>([]);
   let currentTabs = $derived(tabs.filter(tab => tab.account === accountId));
   let query = $state('');
@@ -129,7 +130,7 @@
     ...Object.keys(labels).filter(() => view?.kind === 'message').map(name => ({ id: `assign-${name}`, name: `${labels[name].includes(view?.kind === 'message' ? view.id : '') ? 'Remove' : 'Add'} label: ${name}`, run: () => { if (view?.kind === 'message') void label(name, view.id, labels[name].includes(view.id)); }, disabled: loading })),
     { id: 'refresh', name: 'Refresh current mailbox', run: () => void loadList(), disabled: settingsOpen || !!panelId },
     { id: 'back', name: 'Back to message list', run: back },
-    ...(['Accounts', 'Appearance', 'Servers', 'Extensions'] as const).map(page => ({ id: `settings-${page}`, name: `Settings: ${page}`, run: () => { manageAccounts(); if (settingsOpen && !dirty) settingsTab(page); } })),
+    ...(['Accounts', 'Appearance', 'Servers', 'Extensions', 'API keys'] as const).map(page => ({ id: `settings-${page}`, name: `Settings: ${page}`, run: () => { manageAccounts(); if (settingsOpen && !dirty) settingsTab(page); } })),
     ...accounts.map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
     ...currentTabs.map(tab => ({ id: `tab-${tab.id}`, name: `Open message: ${tab.subject}`, run: () => activateTab(tab) })),
     ...extensionStates.filter(extension => !extension.bundled && extension.enabled).map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => openPanel(extension.manifest.id) })),
@@ -231,10 +232,11 @@
   <main class="workspace">
     {#if accountError}<div class="account-error error-box" role="alert">{accountError}<button class="text-button" onclick={() => { accountError = ''; void refreshAccounts().catch(e => accountError = (e as Error).message); }}>Retry account settings</button></div>{/if}
     {#if settingsOpen}<section class="settings-page" aria-label="Settings"><header class="settings-header"><div><div class="eyebrow">YOUR WORKSPACE</div><h1 tabindex="-1">Settings</h1></div><button class="secondary" disabled={busy} onclick={closeSettings}>Back to mail</button></header>
-      <nav class="settings-nav" aria-label="Settings sections">{#each ['Accounts', 'Appearance', 'Servers', 'Extensions'] as page}<button class:active={settingsPage === page} aria-current={settingsPage === page ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(page as typeof settingsPage)}>{page}</button>{/each}</nav>
+      <nav class="settings-nav" aria-label="Settings sections">{#each ['Accounts', 'Appearance', 'Servers', 'Extensions', 'API keys'] as page}<button class:active={settingsPage === page} aria-current={settingsPage === page ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(page as typeof settingsPage)}>{page}</button>{/each}</nav>
       {#if settingsPage === 'Accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} />
       {:else if settingsPage === 'Appearance'}<section class="settings-card"><h2>Appearance</h2><p>Choose a theme for this device. System follows your device’s color preference.</p><label class="field">Color theme<select value={appearance.theme} onchange={(event) => setTheme(event.currentTarget.value as Theme)}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label></section>
       {:else if settingsPage === 'Servers'}<section class="settings-card"><h2>Mail service</h2><p>Your current service is <strong>{window.location.origin}</strong>. Accounts and saved drafts belong to this service.</p><p>To use a remote daemon, open its HTTPS address. Your credentials stay on that server. Local services can also use HTTP on loopback.</p><form onsubmit={visitServer}><label class="field">Server address<input type="url" bind:value={serverUrl} placeholder="https://mail.example.com" required autocomplete="url" /></label>{#if serverError}<p class="error-box" role="alert">{serverError}</p>{/if}<button class="secondary">Open server</button></form><button class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></section>
+      {:else if settingsPage === 'API keys'}<ApiKeys {accounts} />
       {:else}{@render extensionSettings()}{/if}
     </section>
     {:else if panelId}{#key `${accountId}:${panelId}`}<ExtensionPanel id={panelId} account={accountId} onback={() => navigate('Inbox')} />{/key}

@@ -9,10 +9,21 @@ export interface AccountInfo { id: string; settings: AccountSettings | null; con
 export interface SecurityInfo { cleanup_pending: boolean; protected: boolean; locked: boolean }
 
 let transientToken = '';
-export function setAccessToken(token: string) { transientToken = token; try { if (token) sessionStorage.setItem('colecto.token', token); else sessionStorage.removeItem('colecto.token'); } catch { /* Session storage may be disabled. */ } }
+let ownerSession: Promise<void> | undefined;
+export function setAccessToken(token: string) { ownerSession = undefined; transientToken = token; try { if (token) sessionStorage.setItem('colecto.token', token); else sessionStorage.removeItem('colecto.token'); } catch { /* Session storage may be disabled. */ } }
 function accessToken() { try { return sessionStorage.getItem('colecto.token') ?? ''; } catch { return transientToken; } }
 
-async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE'): Promise<T> {
+async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE', renewSession = true): Promise<T> {
+  if (!ownerSession) {
+    ownerSession = fetch('/api/v1/session', { method: 'POST', headers: { ...(accessToken() ? { Authorization: `Bearer ${accessToken()}` } : {}) } }).then(async response => {
+      if (!response.ok) {
+        if (response.status === 401) window.dispatchEvent(new Event('colecto-auth-required'));
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? 'Could not establish an owner session.');
+      }
+    }).catch(error => { ownerSession = undefined; throw error instanceof TypeError ? new Error('Cannot reach Colecto. Check that your mail service is running, then try again.') : error; });
+  }
+  await ownerSession;
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, {
@@ -27,7 +38,11 @@ async function request<T>(extension: string, account: string, path: string, inpu
   } catch {
     throw new Error('Cannot reach Colecto. Check that your mail service is running, then try again.');
   }
-  if (response.status === 401) window.dispatchEvent(new Event('colecto-auth-required'));
+  if (response.status === 401) {
+    ownerSession = undefined;
+    if (renewSession) return request<T>(extension, account, path, input, method, false);
+    window.dispatchEvent(new Event('colecto-auth-required'));
+  }
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status}). Please try again.`);
   return data as T;
@@ -53,6 +68,9 @@ export function createServices(account: string) {
 export type ReaderService = ReturnType<typeof createServices>['reader'];
 export type ComposerService = ReturnType<typeof createServices>['composer'];
 export const hostService = {
+  apiKeys: () => request<ApiKey[]>('host', 'demo', '/api-keys'),
+  mintApiKey: (input: ApiKeyInput) => request<{key: ApiKey; secret: string}>('host', 'demo', '/api-keys', input),
+  revokeApiKey: (id: string) => request<boolean>('host', 'demo', `/api-keys/${encodeURIComponent(id)}`, {}, 'DELETE'),
   accounts: () => request<AccountInfo[]>('host', 'demo', '/accounts'),
   save: (input: AccountSettings & { id?: string; secret: string }) => request<AccountInfo>('host', 'demo', '/accounts', input),
   disconnect: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}/disconnect`, {}),
@@ -76,3 +94,6 @@ export const extensionHost = {
   update: (account: string, id: string, enabled: boolean, grants: Capability[]) =>
     request<boolean>('host', account, `/extensions/${encodeURIComponent(id)}`, { enabled, grants }),
 };
+
+export interface ApiKeyInput { name: string; accounts: string[]; capabilities: Capability[]; expires_at?: number }
+export interface ApiKey extends ApiKeyInput { id: string; created_at: number; last_used_at: number | null; revoked_at: number | null }

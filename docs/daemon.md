@@ -71,7 +71,7 @@ select the trusted origin. Cross-origin browser clients are not enabled.
 
 The native shell permits navigation to HTTPS server origins selected in settings;
 remote pages receive no native IPC grants. Static UI assets are public so the login interface can load. Every `/api/`
-request requires `Authorization: Bearer <token>` before module/account grants
+request requires an owner session or authenticated bearer before operation grants
 are checked. Never put the token in a URL. Serve the UI from this same daemon
 origin; its login/settings interface keeps the token in session storage.
 
@@ -85,9 +85,16 @@ install -d -m 700 "$HOME/.local/run/colecto"
 COLECTO_SOCKET="$HOME/.local/run/colecto/mail.sock" \
 COLECTO_DATA_DIR="$HOME/.local/state/colecto" \
 ./target/debug/colecto-daemon
+cookie_file=$(mktemp)
+auth_file=$(mktemp)
+printf 'Authorization: Bearer %s\n' "$(cat "$HOME/.local/state/colecto/owner-token")" > "$auth_file"
 curl --unix-socket "$HOME/.local/run/colecto/mail.sock" \
-  -H 'Host: localhost' -H 'x-colecto-extension: host' \
+  -c "$cookie_file" -H "@$auth_file" -X POST -H 'Origin: http://localhost' \
+  -H 'Host: localhost' http://localhost/api/v1/session
+curl --unix-socket "$HOME/.local/run/colecto/mail.sock" \
+  -b "$cookie_file" -H 'Host: localhost' -H 'x-colecto-extension: host' \
   -H 'x-colecto-account: demo' http://localhost/api/v1/accounts
+rm "$cookie_file" "$auth_file"
 ```
 
 Unix socket mode is local-only and requires an existing private parent directory
@@ -192,3 +199,48 @@ Subsystem checks passed: `cargo test -p colecto-host --all-targets --locked`
 The process test keeps an SSE subscription open during SIGTERM and verifies
 that both the stream and process exit before the owned socket disappears.
 The existing upstream `imap-proto` future-compatibility warning remains.
+
+## Owner sessions and scoped API keys
+
+Every API call requires an owner session, the remote owner bearer, or a scoped
+API key. The bundled UI establishes its session with `POST /api/v1/session`.
+Every bootstrap requires the owner bearer token and exact configured `Host` and
+`Origin`, including loopback: headers alone cannot authenticate an OS user.
+Local startup generates `owner-token` in the data directory with mode `0600`.
+It tightens an existing data directory to `0700` only after verifying it belongs
+to the current OS user; a foreign-owned directory fails with an actionable error.
+Read that private file to connect an ordinary browser. Its contents are never
+printed or put in the URL. The native shell injects it only at its exact local
+origin; HTTPS server navigation receives no local credential. Remote deployments
+continue to use `COLECTO_TOKEN_FILE` instead of a generated local token. The response sets an
+HttpOnly, SameSite=Strict cookie (Secure in remote mode), valid for 12 hours.
+Sessions are memory-only, limited to 32 per service, and end on restart. Creating
+a 33rd session removes the oldest. Static UI assets remain public.
+
+Settings → API keys generates named keys for explicitly selected accounts and
+capabilities, with optional expiry. Copy the secret when created: list responses
+contain metadata only. Revocation and expiry are checked on each request. New
+accounts receive no existing key grants. A supplied invalid or scoped bearer
+never falls back to a privileged cookie or local bootstrap. Scoped keys cannot
+manage accounts, credentials, extensions, other keys, events, or owner sessions.
+Direct delivery is denied for scoped callers, including keys with `messages.send`;
+reviewed send requests belong to the later approval/MCP slice.
+
+Automation uses `Authorization: Bearer <key>` plus `x-colecto-account`.
+`x-colecto-extension` cannot confer scoped privileges. Retain the configured
+`Host`; mutation requests also require the configured `Origin`. For owner Unix
+socket calls, include the private owner bearer and first POST to `http://localhost/api/v1/session` with
+`Host: localhost` and `Origin: http://localhost`, save its cookie, and send that
+cookie on subsequent calls (for example, curl `-c` followed by `-b`).
+
+`api-keys.json` is a versioned private policy file: random public IDs and SHA-256
+verifiers, never full secrets. Secrets contain 256 random bits independently of
+the ID. Atomic writes use private files, fsync, and rename. Corrupt, unsupported,
+or non-private policy fails closed; missing policy authenticates no keys.
+Policy permits at most 128 retained keys, 80 bytes per name, 64 explicit accounts
+per key, and eight existing capabilities. Revoked metadata is retained. Last-used
+metadata is updated at most once per minute per key; this is approximate activity
+metadata, not an audit log. Keep the data directory private and owned by its OS
+user. Windows filesystem ACL validation remains outside the tested Unix path.
+
+Configured static assets must not contain the private data directory; startup rejects overlapping roots so private owner credentials cannot become public assets.

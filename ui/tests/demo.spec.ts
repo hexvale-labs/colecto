@@ -3,7 +3,7 @@ async function openExtensions(page: import('@playwright/test').Page) {
   if (await settings.count()) await settings.click();
   await page.getByRole('button', { name: 'Extensions', exact: true }).click();
 }
-import { test, expect } from '@playwright/test';
+import { test, expect, ownerToken } from './fixtures';
 
 test('reads sample messages as text and returns to the inbox on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -69,6 +69,8 @@ test('recovers from a mailbox load failure and handles an empty folder', async (
 });
 
 test('shows a failed draft-open error and recovery on a narrow screen', async ({ page, request }) => {
+  const session = await request.post('/api/v1/session', { headers: { authorization: `Bearer ${ownerToken}`, origin: 'http://127.0.0.1:4179' } });
+  expect(session.ok()).toBe(true);
   const response = await request.post('/api/v1/drafts', {
     headers: { origin: 'http://127.0.0.1:4179', 'x-colecto-extension': 'composer', 'x-colecto-account': 'demo' },
     data: { recipient: '', subject: 'Open failure example', body: 'Still saved' },
@@ -246,4 +248,59 @@ test('installs Wasm disabled, consents to account access, revokes and removes it
   await expect(panel.getByRole('checkbox', { name: 'account.read', exact: true })).not.toBeChecked();
   await panel.getByRole('button', { name: 'Remove extension', exact: true }).click();
   await expect(panel).toHaveCount(0);
+});
+
+test('owner generates a scoped key, sees its secret once, and revokes it on a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'API keys', exact: true }).click();
+  await page.getByLabel('Key name', { exact: true }).fill('Phone assistant');
+  await page.getByRole('checkbox', { name: 'Demo account', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'messages.list', exact: true }).check();
+  await page.getByRole('button', { name: 'Generate API key', exact: true }).click();
+  const secret = page.getByRole('textbox', { name: 'API key secret', exact: true });
+  await expect(secret).toHaveValue(/^colecto_/);
+  const issuedSecret = await secret.inputValue();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Dismiss secret' }).click();
+  await expect(secret).toHaveCount(0);
+  await page.reload();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'API keys', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Phone assistant', exact: true })).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(issuedSecret);
+  await expect(secret).toHaveCount(0);
+  await page.getByRole('button', { name: 'Revoke Phone assistant', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('API key revoked.');
+  await expect(page.getByRole('button', { name: 'Revoke Phone assistant', exact: true })).toHaveCount(0);
+});
+
+test('an expired owner session renews before retrying an unauthorized draft save', async ({ page }) => {
+  let sessions = 0;
+  await page.route('**/api/v1/session', route => { sessions++; return route.continue(); });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  await page.getByLabel('Subject', { exact: true }).fill('Keep edits through session renewal');
+  await page.route('**/api/v1/drafts', route => route.fulfill({ status: 401, json: { error: 'Session expired' } }), { times: 1 });
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Keep edits through session renewal');
+  expect(sessions).toBe(2);
+  await expect(page.getByLabel('Daemon access token')).toHaveCount(0);
+});
+
+test('an ordinary browser needs the local owner token before it can connect', async ({ browser }) => {
+  const page = await browser.newPage();
+  try {
+    await page.goto('http://127.0.0.1:4179/');
+    await expect(page.getByLabel('Daemon access token')).toBeVisible();
+    await page.getByLabel('Daemon access token').fill('wrong-owner-token');
+    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect(page.getByLabel('Daemon access token')).toBeVisible();
+    await page.getByLabel('Daemon access token').fill(ownerToken);
+    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+    await expect(page.getByLabel('Daemon access token')).toHaveCount(0);
+  } finally { await page.close(); }
 });
