@@ -89,7 +89,7 @@ Run `just` for all recipes. After editing UI source, `just demo` rebuilds it.
 - `colecto-extension-api`: version 1 wire types for the operations used today.
 - `colecto-core`: TLS IMAP/SMTP, prototype JMAP, MIME plain-text decoding, sample messages, draft
   validation, IDs, and atomic JSON storage.
-- `colecto-host`: authenticated loopback HTTP/static adapter; validates owner sessions,
+- `colecto-host`: authenticated loopback HTTP/static adapter; validates explicit owner bearers,
   scoped API keys, Host/origin, and built-in
   module grants scoped to an explicitly selected account, persisted extension policy,
   and isolated Wasm panels. API bodies are bounded to 512000 bytes.

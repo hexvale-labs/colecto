@@ -141,7 +141,7 @@ async fn remote_origin_uses_browser_canonical_default_port() {
 }
 
 #[tokio::test]
-async fn remote_owner_session_bootstrap_requires_bearer_and_cookie_cannot_replace_it() {
+async fn remote_owner_validation_issues_no_cookie_and_every_request_requires_bearer() {
     let dir = tempfile::tempdir().unwrap();
     let accounts =
         Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(NoSecrets)).unwrap();
@@ -180,11 +180,8 @@ async fn remote_owner_session_bootstrap_requires_bearer_and_cookie_cannot_replac
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let cookie = response.headers()["set-cookie"].to_str().unwrap();
-    assert!(cookie.contains("HttpOnly"));
-    assert!(cookie.contains("SameSite=Strict"));
-    assert!(cookie.contains("Secure"));
-    let cookie = cookie.split(';').next().unwrap();
+    assert!(!response.headers().contains_key("set-cookie"));
+    let cookie = "colecto_owner=legacy-cookie";
     assert_eq!(
         service
             .router()
@@ -203,7 +200,7 @@ async fn remote_owner_session_bootstrap_requires_bearer_and_cookie_cannot_replac
         .unwrap();
     assert_eq!(
         service.router().oneshot(req).await.unwrap().status(),
-        StatusCode::OK
+        StatusCode::UNAUTHORIZED
     );
 }
 

@@ -160,9 +160,9 @@ def run_once(binary, with_ui, cycles):
                         logs.seek(0)
                         raise RuntimeError(f'Daemon startup failed: {logs.read()}')
                     try:
-                        with urllib.request.urlopen(urllib.request.Request(base + '/api/v1/session', method='POST', headers={'Origin': base, 'Authorization': 'Bearer ' + (Path(directory) / 'owner-token').read_text().strip()}), timeout=1) as response:
+                        owner_token = (Path(directory) / 'owner-token').read_text().strip()
+                        with urllib.request.urlopen(urllib.request.Request(base + '/api/v1/session', method='POST', headers={'Origin': base, 'Authorization': 'Bearer ' + owner_token}), timeout=1) as response:
                             if response.status == 200:
-                                cookie = response.headers['Set-Cookie'].split(';')[0]
                                 break
                     except (OSError, urllib.error.URLError):
                         time.sleep(0.05)
@@ -183,7 +183,7 @@ def run_once(binary, with_ui, cycles):
                     worker.stdin.flush()
                     wait_line(worker, 'EXERCISED')
                 else:
-                    headers = {'Cookie': cookie, 'x-colecto-extension': 'inbox', 'x-colecto-account': 'demo'}
+                    headers = {'Authorization': 'Bearer ' + owner_token, 'x-colecto-extension': 'inbox', 'x-colecto-account': 'demo'}
                     for _ in range(cycles):
                         request = urllib.request.Request(base + '/api/v1/messages', headers=headers)
                         with urllib.request.urlopen(request) as response:

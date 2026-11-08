@@ -72,15 +72,10 @@ impl AccessPolicy {
         })
     }
 }
-struct OwnerSession {
-    token: Zeroizing<String>,
-    expires: u64,
-}
 #[derive(Clone)]
 struct Authentication {
     policy: AccessPolicy,
     keys: Arc<Mutex<ApiKeys>>,
-    sessions: Arc<Mutex<Vec<OwnerSession>>>,
 }
 async fn authenticate(
     State(auth): State<Authentication>,
@@ -93,9 +88,7 @@ async fn authenticate(
     let session_request = request.uri().path() == "/api/v1/session";
     let headers = request.headers();
     let bearer = headers.get(header::AUTHORIZATION);
-    let principal = if session_request && auth.policy.token.is_some() && bearer.is_none() {
-        None
-    } else if let Some(bearer) = bearer {
+    let principal = if let Some(bearer) = bearer {
         let supplied = bearer
             .to_str()
             .ok()
@@ -115,31 +108,7 @@ async fn authenticate(
                 .and_then(|mut keys| keys.authenticate(supplied, api_keys::now()).ok())
         }
     } else {
-        let cookie = headers
-            .get(header::COOKIE)
-            .and_then(|h| h.to_str().ok())
-            .and_then(|cookies| {
-                cookies
-                    .split(';')
-                    .find_map(|cookie| cookie.trim().strip_prefix("colecto_owner="))
-            });
-        let session_ok = auth.sessions.lock().is_ok_and(|mut sessions| {
-            sessions.retain(|session| session.expires > api_keys::now());
-            cookie.is_some_and(|cookie| {
-                sessions.iter().any(|session| {
-                    cookie
-                        .as_bytes()
-                        .ct_eq(session.token.as_bytes())
-                        .unwrap_u8()
-                        == 1
-                })
-            })
-        });
-        if session_ok {
-            Some(Principal::Owner)
-        } else {
-            None
-        }
+        None
     };
     let Some(principal) = principal else {
         return (
@@ -163,27 +132,7 @@ async fn authenticate(
         if request.method() != axum::http::Method::POST {
             return StatusCode::METHOD_NOT_ALLOWED.into_response();
         }
-        let token = match api_keys::random() {
-            Ok(token) => token,
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        };
-        let Ok(mut sessions) = auth.sessions.lock() else {
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        };
-        sessions.retain(|session| session.expires > api_keys::now());
-        if sessions.len() >= 32 {
-            sessions.remove(0);
-        }
-        sessions.push(OwnerSession {
-            token: Zeroizing::new(token.clone()),
-            expires: api_keys::now() + 43_200,
-        });
-        let secure = if auth.policy.origin.starts_with("https://") {
-            "; Secure"
-        } else {
-            ""
-        };
-        return ([(header::SET_COOKIE, format!("colecto_owner={token}; Path=/api/; HttpOnly; SameSite=Strict; Max-Age=43200{secure}"))], axum::Json(true)).into_response();
+        return axum::Json(true).into_response();
     }
 
     request.extensions_mut().insert(principal);
@@ -221,7 +170,6 @@ impl MailService {
         let auth = Authentication {
             policy: policy.clone(),
             keys: keys.clone(),
-            sessions: Arc::new(Mutex::new(vec![])),
         };
         let host = Host {
             keys,
@@ -403,71 +351,6 @@ impl NotificationSnapshots {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[tokio::test]
-    async fn expired_owner_sessions_are_rejected_and_bootstrap_evicts_the_oldest() {
-        use axum::{body::Body, http::Request};
-        use tower::ServiceExt;
-        let dir = tempfile::tempdir().unwrap();
-        let sessions = Arc::new(Mutex::new(vec![OwnerSession {
-            token: Zeroizing::new("expired".into()),
-            expires: 0,
-        }]));
-        let auth = Authentication {
-            policy: AccessPolicy {
-                token: Some(Arc::new(Zeroizing::new("a".repeat(64)))),
-                ..AccessPolicy::local("localhost".into())
-            },
-            keys: Arc::new(Mutex::new(ApiKeys::open(dir.path()).unwrap())),
-            sessions: sessions.clone(),
-        };
-        let router = Router::new()
-            .route("/api/v1/test", get(|| async { "ok" }))
-            .layer(middleware::from_fn_with_state(auth, authenticate));
-        let request = Request::builder()
-            .uri("/api/v1/test")
-            .header("cookie", "colecto_owner=expired")
-            .body(Body::empty())
-            .unwrap();
-        assert_eq!(
-            router.clone().oneshot(request).await.unwrap().status(),
-            StatusCode::UNAUTHORIZED
-        );
-        let mut first = String::new();
-        for index in 0..33 {
-            let response = router
-                .clone()
-                .oneshot(
-                    Request::builder()
-                        .method("POST")
-                        .header("authorization", format!("Bearer {}", "a".repeat(64)))
-                        .uri("/api/v1/session")
-                        .body(Body::empty())
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-            if index == 0 {
-                first = response.headers()["set-cookie"]
-                    .to_str()
-                    .unwrap()
-                    .split(';')
-                    .next()
-                    .unwrap()
-                    .into();
-            }
-        }
-        assert_eq!(sessions.lock().unwrap().len(), 32);
-        let request = Request::builder()
-            .uri("/api/v1/test")
-            .header("cookie", first)
-            .body(Body::empty())
-            .unwrap();
-        assert_eq!(
-            router.oneshot(request).await.unwrap().status(),
-            StatusCode::UNAUTHORIZED
-        );
-    }
     #[tokio::test]
     async fn queued_refresh_never_starts_after_shutdown() {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(0));

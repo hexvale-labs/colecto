@@ -9,24 +9,14 @@ export interface AccountInfo { id: string; settings: AccountSettings | null; con
 export interface SecurityInfo { cleanup_pending: boolean; protected: boolean; locked: boolean }
 
 let transientToken = '';
-let ownerSession: Promise<void> | undefined;
-export function setAccessToken(token: string) { ownerSession = undefined; transientToken = token; try { if (token) sessionStorage.setItem('colecto.token', token); else sessionStorage.removeItem('colecto.token'); } catch { /* Session storage may be disabled. */ } }
+export function setAccessToken(token: string) { transientToken = token; try { if (token) sessionStorage.setItem('colecto.token', token); else sessionStorage.removeItem('colecto.token'); } catch { /* Session storage may be disabled. */ } }
 function accessToken() { try { return sessionStorage.getItem('colecto.token') ?? ''; } catch { return transientToken; } }
 
-async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE', renewSession = true): Promise<T> {
-  if (!ownerSession) {
-    ownerSession = fetch('/api/v1/session', { method: 'POST', headers: { ...(accessToken() ? { Authorization: `Bearer ${accessToken()}` } : {}) } }).then(async response => {
-      if (!response.ok) {
-        if (response.status === 401) window.dispatchEvent(new Event('colecto-auth-required'));
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.error ?? 'Could not establish an owner session.');
-      }
-    }).catch(error => { ownerSession = undefined; throw error instanceof TypeError ? new Error('Cannot reach Colecto. Check that your mail service is running, then try again.') : error; });
-  }
-  await ownerSession;
+async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE'): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, {
+      credentials: 'omit',
       method: method ?? (input === undefined ? 'GET' : 'POST'),
       headers: {
         ...(accessToken() ? { Authorization: `Bearer ${accessToken()}` } : {}),
@@ -38,11 +28,7 @@ async function request<T>(extension: string, account: string, path: string, inpu
   } catch {
     throw new Error('Cannot reach Colecto. Check that your mail service is running, then try again.');
   }
-  if (response.status === 401) {
-    ownerSession = undefined;
-    if (renewSession) return request<T>(extension, account, path, input, method, false);
-    window.dispatchEvent(new Event('colecto-auth-required'));
-  }
+  if (response.status === 401) window.dispatchEvent(new Event('colecto-auth-required'));
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status}). Please try again.`);
   return data as T;

@@ -69,10 +69,8 @@ test('recovers from a mailbox load failure and handles an empty folder', async (
 });
 
 test('shows a failed draft-open error and recovery on a narrow screen', async ({ page, request }) => {
-  const session = await request.post('/api/v1/session', { headers: { authorization: `Bearer ${ownerToken}`, origin: 'http://127.0.0.1:4179' } });
-  expect(session.ok()).toBe(true);
   const response = await request.post('/api/v1/drafts', {
-    headers: { origin: 'http://127.0.0.1:4179', 'x-colecto-extension': 'composer', 'x-colecto-account': 'demo' },
+    headers: { authorization: `Bearer ${ownerToken}`, origin: 'http://127.0.0.1:4179', 'x-colecto-extension': 'composer', 'x-colecto-account': 'demo' },
     data: { recipient: '', subject: 'Open failure example', body: 'Still saved' },
   });
   expect(response.ok()).toBe(true);
@@ -276,18 +274,19 @@ test('owner generates a scoped key, sees its secret once, and revokes it on a ph
   await expect(page.getByRole('button', { name: 'Revoke Phone assistant', exact: true })).toHaveCount(0);
 });
 
-test('an expired owner session renews before retrying an unauthorized draft save', async ({ page }) => {
-  let sessions = 0;
-  await page.route('**/api/v1/session', route => { sessions++; return route.continue(); });
+test('a rejected owner bearer preserves draft edits until the owner reconnects', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
-  await page.getByLabel('Subject', { exact: true }).fill('Keep edits through session renewal');
-  await page.route('**/api/v1/drafts', route => route.fulfill({ status: 401, json: { error: 'Session expired' } }), { times: 1 });
+  await page.getByLabel('Subject', { exact: true }).fill('Keep edits through owner reconnect');
+  await page.route('**/api/v1/drafts', route => route.fulfill({ status: 401, json: { error: 'Owner authentication required' } }), { times: 1 });
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page.getByLabel('Daemon access token')).toBeVisible();
+  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Keep edits through owner reconnect');
+  await page.getByLabel('Daemon access token').fill(ownerToken);
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Draft saved');
-  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Keep edits through session renewal');
-  expect(sessions).toBe(2);
-  await expect(page.getByLabel('Daemon access token')).toHaveCount(0);
+  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Keep edits through owner reconnect');
 });
 
 test('an ordinary browser needs the local owner token before it can connect', async ({ browser }) => {
@@ -303,4 +302,30 @@ test('an ordinary browser needs the local owner token before it can connect', as
     await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
     await expect(page.getByLabel('Daemon access token')).toHaveCount(0);
   } finally { await page.close(); }
+});
+
+test('another loopback port receives no owner credential after legitimate owner login', async ({ page }) => {
+  const { createServer } = await import('node:http');
+  let captured: import('node:http').IncomingHttpHeaders = {};
+  const server = createServer((request, response) => {
+    if (request.url === '/api/capture') captured = request.headers;
+    response.writeHead(200, { 'content-type': 'text/html' });
+    response.end('<!doctype html><title>Other local service</title>Other local service');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+    const port = (server.address() as import('node:net').AddressInfo).port;
+    await page.goto(`http://127.0.0.1:${port}/`);
+    await page.evaluate(async () => { await fetch('/api/capture'); });
+    expect(Boolean(captured.authorization)).toBe(false);
+    expect(Boolean(captured.cookie?.includes('colecto_owner='))).toBe(false);
+    expect(await page.evaluate(() => sessionStorage.getItem('colecto.token'))).toBeNull();
+    const replay = await page.request.get('http://127.0.0.1:4179/api/v1/accounts', { headers: { origin: 'http://127.0.0.1:4179', 'x-colecto-extension': 'host', ...(captured.cookie ? { cookie: captured.cookie } : {}) } });
+    expect(replay.status()).toBe(401);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });

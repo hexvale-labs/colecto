@@ -38,18 +38,12 @@ fn unix_http_runtime_serves_requests_and_cleans_socket_on_sigterm() {
     let mut session = String::new();
     bootstrap.read_to_string(&mut session).unwrap();
     assert!(session.starts_with("HTTP/1.1 200"), "{session}");
-    let cookie = session
-        .lines()
-        .find_map(|line| line.strip_prefix("set-cookie: "))
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap();
+    assert!(!session.contains("set-cookie:"));
     let mut client = UnixStream::connect(&socket).unwrap();
     client
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    client.write_all(format!("GET /api/v1/accounts HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie}\r\nx-colecto-extension: host\r\nx-colecto-account: demo\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();
+    client.write_all(format!("GET /api/v1/accounts HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nx-colecto-extension: host\r\nx-colecto-account: demo\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();
     let mut response = String::new();
     client.read_to_string(&mut response).unwrap();
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
@@ -58,7 +52,7 @@ fn unix_http_runtime_serves_requests_and_cleans_socket_on_sigterm() {
     events
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    events.write_all(format!("GET /api/v1/events HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie}\r\nx-colecto-extension: host\r\nx-colecto-account: demo\r\n\r\n").as_bytes()).unwrap();
+    events.write_all(format!("GET /api/v1/events HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nx-colecto-extension: host\r\nx-colecto-account: demo\r\n\r\n").as_bytes()).unwrap();
     let mut events = BufReader::new(events);
     loop {
         let mut line = String::new();

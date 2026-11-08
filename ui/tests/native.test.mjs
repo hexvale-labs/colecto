@@ -30,8 +30,8 @@ test('native window starts with its loopback service and bundled registry', asyn
     const ownerToken = (await readFile(join(directory, 'owner-token'), 'utf8')).trim();
     const session = await fetch(`${url}/api/v1/session`, { method: 'POST', headers: { origin: url, authorization: `Bearer ${ownerToken}` } });
     assert.equal(session.status, 200);
-    const cookie = session.headers.get('set-cookie').split(';')[0];
-    const response = await fetch(`${url}/api/v1/extensions`, { headers: { cookie, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' } });
+    assert.equal(session.headers.get('set-cookie'), null);
+    const response = await fetch(`${url}/api/v1/extensions`, { headers: { authorization: `Bearer ${ownerToken}`, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' } });
     assert.equal(response.status, 200);
     const extensions = await response.json();
     assert.equal(extensions.length, 4);

@@ -154,13 +154,16 @@ provider history. Drafts are searchable locally but do not accept message labels
 
 ## HTTP principal authentication
 
-Bundled UI account/module headers route operations only after owner
-authentication. Local clients bootstrap an HttpOnly owner cookie through
-`POST /api/v1/session` with exact Host and Origin plus the owner bearer.
-Local bootstrap uses a private OS-user-owned `owner-token` file; loopback
-headers alone cannot establish ownership. Remote bootstrap uses the configured
-owner bearer. The native shell injects the local owner token only at its exact
-local origin, never into a remote server page. API keys use explicit account/capability grants
-independent of extension headers and cannot invoke Host controls or directly
-send mail. Wasm service calls retain their existing Host-bound extension grants.
-See [daemon authentication](daemon.md#owner-sessions-and-scoped-api-keys).
+Bundled UI account/module headers route operations only after owner bearer
+authentication. Every local and remote owner request explicitly supplies
+`Authorization: Bearer <owner-token>`; cookies never establish owner authority.
+Local mode uses a private OS-user-owned `owner-token` file; loopback headers alone
+cannot establish ownership. Remote mode uses the configured owner bearer. The
+native shell injects the local token only at its exact local origin, never into
+a remote server page. The browser keeps the bearer in origin-scoped sessionStorage
+and does not automatically send it to another port. `POST /api/v1/session` only
+validates an owner bearer with exact Host/Origin; it creates no cookie or session.
+API keys use explicit account/capability grants independent of extension headers
+and cannot invoke Host controls or directly send mail. Wasm service calls retain
+their existing Host-bound extension grants.
+See [daemon authentication](daemon.md#owner-bearers-and-scoped-api-keys).

@@ -488,42 +488,32 @@ async fn installed_wasm_uses_consented_account_grants_and_cannot_call_http_servi
 }
 
 async fn authenticated(router: axum::Router) -> axum::Router {
-    let cookie = owner_cookie(&router).await;
+    let bearer = owner_bearer(&router).await;
     router.layer(axum::middleware::from_fn(
         move |mut req: axum::extract::Request, next: axum::middleware::Next| {
-            req.headers_mut().insert("cookie", cookie.parse().unwrap());
+            req.headers_mut()
+                .insert("authorization", bearer.parse().unwrap());
             async move { next.run(req).await }
         },
     ))
 }
 
-async fn owner_cookie(router: &axum::Router) -> String {
-    let mut bootstrap = request(
+async fn owner_bearer(router: &axum::Router) -> String {
+    let bearer = format!("Bearer {}", "a".repeat(64));
+    let mut validate = request(
         "POST",
         "/api/v1/session",
         "host",
         "http://127.0.0.1:4173",
         "{}",
     );
-    bootstrap.headers_mut().insert(
-        "authorization",
-        format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
-    );
-    let response = router.clone().oneshot(bootstrap).await.unwrap();
+    validate
+        .headers_mut()
+        .insert("authorization", bearer.parse().unwrap());
+    let response = router.clone().oneshot(validate).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(
-        !response.headers()["set-cookie"]
-            .to_str()
-            .unwrap()
-            .contains("Secure")
-    );
-    response.headers()["set-cookie"]
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_owned()
+    assert!(!response.headers().contains_key("set-cookie"));
+    bearer
 }
 
 #[tokio::test]
@@ -545,7 +535,7 @@ async fn api_keys_reject_missing_invalid_authentication_and_forged_host_headers(
             StatusCode::UNAUTHORIZED
         );
     }
-    let cookie = owner_cookie(&router).await;
+    let bearer = owner_bearer(&router).await;
     let mut mint = request(
         "POST",
         "/api/v1/api-keys",
@@ -553,7 +543,8 @@ async fn api_keys_reject_missing_invalid_authentication_and_forged_host_headers(
         "http://127.0.0.1:4173",
         r#"{"name":"Assistant","accounts":["demo"],"capabilities":["messages.list","messages.send"]}"#,
     );
-    mint.headers_mut().insert("cookie", cookie.parse().unwrap());
+    mint.headers_mut()
+        .insert("authorization", bearer.parse().unwrap());
     let response = router.clone().oneshot(mint).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let minted: serde_json::Value =
@@ -573,7 +564,8 @@ async fn api_keys_reject_missing_invalid_authentication_and_forged_host_headers(
         let mut req = request(method, path, "host", "http://127.0.0.1:4173", "{}");
         req.headers_mut()
             .insert("authorization", format!("Bearer {token}").parse().unwrap());
-        req.headers_mut().insert("cookie", cookie.parse().unwrap());
+        req.headers_mut()
+            .insert("cookie", "colecto_owner=legacy-cookie".parse().unwrap());
         req.headers_mut()
             .insert("x-colecto-account", account.parse().unwrap());
         assert_eq!(
@@ -591,7 +583,7 @@ async fn api_keys_reject_missing_invalid_authentication_and_forged_host_headers(
     );
     revoke
         .headers_mut()
-        .insert("cookie", cookie.parse().unwrap());
+        .insert("authorization", bearer.parse().unwrap());
     assert_eq!(
         router.clone().oneshot(revoke).await.unwrap().status(),
         StatusCode::OK
@@ -786,4 +778,50 @@ async fn local_owner_bootstrap_requires_a_private_os_user_secret_not_just_forged
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn cookie_only_owner_requests_are_rejected_even_after_valid_bearer_validation() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    );
+    let mut validate = request(
+        "POST",
+        "/api/v1/session",
+        "host",
+        "http://127.0.0.1:4173",
+        "{}",
+    );
+    validate.headers_mut().insert(
+        "authorization",
+        format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
+    );
+    let response = router.clone().oneshot(validate).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let cookie = response
+        .headers()
+        .get("set-cookie")
+        .map(|value| {
+            value
+                .to_str()
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap()
+                .to_owned()
+        })
+        .unwrap_or_else(|| "colecto_owner=legacy-cookie".into());
+    for path in ["/api/v1/accounts", "/api/v1/events", "/api/v1/messages"] {
+        let mut req = request("GET", path, "host", "http://127.0.0.1:4173", "");
+        req.headers_mut().insert("cookie", cookie.parse().unwrap());
+        assert_eq!(
+            router.clone().oneshot(req).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED,
+            "{path}"
+        );
+    }
+    assert!(!response.headers().contains_key("set-cookie"));
 }

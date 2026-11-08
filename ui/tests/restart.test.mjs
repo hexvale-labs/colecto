@@ -27,8 +27,8 @@ async function start(directory) {
   const ownerToken = (await readFile(join(directory, 'owner-token'), 'utf8')).trim();
   const session = await fetch(`${url}/api/v1/session`, { method: 'POST', headers: { origin: url, authorization: `Bearer ${ownerToken}` } });
   assert.equal(session.status, 200);
-  const cookie = session.headers.get('set-cookie').split(';')[0];
-  return { url, cookie, stop: async () => { child.kill('SIGINT'); await exited; } };
+  assert.equal(session.headers.get('set-cookie'), null);
+  return { url, ownerToken, stop: async () => { child.kill('SIGINT'); await exited; } };
 }
 
 test('a saved draft survives an actual Host process restart', async () => {
@@ -36,14 +36,14 @@ test('a saved draft survives an actual Host process restart', async () => {
   let host;
   try {
     host = await start(directory);
-    const headers = { 'content-type': 'application/json', 'x-colecto-extension': 'composer', 'x-colecto-account': 'demo', origin: host.url, cookie: host.cookie };
+    const headers = { 'content-type': 'application/json', 'x-colecto-extension': 'composer', 'x-colecto-account': 'demo', origin: host.url, authorization: `Bearer ${host.ownerToken}` };
     const response = await fetch(`${host.url}/api/v1/drafts`, { method: 'POST', headers,
       body: JSON.stringify({ recipient: 'friend@example.test', subject: 'Remember me', body: 'Across process boundaries. 世界' }) });
     assert.equal(response.status, 200);
     const saved = await response.json();
     await host.stop(); host = null;
     host = await start(directory);
-    const reopened = await fetch(`${host.url}/api/v1/drafts/${saved.id}`, { headers: { ...headers, origin: host.url, cookie: host.cookie } });
+    const reopened = await fetch(`${host.url}/api/v1/drafts/${saved.id}`, { headers: { ...headers, origin: host.url, authorization: `Bearer ${host.ownerToken}` } });
     assert.equal(reopened.status, 200);
     assert.deepEqual(await reopened.json(), saved);
     const frontend = await fetch(host.url);
