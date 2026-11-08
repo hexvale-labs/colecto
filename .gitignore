@@ -5,3 +5,4 @@
 /ui/playwright-report/
 /.colecto-demo/
 /crates/colecto-host/gen/
+.vite/
