@@ -226,7 +226,7 @@ def command(*args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--binary', type=Path, default=ROOT / 'target/debug/colecto-host')
+    parser.add_argument('--binary', type=Path)
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--cycles', type=int, default=12)
     parser.add_argument('--history', type=Path, default=ROOT / 'performance-results')
@@ -236,6 +236,9 @@ def main():
         parser.error('This recorder requires Linux /proc; native Android and other desktop OS measurements are not implemented')
     if args.runs < 1 or args.cycles < 1:
         parser.error('--runs and --cycles must be positive')
+    if args.binary is None:
+        metadata = json.loads(command('cargo', 'metadata', '--format-version', '1', '--no-deps'))
+        args.binary = Path(metadata['target_directory']) / 'debug/colecto-host'
     binary = args.binary.resolve(strict=True)
     browser_version = command('node', '-p', "require('./ui/node_modules/playwright/package.json').version") if not args.skip_ui else None
     cpu = next((line.split(':', 1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines()

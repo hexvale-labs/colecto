@@ -34,11 +34,11 @@
 
 **Interfaces:** Export cloneable `Database` (owned private path and shared bounded connection/mutex) plus small record get/initialize/set/remove operations. Versioned namespaced records support existing serialized schemas. `Accounts::database()` returns the shared handle; child MailStores receive that handle plus account ID, never open their own authoritative DB. `MailStore::open` retains a compatibility entrypoint for tests/standalone construction. Mail snapshots use an account/provider/folder primary key in the same database. Constructors may retain legacy directory paths solely for source import and process locking.
 
-- [ ] Write failing tests proving drafts/labels/vault/account metadata and multi-account snapshots survive reopening from `colecto.db` after legacy sources are moved aside; import preserves originals and ignores later stale edits.
-- [ ] Run focused RED tests. Include schema rejection, transactional import failure, account-cache isolation/bounds and vault encryption/AAD/keyring cleanup regression cases.
-- [ ] Implement private single-database schema/record access and inject it through Core stores. Validate records before import and keep migration markers atomic. Persist encrypted vault bytes rather than secrets; retain keyring protection and process locks.
-- [ ] Migrate legacy account-local Turso cache rows using the actual Turso engine, preserving valid timestamps/identity and account-wide quotas. Integrate IMAP mailbox-identity invalidation for retained reader data when a successful UIDVALIDITY change is observed, with controlled fixtures; retain honest bounded-snapshot/JMAP refresh semantics.
-- [ ] Run focused Core/account/mail tests then `CARGO_BUILD_JOBS=1 just verify` when stable. Update docs with actual storage/migration boundaries, commit only this task, record evidence and integration interfaces.
+- [x] Write failing tests proving drafts/labels/vault/account metadata and multi-account snapshots survive reopening from `colecto.db` after legacy sources are moved aside; import preserves originals and ignores later stale edits.
+- [x] Run focused RED tests. Include schema rejection, transactional import failure, account-cache isolation/bounds and vault encryption/AAD/keyring cleanup regression cases.
+- [x] Implement private single-database schema/record access and inject it through Core stores. Validate records before import and keep migration markers atomic. Persist encrypted vault bytes rather than secrets; retain keyring protection and process locks.
+- [x] Migrate legacy account-local Turso cache rows using the actual Turso engine, preserving valid timestamps/identity and account-wide quotas. Integrate IMAP mailbox-identity invalidation for retained reader data when a successful UIDVALIDITY change is observed, with controlled fixtures; retain honest bounded-snapshot/JMAP refresh semantics.
+- [x] Run focused Core/account/mail tests then `CARGO_BUILD_JOBS=1 just verify` when stable. Update docs with actual storage/migration boundaries, commit only this task, record evidence and integration interfaces.
 
 ### Task 2: Host policies, daemon state and UI preferences in Turso
 
