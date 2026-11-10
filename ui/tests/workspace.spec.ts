@@ -126,6 +126,8 @@ test('command runner opens by keyboard, filters actions and searches drafts', as
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
   await page.getByLabel('Subject', { exact: true }).fill('Find this local note');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  // Commands are disabled while the save is in flight.
+  await expect(page.getByRole('status')).toHaveText('Draft saved');
   await page.keyboard.press('Control+k');
   await page.getByRole('combobox', { name: 'Search commands' }).fill('drafts');
   await page.keyboard.press('Enter');
