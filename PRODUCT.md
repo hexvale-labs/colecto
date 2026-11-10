@@ -30,8 +30,8 @@ Wasm runtime.
 - Desktop (Tauri), browser and mobile targets share one service boundary.
 - Accounts, labels, drafts, search, open-message tabs, a command palette, API keys
   and human send approvals exist today.
-- Widgets will become movable and resizable next, so each widget must work in
-  both tall and wide slots.
+- Panes can be docked left, center, right or bottom, tabbed together and resized,
+  so each pane must work in tall, wide and in-between slots.
 
 ## Brand Commitments
 
@@ -40,6 +40,6 @@ Wasm runtime.
 
 ## Product Principles
 
-1. Two columns: navigation and list on the left, the thing you're working on on the right.
+1. A calm default (list on the left, the thing you're working on beside it) that people can rearrange.
 2. Never lose the user's mail or unsaved writing.
 3. Keyboard first, but every action is reachable by pointer and touch.

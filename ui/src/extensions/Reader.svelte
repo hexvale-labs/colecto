@@ -21,16 +21,25 @@
   let frameStyle = $derived(designed
     ? 'html{color-scheme:light}body{margin:24px;font:15px/1.6 system-ui,sans-serif;color:#1d1d1f;background:#fff;overflow-wrap:anywhere}'
     : 'html{color-scheme:dark}body{margin:0;font:15.5px/1.65 system-ui,sans-serif;color:#d5ddd7;background:transparent;overflow-wrap:anywhere}a{color:#a2d6b1}blockquote{margin:0 0 0 2px;padding-left:14px;border-left:1px solid #3a463f;color:#9faba3}');
-  let frameDoc = $derived(content?.html ? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:${remoteImages ? ' https:' : ''}"><base target="_blank"><style>${frameStyle}img{max-width:100%;height:auto}</style>${content.html}` : '');
+  // Designed mail is shown on its own light sheet, so its dark-mode rules would mix light backgrounds with light text.
+  // Rename the media feature so those rules never match, whatever colour scheme the webview reports.
+  let html = $derived(content?.html ? designed ? content.html.replace(/prefers-color-scheme\s*:\s*dark/gi, 'prefers-color-scheme: colecto-light') : content.html : '');
+  let frameDoc = $derived(html ? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:${remoteImages ? ' https:' : ''}"><base target="_blank"><style>${frameStyle}img{max-width:100%;height:auto}</style>${html}` : '');
+  let painted = $state(false);
+  let contentLoading = $state(true);
   let date = $derived(message ? when(message.date) : null);
   async function load() {
-    loading = true; error = '';
+    loading = true; contentLoading = true; error = '';
+    // Fetch the body alongside the header instead of after it; opening HTML mail used to wait for both in turn.
+    const body = service.content(id);
+    body.catch(() => {});
     try { message = await service.read(id); }
     catch (e) { error = (e as Error).message; }
     finally { loading = false; }
     if (message) {
-      try { content = await service.content(id); contentError = ''; }
+      try { content = await body; contentError = ''; }
       catch (e) { contentError = (e as Error).message; }
+      finally { contentLoading = false; }
     }
   }
   function reply(mode: ReplyMode) { if (message) onreply?.(replyDraft(mode, message, content, self)); }
@@ -75,7 +84,8 @@
         {#if showHtml && !remoteImages}<span class="body-note"><Icon name="image" />Remote images are blocked.</span><button class="text-button" onclick={() => remoteImages = true}>Load remote images</button>{/if}
         <button class="text-button push" aria-pressed={!showHtml} onclick={() => showHtml = !showHtml}><Icon name="text" />{showHtml ? 'Show plain text' : 'Show formatted'}</button>
       </div>{/if}
-      {#if content?.html && showHtml}<iframe class="html-body" class:designed title="Message content" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc={frameDoc}></iframe>
+      {#if contentLoading}<div class="body-skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
+      {:else if content?.html && showHtml}<iframe class="html-body" class:designed class:painted title="Message content" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc={frameDoc} onload={() => painted = true}></iframe>
       {:else}<div class="letter-body">{content?.text || message.body}</div>{/if}
     </article>
   {/if}

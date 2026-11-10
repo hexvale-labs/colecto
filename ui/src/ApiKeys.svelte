@@ -34,30 +34,40 @@
   const date = (value: number | null | undefined) => value ? new Date(value * 1000).toLocaleString() : 'Never';
 </script>
 
-<section class="settings-card" aria-labelledby="api-keys-title">
-  <h2 id="api-keys-title">API keys</h2>
-  <p>Give automation access to selected accounts and operations. Keys cannot manage settings. messages.send requests human approval; it never sends directly.</p>
+<section class="settings-section" aria-labelledby="api-keys-title">
+  <header class="section-head"><h2 id="api-keys-title">API keys</h2>
+  <p>Give automation access to selected accounts and operations. Keys cannot manage settings, and <code>messages.send</code> only asks you for approval; it never sends directly.</p></header>
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   <p role="status">{status}</p>
-  {#if secret}<section class="secret" aria-label="New API key"><h3>Copy your key now</h3><p>This secret is shown only here, until you leave or dismiss it.</p><textarea aria-label="API key secret" readonly value={secret} spellcheck="false"></textarea><button class="secondary" onclick={copy}>Copy key</button> <button class="text-button" onclick={() => secret = ''}>Dismiss secret</button></section>{/if}
-  <form onsubmit={create}>
+  {#if secret}<section class="secret" aria-label="New API key"><h3>Copy your key now</h3><p>This secret is shown only here, until you leave or dismiss it.</p><textarea aria-label="API key secret" readonly value={secret} spellcheck="false"></textarea><div><button class="secondary" onclick={copy}>Copy key</button><button class="text-button" onclick={() => secret = ''}>Dismiss secret</button></div></section>{/if}
+  <form class="settings-card" onsubmit={create}>
+    <h3>New key</h3>
     <label class="field">Key name<input bind:value={name} maxlength="80" required placeholder="Desktop assistant" autocomplete="off" /></label>
-    <fieldset disabled={busy}><legend>Accounts</legend>{#each accounts as account}<label class="choice"><input type="checkbox" bind:group={selectedAccounts} value={account.id} />{account.settings?.name || account.settings?.address || 'Demo account'}</label>{/each}</fieldset>
-    <fieldset disabled={busy}><legend>Operations</legend>{#each operations as operation}<label class="choice"><input type="checkbox" bind:group={capabilities} value={operation} />{operation}</label>{/each}</fieldset>
+    <fieldset class="check-group" disabled={busy}><legend>Accounts</legend>{#each accounts as account}<label class="choice"><input type="checkbox" bind:group={selectedAccounts} value={account.id} />{account.settings?.name || account.settings?.address || 'Demo account'}</label>{/each}</fieldset>
+    <fieldset class="check-group" disabled={busy}><legend>Operations</legend>{#each operations as operation}<label class="choice"><input type="checkbox" bind:group={capabilities} value={operation} /><code>{operation}</code></label>{/each}</fieldset>
     <label class="field">Expires at (optional)<input type="datetime-local" bind:value={expiry} /></label>
     <button class="primary" disabled={busy || !name.trim() || !selectedAccounts.length || !capabilities.length}>{busy ? 'Saving…' : 'Generate API key'}</button>
   </form>
-  <h3>Issued keys</h3>
-  {#if !keys.length}<p>No API keys yet.</p>{/if}
-  {#each keys as key (key.id)}<article class="issued-key"><h4>{key.name}</h4><p>{key.accounts.map(id => accounts.find(a => a.id === id)?.settings?.name || accounts.find(a => a.id === id)?.settings?.address || id).join(', ')}</p><p>{key.capabilities.join(', ')}</p><p>Created {date(key.created_at)} · Last used {date(key.last_used_at)}<br />Expires {key.expires_at ? date(key.expires_at) : 'Never'}</p>{#if key.revoked_at}<p>Revoked {date(key.revoked_at)}</p>{:else}<button class="secondary" disabled={busy} onclick={() => revoke(key.id)} aria-label={`Revoke ${key.name}`}>Revoke key</button>{/if}</article>{/each}
+  <h3 class="list-title">Issued keys</h3>
+  {#if !keys.length}<p class="empty-note">No API keys yet. Your mail is keeping to itself.</p>{/if}
+  {#each keys as key (key.id)}<article class="settings-card issued-key"><h4>{key.name}</h4><p>{key.accounts.map(id => accounts.find(a => a.id === id)?.settings?.name || accounts.find(a => a.id === id)?.settings?.address || id).join(', ')}</p><p class="caps">{#each key.capabilities as capability}<code>{capability}</code>{/each}</p><p class="meta">Created {date(key.created_at)} · Last used {date(key.last_used_at)}<br />Expires {key.expires_at ? date(key.expires_at) : 'Never'}</p>{#if key.revoked_at}<p>Revoked {date(key.revoked_at)}</p>{:else}<button class="secondary" disabled={busy} onclick={() => revoke(key.id)} aria-label={`Revoke ${key.name}`}>Revoke key</button>{/if}</article>{/each}
 </section>
 
 <style>
-  fieldset { margin: 1rem 0; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; }
-  .choice { display: flex; align-items: center; gap: 0.6rem; min-height: 44px; overflow-wrap: anywhere; }
-  .choice input { width: 18px; height: 18px; flex-shrink: 0; }
-  .issued-key { padding: 1rem 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
-  h4 { margin: 0; }
-  .secret { margin: 1rem 0; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; }
-  textarea { width: 100%; min-height: 100px; resize: vertical; word-break: break-all; font-size: 16px; }
+  .check-group { display: flex; flex-wrap: wrap; gap: 2px 18px; margin-top: 18px; }
+  .check-group legend { width: 100%; margin-bottom: 6px; padding: 0; color: var(--ink-2); font-size: 12.5px; font-weight: 560; }
+  .settings-card > .primary { margin-top: 20px; }
+  .list-title { margin: 28px 0 10px; font-size: 15px; }
+  .issued-key { display: grid; gap: 6px; margin-bottom: 10px; overflow-wrap: anywhere; }
+  .issued-key p { color: var(--ink-2); font-size: 13px; }
+  .issued-key .meta { color: var(--ink-3); font-size: 12.5px; }
+  .issued-key .secondary { justify-self: start; margin-top: 6px; }
+  .caps { display: flex; flex-wrap: wrap; gap: 6px; }
+  .caps code { padding: 2px 7px; border-radius: 6px; background: var(--sunk); }
+  h4 { margin: 0; font-size: 14px; }
+  .secret { display: grid; gap: 10px; margin: 16px 0; padding: 18px; border-radius: 12px; background: var(--select); }
+  .secret h3 { margin: 0; color: var(--mint-hi); }
+  .secret p { color: var(--ink-2); }
+  .secret div { display: flex; gap: 12px; }
+  textarea { width: 100%; min-height: 84px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunk); resize: vertical; word-break: break-all; font: 13px/1.5 ui-monospace, monospace; }
 </style>

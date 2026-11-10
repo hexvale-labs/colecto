@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { hostService, type PendingSend, type ApiKey } from './lib/api';
+  import Icon from './Icon.svelte';
   let requests = $state<PendingSend[]>([]);
   let keys = $state<ApiKey[]>([]);
   let busy = $state(false);
@@ -22,15 +23,15 @@
     finally { busy = false; }
   }
 </script>
-<section class="settings-card" aria-labelledby="approvals-title">
-  <h2 id="approvals-title">Send approvals</h2>
-  <p>Automation cannot send until you approve the exact message below. Requests expire after 10 minutes. Changes require a new request.</p>
-  <button class="secondary" disabled={busy} onclick={reload}>Refresh requests</button>
+<section class="settings-section" aria-labelledby="approvals-title">
+  <header class="section-head with-action"><div><h2 id="approvals-title">Send approvals</h2>
+  <p>Automation cannot send until you approve the exact message below. Requests expire after 10 minutes, and any change needs a new request.</p></div>
+  <button class="secondary" disabled={busy} onclick={reload}><Icon name="refresh" size={15} />Refresh</button></header>
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   <p role="status">{status}</p>
-  {#if !requests.length && !busy}<p>No delivery requests.</p>{/if}
+  {#if !requests.length && !busy}<p class="empty-note">Nothing waiting for you. Automation is behaving.</p>{/if}
   {#each requests.slice().reverse() as request (request.id)}
-    <article aria-label={`Delivery request: ${request.snapshot?.subject || '(no subject)'}`}>
+    <article class="settings-card" aria-label={`Delivery request: ${request.snapshot?.subject || '(no subject)'}`}>
       <h3>{request.snapshot?.subject || '(no subject)'}</h3>
       <dl><dt>Requested by</dt><dd>{keys.find(key => key.id === request.requester)?.name || request.requester}</dd><dt>Account</dt><dd>{request.account}</dd><dt>From</dt><dd>{request.from}</dd><dt>Status</dt><dd>{request.status}</dd><dt>Expires</dt><dd>{new Date(request.expires_at * 1000).toLocaleString()}</dd></dl>
       {#if request.snapshot}<dl>{#each Object.entries(request.snapshot).filter(([key]) => key !== 'id') as [key, value]}<dt>{key === 'recipient' ? 'To' : key === 'subject' ? 'Subject' : key === 'body' ? 'Body' : key}</dt><dd class="snapshot">{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</dd>{/each}</dl>{/if}
@@ -41,8 +42,12 @@
   {/each}
 </section>
 <style>
-  article { padding: 1.25rem 0; border-top: 1px solid var(--border); margin-top: 1rem; overflow-wrap: anywhere; }
-  h3 { margin: 0 0 1rem; }
-  dl { margin: 1rem 0; } dt { font-weight: 600; margin-top: 0.75rem; } dd { margin: 0.25rem 0 0; }
-  .snapshot { white-space: pre-wrap; } .decisions { display: flex; flex-wrap: wrap; gap: 0.75rem; } button { min-height: 44px; touch-action: manipulation; }
+  article { display: grid; gap: 4px; margin-bottom: 12px; overflow-wrap: anywhere; }
+  h3 { margin: 0 0 8px; font-size: 16px; }
+  dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 8px 0; font-size: 13.5px; }
+  dt { color: var(--ink-3); font-weight: 540; } dd { margin: 0; color: var(--ink); }
+  dl + dl { padding-top: 12px; border-top: 1px solid var(--line-soft); }
+  .snapshot { white-space: pre-wrap; } article > p { color: var(--ink-3); font-size: 12.5px; }
+  .decisions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  @container settings (max-width: 480px) { dl { grid-template-columns: minmax(0, 1fr); gap: 2px; } dd { margin-bottom: 8px; } }
 </style>

@@ -249,3 +249,31 @@ test('activating an existing message tab clears an invalidated refresh', async (
   await expect(refresh).toBeEnabled();
   await expect(page.getByRole('heading', { name: 'First retained tab' })).toBeVisible();
 });
+
+test('docks panes by menu, drag and keyboard, keeps an open draft, and remembers the layout', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  const subject = page.getByLabel('Subject', { exact: true });
+  await subject.fill('Moving house');
+  await page.getByRole('button', { name: 'Move Reader' }).click();
+  await page.getByRole('option', { name: 'Dock bottom' }).click();
+  await expect(page.getByRole('region', { name: 'Bottom dock' }).getByRole('tab', { name: 'Reader' })).toBeVisible();
+  await expect(subject).toHaveValue('Moving house');
+  const viewport = page.viewportSize()!;
+  await page.getByRole('tab', { name: 'Mail' }).hover();
+  await page.mouse.down();
+  await page.mouse.move(viewport.width - 60, viewport.height / 3, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.getByRole('region', { name: 'Right dock' }).getByRole('tab', { name: 'Mail' })).toBeVisible();
+  await expect(subject).toHaveValue('Moving house');
+  const handle = page.getByRole('separator', { name: 'Resize bottom dock' });
+  const before = Number(await handle.getAttribute('aria-valuenow'));
+  await handle.focus();
+  await page.keyboard.press('ArrowUp');
+  await expect(handle).toHaveAttribute('aria-valuenow', String(before + 16));
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Right dock' }).getByRole('tab', { name: 'Mail' })).toBeVisible();
+  await expect(page.getByRole('separator', { name: 'Resize bottom dock' })).toHaveAttribute('aria-valuenow', String(before + 16));
+});

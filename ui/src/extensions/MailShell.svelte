@@ -10,6 +10,8 @@
   import { setAccessToken } from '../lib/api';
   import { onMount, tick } from 'svelte';
   import ExtensionPanel from '../ExtensionPanel.svelte';
+  import DockArea, { type PaneInfo } from '../DockArea.svelte';
+  import { defaultLayout, docks, dockOf, loadLayout, move, reconcile, saveLayout, type Dock, type Layout } from '../lib/layout';
   import { mailExtensions } from './registry';
   import ApiKeys from '../ApiKeys.svelte';
   import SendApprovals from '../SendApprovals.svelte';
@@ -50,7 +52,9 @@
     finally { labeling = false; }
   }
   async function searchMail(target = 'mail-search') {
-    if (settingsOpen || panelId || view) { if (!canLeave()) return; const reload = settingsOpen || !!panelId; clearView(); settingsOpen = false; if (reload) void loadList(); }
+    if (settingsOpen) { if (!canLeave()) return; clearView(); settingsOpen = false; void loadList(); }
+    else if (compact && view) { if (!canLeave()) return; clearView(); }
+    activate('mailbox');
     await tick(); document.getElementById(target)?.focus();
   }
   function keyboard(event: KeyboardEvent) {
@@ -67,7 +71,7 @@
     catch { serverError = 'Enter an HTTPS server address, or HTTP for a local server. Do not include credentials or an access token.'; }
   }
   function settingsTab(next: typeof settingsPage) { if (next === settingsPage || !canLeave()) return; dirty = false; settingsPage = next; if (next === 'Extensions') onsettings(); }
-  function activateTab(tab: typeof tabs[number]) { if (!canLeave()) return; clearView(); invalidateList(); settingsOpen = false; view = { kind: 'message', id: tab.id, folder: tab.folder }; }
+  function activateTab(tab: typeof tabs[number]) { if (!canLeave()) return; clearView(); invalidateList(); settingsOpen = false; view = { kind: 'message', id: tab.id, folder: tab.folder }; activate('reader'); }
   async function closeTab(id: string) {
     const index = currentTabs.findIndex(tab => tab.id === id);
     const active = view?.kind === 'message' && view.id === id;
@@ -82,8 +86,26 @@
     target?.focus();
   }
 
-  let panelId = $state<string | null>(null);
-  function openPanel(id: string) { if (!canLeave()) return; clearView(); invalidateList(); settingsOpen = false; panelId = id; }
+  // Panes are extension surfaces placed in docks. Hidden panes stay mounted, so moving or switching never loses a draft.
+  let thirdParty = $derived(extensionStates.filter(extension => !extension.bundled && extension.enabled));
+  let panes: PaneInfo[] = $derived([{ id: 'mailbox', title: 'Mail', icon: 'inbox' }, { id: 'reader', title: 'Reader', icon: 'mail' }, ...thirdParty.map(extension => ({ id: `ext:${extension.manifest.id}`, title: extension.manifest.name, icon: 'extension' as const }))]);
+  let savedLayout = $state<Layout>(loadLayout());
+  let layout = $derived(reconcile(savedLayout, panes.map(pane => pane.id)));
+  let focus = $state('mailbox');
+  let compact = $state(false);
+  let panelRuns = $state<Record<string, number>>({});
+  function commitLayout(next: Layout) { savedLayout = next; saveLayout(next); }
+  function activate(pane: string) {
+    focus = pane;
+    const dock = dockOf(layout, pane);
+    if (dock && layout.active[dock] !== pane) commitLayout({ ...layout, active: { ...layout.active, [dock]: pane } });
+  }
+  function openPanel(id: string) {
+    if (settingsOpen) { if (!canLeave()) return; settingsOpen = false; void loadList(); }
+    // Each explicit open runs the panel again, so it reflects permission changes.
+    panelRuns[id] = (panelRuns[id] ?? 0) + 1; activate(`ext:${id}`);
+  }
+  const dockNames: Record<Dock, string> = { left: 'left', center: 'center', right: 'right', bottom: 'bottom' };
   let accountError = $state('');
   let services = $derived(createServices(accountId));
   let activeAccount = $derived(accounts.find(a => a.id === accountId));
@@ -103,6 +125,7 @@
     settingsOpen = false; query = ''; folder = 'Inbox'; void loadList();
   }
   function manageAccounts() {
+    if (settingsOpen) return;
     if (!canLeave()) return;
     clearView(); invalidateList(); settingsOpen = true; settingsPage = 'Accounts';
     void refreshAccounts().catch(e => accountError = (e as Error).message);
@@ -132,9 +155,11 @@
     { id: 'search', name: 'Search emails', run: () => void searchMail(), disabled: !Mailbox },
     { id: 'new-label', name: 'Create a local label', run: () => void searchMail('new-label'), disabled: !Reader },
     ...Object.keys(labels).filter(() => view?.kind === 'message').map(name => ({ id: `assign-${name}`, name: `${labels[name].includes(view?.kind === 'message' ? view.id : '') ? 'Remove' : 'Add'} label: ${name}`, run: () => { if (view?.kind === 'message') void label(name, view.id, labels[name].includes(view.id)); }, disabled: loading })),
-    { id: 'refresh', name: 'Refresh current mailbox', run: () => void loadList(), disabled: settingsOpen || !!panelId },
+    { id: 'refresh', name: 'Refresh current mailbox', run: () => void loadList(), disabled: settingsOpen },
     { id: 'back', name: 'Back to message list', run: back },
     ...settingsPages.map(({ name: page }) => ({ id: `settings-${page}`, name: `Settings: ${page}`, run: () => { manageAccounts(); if (settingsOpen && !dirty) settingsTab(page); } })),
+    ...panes.flatMap(pane => docks.filter(dock => dockOf(layout, pane.id) !== dock).map(dock => ({ id: `move-${pane.id}-${dock}`, name: `Layout: Move ${pane.title} to the ${dockNames[dock]} dock`, run: () => { commitLayout(move(layout, pane.id, dock)); focus = pane.id; }, disabled: settingsOpen || compact }))),
+    { id: 'layout-reset', name: 'Layout: Reset to default', run: () => commitLayout(defaultLayout()), disabled: settingsOpen || compact },
     ...accounts.map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
     ...currentTabs.map(tab => ({ id: `tab-${tab.id}`, name: `Open message: ${tab.subject}`, run: () => activateTab(tab) })),
     ...extensionStates.filter(extension => !extension.bundled && extension.enabled).map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => openPanel(extension.manifest.id) })),
@@ -171,15 +196,15 @@
     finally { if (generation === listGeneration) { loading = false; fetching = false; } }
   }
   function canLeave() { return initialized && !busy && !labeling && (!dirty || window.confirm('Discard unsaved changes? Your last saved draft will be kept.')); }
-  function clearView() { panelId = null; ++openGeneration; view = null; dirty = false; openError = ''; opening = false; }
+  function clearView() { ++openGeneration; view = null; dirty = false; openError = ''; opening = false; }
   function navigate(next: 'Inbox' | 'Drafts' | 'Sent') {
     if (!canLeave()) return;
     clearView(); settingsOpen = false; query = ''; labelFilter = '';
     if (next !== folder) { items = []; fetchedAt = null; appliedQuery = ''; }
-    folder = next; void loadList();
+    folder = next; activate('mailbox'); void loadList();
   }
-  function compose(draft: Draft | null = null) { if (!Composer || !canLeave()) return; clearView(); settingsOpen = false; view = { kind: 'draft', draft }; }
-  function back() { if (!canLeave()) return; clearView(); }
+  function compose(draft: Draft | null = null) { if (!Composer || !canLeave()) return; clearView(); settingsOpen = false; view = { kind: 'draft', draft }; activate('reader'); }
+  function back() { if (!canLeave()) return; clearView(); activate('mailbox'); }
   async function open(id: string) {
     if (!canLeave()) return;
     if (folder !== 'Drafts') {
@@ -187,14 +212,14 @@
         if (currentTabs.length >= 30) { openError = 'You have 30 messages open in this account. Close a tab to open another.'; return; }
         tabs = [...tabs, { account: accountId, id, subject: items.find(item => item.id === id)?.subject || '(No subject)', folder }];
       }
-      clearView(); view = { kind: 'message', id, folder }; return;
+      clearView(); view = { kind: 'message', id, folder }; activate('reader'); return;
     }
     clearView();
     const generation = ++openGeneration;
     opening = true;
     try {
       const draft = await services.composer.read(id);
-      if (generation === openGeneration) view = { kind: 'draft', draft };
+      if (generation === openGeneration) { view = { kind: 'draft', draft }; activate('reader'); }
     } catch (e) { if (generation === openGeneration) openError = (e as Error).message; }
     finally { if (generation === openGeneration) opening = false; }
   }
@@ -204,99 +229,126 @@
     if (folder === 'Drafts') void loadList();
   }
   function beforeUnload(event: BeforeUnloadEvent) { if (dirty || busy) { event.preventDefault(); event.returnValue = ''; } }
+  const hour = new Date().getHours();
+  const greeting = hour < 5 ? 'Up late?' : hour < 12 ? 'Good morning.' : hour < 18 ? 'Good afternoon.' : 'Good evening.';
   onMount(() => {
+    const narrow = window.matchMedia('(max-width: 800px)');
+    const sync = () => compact = narrow.matches; sync(); narrow.addEventListener('change', sync);
     void refreshAccounts().then(() => {
       let remembered = ''; try { remembered = localStorage.getItem('colecto.account') ?? ''; } catch { /* Storage can be disabled. */ }
       if (accounts.some(a => a.id === remembered)) accountId = remembered;
       connected = accounts.find(a => a.id === accountId)?.connected ?? false;
     }).catch(e => accountError = (e as Error).message).finally(() => { initialized = true; void loadList(); });
+    return () => narrow.removeEventListener('change', sync);
   });
 </script>
 
 <svelte:window onbeforeunload={beforeUnload} onkeydown={keyboard} />
 <CommandRunner bind:this={runner} {commands} />
-<div class="app-shell" class:detail-open={view !== null || !!panelId} class:settings-open={settingsOpen}>
-  <aside class="rail">
-    <header class="rail-head">
-      <a class="brand" href="/" aria-label="Colecto, go to Inbox" onclick={(event) => { event.preventDefault(); navigate('Inbox'); }}><img class="brand-mark" src={mark} alt="" width="28" height="28" /><img class="brand-word" src={wordmark} alt="" width="73" height="17" /></a>
-      <button class="icon-button" aria-label="Commands" title="Commands  Ctrl K" onclick={() => runner.open()}><Icon name="command" /></button>
-      <button class="compose-button" disabled={busy || !initialized} onclick={() => compose()}><Icon name="compose" />Compose</button>
-    </header>
-    {#if settingsOpen}
+<div class="app-shell" class:settings-open={settingsOpen} class:compact>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Colecto, go to Inbox" onclick={(event) => { event.preventDefault(); navigate('Inbox'); }}><img class="brand-mark" src={mark} alt="" width="26" height="26" /><img class="brand-word" src={wordmark} alt="" width="69" height="16" /></a>
+    <button class="command-trigger" aria-label="Commands" title="Commands  Ctrl K" onclick={() => runner.open()}><Icon name="command" size={15} /><span class="command-hint">Jump to anything</span><span class="command-keys" aria-hidden="true"><kbd>Ctrl</kbd><kbd>K</kbd></span></button>
+    <div class="topbar-end">
+      <button class="compose-button" aria-label="Compose" disabled={busy || !initialized} onclick={() => compose()}><Icon name="compose" /><span>Compose</span></button>
+      <Select label="Current account" value={accountId} options={accountOptions} disabled={busy || !initialized} onchange={selectAccount}>
+        {#snippet trigger(current)}
+          <span class="avatar" style:--hue={hue(current?.label ?? accountLabel)} aria-hidden="true">{initial(current?.label ?? accountLabel)}</span>
+          <span class="account-name">{current?.label ?? accountLabel}<small><span class="status-dot" class:on={connected && !security.locked} aria-hidden="true"></span>{security.locked ? 'Credentials locked' : activeAccount?.configured ? connected ? 'Connected' : 'Not connected' : 'Local sample mail'}</small></span>
+        {/snippet}
+      </Select>
+      <button class="icon-button" class:active={settingsOpen} aria-label="Settings" title="Settings" disabled={busy || !initialized} onclick={() => settingsOpen ? closeSettings() : manageAccounts()}><Icon name="settings" size={18} /></button>
+    </div>
+  </header>
+  {#if accountError}<div class="account-error error-box" role="alert">{accountError}<button class="text-button" onclick={() => { accountError = ''; void refreshAccounts().catch(e => accountError = (e as Error).message); }}>Retry account settings</button></div>{/if}
+  {#if settingsOpen}
+    <div class="settings-view">
       <nav class="settings-nav" aria-label="Settings sections">
         <button class="nav-back" disabled={busy} onclick={closeSettings}><Icon name="back" />Back to mail</button>
         <h1 tabindex="-1">Settings</h1>
         {#each settingsPages as page (page.name)}<button class="nav-item" class:active={settingsPage === page.name} aria-current={settingsPage === page.name ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(page.name)}><Icon name={page.icon} />{page.name}</button>{/each}
       </nav>
-    {:else}
-      {#if Mailbox}<form class="mail-search" role="search" onsubmit={(event) => { event.preventDefault(); if (!busy && !labeling) void loadList(); }}>
-        <Icon name="search" />
-        <label class="sr-only" for="mail-search">Search {folder}</label>
-        <input id="mail-search" type="search" enterkeyhint="search" autocapitalize="none" maxlength="1024" bind:value={query} placeholder={`Search ${folder.toLowerCase()}`} />
-        <button class="search-submit" type="submit" aria-label="Search" disabled={busy}><kbd>↵</kbd></button>
-      </form>{/if}
-      <nav class="folder-nav" aria-label="Mail folders">
-        {#each folders as item (item.name)}<button class:active={folder === item.name && !panelId} aria-current={folder === item.name && !panelId ? 'page' : undefined} disabled={busy || !initialized} onclick={() => navigate(item.name)}><Icon name={item.icon} /><span>{item.name}</span>{#if folder === item.name && !loading && items.length}<span class="count" aria-hidden="true">{items.length}</span>{/if}</button>{/each}
-        {#each extensionStates.filter(extension => !extension.bundled && extension.enabled) as extension (extension.manifest.id)}
-          <button disabled={busy || !initialized} class:active={panelId === extension.manifest.id} aria-current={panelId === extension.manifest.id ? 'page' : undefined} onclick={() => openPanel(extension.manifest.id)}><Icon name="extension" /><span>{extension.manifest.name}</span></button>
-        {/each}
-      </nav>
-      {#if Mailbox}
-        {#if folder !== 'Drafts'}<div class="label-bar" role="group" aria-label="Filter by label">
-          {#if Object.keys(labels).length}<button class="chip" aria-pressed={!labelFilter} onclick={() => labelFilter = ''}>All</button>{/if}
-          {#each Object.keys(labels) as name (name)}<span class="chip-group">
-            <button class="chip" aria-pressed={labelFilter === name} onclick={() => labelFilter = labelFilter === name ? '' : name}>{name}</button>
-            {#if labelFilter === name}<button class="chip-remove" disabled={labeling || loading || busy} aria-label={`Delete label ${name}`} onclick={() => { if (window.confirm(`Delete label “${name}”? Messages will be kept.`)) void label(name, undefined, true); }}><Icon name="close" size={12} /></button>{/if}
-          </span>{/each}
-          <form class="label-new" onsubmit={(event) => { event.preventDefault(); void label(labelName); }}>
-            <input id="new-label" aria-label="New label" placeholder="New label" maxlength="80" bind:value={labelName} />
-            <button aria-label="Create label" disabled={!labelName.trim() || labeling || loading || busy}><Icon name="plus" size={14} /></button>
-          </form>
-        </div>{/if}
-        {#if labelError}<p class="error-box" role="alert">{labelError}</p>{/if}
-        <Mailbox items={visibleItems} searching={!!appliedQuery || !!labelFilter} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} />
-      {:else}<p class="rail-note">The mailbox extension is turned off. Turn it on in Settings → Extensions.</p>{/if}
-    {/if}
-    <footer class="rail-foot">
-      <Select label="Current account" value={accountId} options={accountOptions} placement="above" disabled={busy || !initialized} onchange={selectAccount}>
-        {#snippet trigger(current)}
-          <span class="avatar" style:--hue={hue(current?.label ?? accountLabel)} aria-hidden="true">{initial(current?.label ?? accountLabel)}</span>
-          <span class="account-name">{current?.label ?? accountLabel}<small>{security.locked ? 'Credentials locked' : activeAccount?.configured ? connected ? 'Connected' : 'Not connected' : 'Local sample mail'}</small></span>
-        {/snippet}
-      </Select>
-      <button class="icon-button" class:active={settingsOpen} aria-label="Settings" title="Settings" disabled={busy || !initialized} onclick={() => settingsOpen ? closeSettings() : manageAccounts()}><Icon name="settings" size={18} /></button>
-    </footer>
-  </aside>
-  <main class="stage">
-    {#if accountError}<div class="account-error error-box" role="alert">{accountError}<button class="text-button" onclick={() => { accountError = ''; void refreshAccounts().catch(e => accountError = (e as Error).message); }}>Retry account settings</button></div>{/if}
-    {#if settingsOpen}<section class="settings-page" aria-label="Settings">
-      {#if settingsPage === 'Accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} />
-      {:else if settingsPage === 'Servers'}<section class="settings-section"><h2>Mail service</h2><p>You are connected to <strong>{window.location.origin}</strong>. Accounts and saved drafts belong to this service.</p><p>To use a remote daemon, open its HTTPS address. Your credentials stay on that server. Local services can also use HTTP on loopback.</p><form class="inline-form" onsubmit={visitServer}><label class="field">Server address<input type="url" bind:value={serverUrl} placeholder="https://mail.example.com" required autocomplete="url" /></label>{#if serverError}<p class="error-box" role="alert">{serverError}</p>{/if}<div class="button-row"><button class="secondary">Open server</button><button type="button" class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></div></form></section>
-      {:else if settingsPage === 'Send approvals'}<SendApprovals />
-      {:else if settingsPage === 'API keys'}<ApiKeys {accounts} />
-      {:else}{@render extensionSettings()}{/if}
-    </section>
-    {:else if panelId}{#key `${accountId}:${panelId}`}<ExtensionPanel id={panelId} account={accountId} onback={() => navigate('Inbox')} />{/key}
-    {:else}
-      {#if currentTabs.length}<nav class="tab-strip" aria-label="Open messages">
-        {#each currentTabs as tab (tab.id)}<div class="message-tab" class:active={view?.kind === 'message' && view.id === tab.id}>
-          <button class="tab-title" aria-pressed={view?.kind === 'message' && view.id === tab.id} disabled={busy} onclick={() => activateTab(tab)} title={tab.subject}>{tab.subject}</button>
-          <button class="tab-close" aria-label={`Close ${tab.subject}`} disabled={busy} onclick={() => closeTab(tab.id)}><Icon name="close" size={13} /></button>
-        </div>{/each}
-      </nav>{/if}
-      <div class="reading-pane">
-        {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
-          {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />
-          {:else if view?.kind === 'draft' && Composer}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
-          {:else}
-            <section class="welcome">
-              <img src={mark} alt="" width="56" height="56" />
-              <p>{opening ? 'Opening your draft…' : !Reader ? 'The reader extension is turned off.' : 'Pick a message from the list to read it here.'}</p>
-              <p class="hint">Press <kbd>Ctrl</kbd> <kbd>K</kbd> to search commands.</p>
-            </section>
-          {/if}
-        {/key}
-      </div>
-    {/if}
-  </main>
+      <section class="settings-page" aria-label="Settings">
+        {#if settingsPage === 'Accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} />
+        {:else if settingsPage === 'Servers'}<section class="settings-section"><header class="section-head"><h2>Mail service</h2><p>You are connected to <strong>{window.location.origin}</strong>. Accounts and saved drafts belong to this service.</p></header><div class="settings-card"><h3>Use another server</h3><p>Open a remote daemon’s HTTPS address. Your credentials stay on that server. Local services can also use HTTP on loopback.</p><form class="inline-form" onsubmit={visitServer}><label class="field">Server address<input type="url" bind:value={serverUrl} placeholder="https://mail.example.com" required autocomplete="url" /></label>{#if serverError}<p class="error-box" role="alert">{serverError}</p>{/if}<div class="button-row"><button class="secondary">Open server</button><button type="button" class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></div></form></div></section>
+        {:else if settingsPage === 'Send approvals'}<SendApprovals />
+        {:else if settingsPage === 'API keys'}<ApiKeys {accounts} />
+        {:else}{@render extensionSettings()}{/if}
+      </section>
+    </div>
+  {:else}
+    <DockArea {layout} {panes} focus={panes.some(pane => pane.id === focus) ? focus : 'mailbox'} {compact} onchange={commitLayout} onactivate={activate}>
+      {#snippet content(pane)}
+        {#if pane === 'mailbox'}{@render mailboxPane()}
+        {:else if pane === 'reader'}{@render readerPane()}
+        {:else}
+          {@const id = pane.slice(4)}
+          {#if panelRuns[id] || layout.active[dockOf(layout, pane) ?? 'center'] === pane}{#key `${accountId}:${id}:${panelRuns[id] ?? 0}`}<ExtensionPanel {id} account={accountId} onback={() => activate('mailbox')} />{/key}{/if}
+        {/if}
+      {/snippet}
+    </DockArea>
+    {#if compact}{@render folderNav()}{/if}
+  {/if}
 </div>
+
+{#snippet folderNav()}
+<nav class="folder-nav" aria-label="Mail folders">
+  {#each folders as item (item.name)}<button class:active={folder === item.name} aria-current={folder === item.name ? 'page' : undefined} disabled={busy || !initialized} onclick={() => navigate(item.name)}><Icon name={item.icon} /><span>{item.name}</span>{#if folder === item.name && !loading && items.length}<span class="count" aria-hidden="true">{items.length}</span>{/if}</button>{/each}
+  {#each thirdParty as extension (extension.manifest.id)}
+    <button disabled={busy || !initialized} class:active={focus === `ext:${extension.manifest.id}`} onclick={() => openPanel(extension.manifest.id)}><Icon name="extension" /><span>{extension.manifest.name}</span></button>
+  {/each}
+</nav>
+{/snippet}
+
+{#snippet mailboxPane()}
+  <div class="mail-pane">
+    {#if Mailbox}<form class="mail-search" role="search" onsubmit={(event) => { event.preventDefault(); if (!busy && !labeling) void loadList(); }}>
+      <Icon name="search" />
+      <label class="sr-only" for="mail-search">Search {folder}</label>
+      <input id="mail-search" type="search" enterkeyhint="search" autocapitalize="none" maxlength="1024" bind:value={query} placeholder={`Search ${folder.toLowerCase()}`} />
+      <button class="search-submit" type="submit" aria-label="Search" disabled={busy}><kbd>↵</kbd></button>
+    </form>{/if}
+    {#if !compact}{@render folderNav()}{/if}
+    {#if Mailbox}
+      {#if folder !== 'Drafts'}<div class="label-bar" role="group" aria-label="Filter by label">
+        {#if Object.keys(labels).length}<button class="chip" aria-pressed={!labelFilter} onclick={() => labelFilter = ''}>All</button>{/if}
+        {#each Object.keys(labels) as name (name)}<span class="chip-group">
+          <button class="chip" aria-pressed={labelFilter === name} onclick={() => labelFilter = labelFilter === name ? '' : name}>{name}</button>
+          {#if labelFilter === name}<button class="chip-remove" disabled={labeling || loading || busy} aria-label={`Delete label ${name}`} onclick={() => { if (window.confirm(`Delete label “${name}”? Messages will be kept.`)) void label(name, undefined, true); }}><Icon name="close" size={12} /></button>{/if}
+        </span>{/each}
+        <form class="label-new" onsubmit={(event) => { event.preventDefault(); void label(labelName); }}>
+          <input id="new-label" aria-label="New label" placeholder="New label" maxlength="80" bind:value={labelName} />
+          <button aria-label="Create label" disabled={!labelName.trim() || labeling || loading || busy}><Icon name="plus" size={14} /></button>
+        </form>
+      </div>{/if}
+      {#if labelError}<p class="error-box" role="alert">{labelError}</p>{/if}
+      <Mailbox items={visibleItems} searching={!!appliedQuery || !!labelFilter} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} />
+    {:else}<p class="pane-note">The mailbox extension is turned off. Turn it on in Settings → Extensions.</p>{/if}
+  </div>
+{/snippet}
+
+{#snippet readerPane()}
+  <div class="stage">
+    {#if currentTabs.length}<nav class="tab-strip" aria-label="Open messages">
+      {#each currentTabs as tab (tab.id)}<div class="message-tab" class:active={view?.kind === 'message' && view.id === tab.id}>
+        <button class="tab-title" aria-pressed={view?.kind === 'message' && view.id === tab.id} disabled={busy} onclick={() => activateTab(tab)} title={tab.subject}>{tab.subject}</button>
+        <button class="tab-close" aria-label={`Close ${tab.subject}`} disabled={busy} onclick={() => closeTab(tab.id)}><Icon name="close" size={13} /></button>
+      </div>{/each}
+    </nav>{/if}
+    <div class="reading-pane">
+      {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
+        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />
+        {:else if view?.kind === 'draft' && Composer}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
+        {:else}
+          <section class="welcome">
+            <img src={mark} alt="" width="48" height="48" />
+            {#if opening}<p>Opening your draft…</p>
+            {:else if !Reader}<p>The reader extension is turned off.</p>
+            {:else}<h2>{greeting}</h2><p>Pick a message and it will open here.</p>{/if}
+            <p class="hint">Press <kbd>Ctrl</kbd> <kbd>K</kbd> to jump anywhere, or drag a pane’s tab to rearrange.</p>
+          </section>
+        {/if}
+      {/key}
+    </div>
+  </div>
+{/snippet}
