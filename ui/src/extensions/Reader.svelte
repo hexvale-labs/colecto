@@ -16,8 +16,9 @@
   let remoteImages = $state(false);
   let downloading = $state<number | null>(null);
   // The frame has no scripts, forms, or same-origin access; this policy also blocks remote content until asked.
-  // Mail that paints its own backgrounds keeps its sheet; plain HTML mail adopts the dark reading colours.
-  let designed = $derived(!!content?.html && /bgcolor|background(-color)?\s*:/i.test(content.html));
+  // Mail that paints its own backgrounds or text colours keeps its light sheet, so dark ink stays readable.
+  // Plain HTML mail adopts the dark reading colours.
+  let designed = $derived(!!content?.html && /bgcolor|background(-color)?\s*:|(^|[^-\w])color\s*[:=]/i.test(content.html));
   let frameStyle = $derived(designed
     ? 'html{color-scheme:light}body{margin:24px;font:15px/1.6 system-ui,sans-serif;color:#1d1d1f;background:#fff;overflow-wrap:anywhere}'
     : 'html{color-scheme:dark}body{margin:0;font:15.5px/1.65 system-ui,sans-serif;color:#d5ddd7;background:transparent;overflow-wrap:anywhere}a{color:#a2d6b1}blockquote{margin:0 0 0 2px;padding-left:14px;border-left:1px solid #3a463f;color:#9faba3}');

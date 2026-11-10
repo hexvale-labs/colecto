@@ -12,8 +12,17 @@
   let status = $state('');
   let busy = $state(false);
   const operations: Capability[] = ['account.read', 'messages.list', 'messages.read', 'messages.label', 'drafts.list', 'drafts.read', 'drafts.write', 'messages.send'];
+  let mcp = $state<boolean | null>(null);
   async function reload() { keys = await hostService.apiKeys(); }
-  onMount(() => { void reload().catch(e => error = e.message); });
+  onMount(() => {
+    void reload().catch(e => error = e.message);
+    void hostService.preferences().then(p => mcp = p.mcp).catch(e => error = e.message);
+  });
+  async function toggleMcp(on: boolean) {
+    busy = true; error = ''; status = '';
+    try { mcp = (await hostService.savePreferences({ mcp: on })).mcp; status = on ? 'MCP server turned on.' : 'MCP server turned off.'; }
+    catch (e) { error = (e as Error).message; } finally { busy = false; }
+  }
   async function create(event: SubmitEvent) {
     event.preventDefault(); busy = true; error = ''; status = ''; secret = '';
     try {
@@ -39,6 +48,10 @@
   <p>Give automation access to selected accounts and operations. Keys cannot manage settings, and <code>messages.send</code> only asks you for approval; it never sends directly.</p></header>
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   <p role="status">{status}</p>
+  <div class="settings-card setting-row">
+    <div><h3>MCP server</h3><p>Lets MCP clients use a key below at <code>{window.location.origin}/api/v1/mcp</code>. Off until you turn it on; keys keep working over HTTP either way.</p></div>
+    <label class="switch"><input type="checkbox" checked={!!mcp} disabled={busy || mcp === null} onchange={(event) => void toggleMcp(event.currentTarget.checked)} /><span class="sr-only">MCP server</span></label>
+  </div>
   {#if secret}<section class="secret" aria-label="New API key"><h3>Copy your key now</h3><p>This secret is shown only here, until you leave or dismiss it.</p><textarea aria-label="API key secret" readonly value={secret} spellcheck="false"></textarea><div><button class="secondary" onclick={copy}>Copy key</button><button class="text-button" onclick={() => secret = ''}>Dismiss secret</button></div></section>{/if}
   <form class="settings-card" onsubmit={create}>
     <h3>New key</h3>

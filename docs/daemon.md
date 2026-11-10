@@ -258,7 +258,9 @@ Review requests in Settings → Send approvals. The owner composer still sends
 when the owner presses Send. Routing headers cannot turn a scoped key into an
 owner.
 
-The shared local Host and daemon expose `/api/v1/mcp` using the official Rust
+MCP is **off by default**. Turn it on in Settings → API keys (it is stored with the
+owner preferences); until then `/api/v1/mcp` answers 404 and keys still work over
+HTTP. The shared local Host and daemon expose `/api/v1/mcp` using the official Rust
 MCP SDK (`rmcp` 3.9.0), stateless Streamable HTTP JSON responses and the stable
 `2025-11-25` protocol. Configure `Authorization: Bearer <scoped-key>` in your
 client. There is no OAuth authorization server, discovery or dynamic client

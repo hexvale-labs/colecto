@@ -6,118 +6,147 @@
   import type { Snippet } from 'svelte';
   import Icon from './Icon.svelte';
   import Select from './Select.svelte';
-  import { docks, minSize, move, type Dock, type Layout } from './lib/layout';
+  import { HEAD, MIN, dock, dockEdge, leaves, measure, preview, resize, setVisible, zoneIn, type Edge, type Gutter, type Layout, type Rect, type Zone } from './lib/layout';
   let { layout, panes, focus, compact, content, onactivate, onchange }: {
     layout: Layout; panes: PaneInfo[]; focus: string; compact: boolean; content: Snippet<[string]>;
     onactivate: (pane: string) => void; onchange: (layout: Layout) => void;
   } = $props();
-  const names: Record<Dock, string> = { left: 'Left', center: 'Center', right: 'Right', bottom: 'Bottom' };
-  const dockOptions = docks.map(dock => ({ value: dock, label: `Dock ${names[dock].toLowerCase()}` }));
+  type MenuAction = Edge | 'hide';
+  const menu: { value: MenuAction; label: string }[] = [
+    { value: 'left', label: 'Dock along the left edge' }, { value: 'right', label: 'Dock along the right edge' },
+    { value: 'top', label: 'Dock along the top edge' }, { value: 'bottom', label: 'Dock along the bottom edge' },
+    { value: 'hide', label: 'Hide this pane' },
+  ];
+  const EDGE = 14;
   let area = $state<HTMLElement>();
-  let dragging = $state<{ pane: string; zone: Dock | null } | null>(null);
-  let resizing = $state<Dock | null>(null);
+  let width = $state(0);
+  let height = $state(0);
   let info = $derived(new Map(panes.map(pane => [pane.id, pane])));
-  let placed = $derived(docks.flatMap(dock => layout.docks[dock].filter(pane => info.has(pane)).map(pane => ({ pane, dock }))));
-  let used = $derived(docks.filter(dock => placed.some(item => item.dock === dock)));
-  // Side docks keep their size; whichever top dock is last absorbs the remaining width when the center is empty.
-  let grid = $derived.by(() => {
-    const top = (['left', 'center', 'right'] as const).filter(dock => used.includes(dock));
-    const columns = top.map(dock => dock === 'center' ? 'minmax(0, 1fr)' : `min(${layout.size[dock]}px, 44%)`);
-    if (top.length && !top.includes('center')) columns[columns.length - 1] = 'minmax(0, 1fr)';
-    const bottom = used.includes('bottom');
-    const width = Math.max(top.length, 1);
-    return {
-      columns: columns.join(' ') || 'minmax(0, 1fr)',
-      rows: !top.length ? 'minmax(0, 1fr)' : bottom ? `minmax(0, 1fr) min(${layout.size.bottom}px, 60%)` : 'minmax(0, 1fr)',
-      areas: [top.length ? `"${top.join(' ')}"` : '', bottom ? `"${Array(width).fill('bottom').join(' ')}"` : ''].filter(Boolean).join(' '),
-    };
-  });
-  const visible = (pane: string, dock: Dock) => compact ? pane === focus : layout.active[dock] === pane;
+  let groups = $derived(leaves(layout.root));
+  let measured = $derived(measure(layout.root, { x: 0, y: 0, w: width, h: height }));
+  let placed = $derived(groups.flatMap(group => group.panes.filter(pane => info.has(pane)).map(pane => ({ pane, group }))));
+  type Target = { group: string; zone: Zone; index?: number } | { edge: Edge };
+  let dragging = $state<{ pane: string; x: number; y: number; target: Target | null; shape: Rect | null } | null>(null);
+  let resizing = $state<'row' | 'column' | null>(null);
+  const box = (rect: Rect | undefined) => rect ? `left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px` : 'display:none';
+  const body = (rect: Rect | undefined) => rect && box({ ...rect, y: rect.y + HEAD, h: rect.h - HEAD });
 
-  function zoneAt(x: number, y: number): Dock | null {
-    if (!area) return null;
-    const rect = area.getBoundingClientRect();
-    const rx = (x - rect.left) / rect.width, ry = (y - rect.top) / rect.height;
-    if (rx < 0 || rx > 1 || ry < 0 || ry > 1) return null;
-    return ry > 0.72 ? 'bottom' : rx < 0.24 ? 'left' : rx > 0.76 ? 'right' : 'center';
+  function targetAt(x: number, y: number): { target: Target; shape: Rect } | null {
+    if (x < 0 || y < 0 || x > width || y > height) return null;
+    const edge: Edge | null = x < EDGE ? 'left' : x > width - EDGE ? 'right' : y < EDGE ? 'top' : y > height - EDGE ? 'bottom' : null;
+    if (edge) return { target: { edge }, shape: preview({ x: 0, y: 0, w: width, h: height }, edge) };
+    for (const [group, rect] of measured.groups) {
+      if (x < rect.x || x > rect.x + rect.w || y < rect.y || y > rect.y + rect.h) continue;
+      const zone = zoneIn(rect, x, y);
+      let index: number | undefined;
+      if (zone === 'center' && y < rect.y + HEAD) {
+        const tabs = [...(area?.querySelectorAll<HTMLElement>(`[data-group="${group}"] .dock-tab`) ?? [])];
+        const left = area?.getBoundingClientRect().left ?? 0;
+        index = tabs.findIndex(tab => { const r = tab.getBoundingClientRect(); return x + left < r.left + r.width / 2; });
+        if (index < 0) index = tabs.length;
+      }
+      return { target: { group, zone, index }, shape: preview(rect, zone) };
+    }
+    return null;
   }
   function startDrag(event: PointerEvent, pane: string) {
-    if (event.button !== 0 || compact) return;
+    if (event.button !== 0 || compact || !area) return;
     const start = { x: event.clientX, y: event.clientY };
+    const origin = area.getBoundingClientRect();
     const moveTo = (e: PointerEvent) => {
       if (!dragging && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 6) return;
-      dragging = { pane, zone: zoneAt(e.clientX, e.clientY) };
+      const x = e.clientX - origin.left, y = e.clientY - origin.top;
+      const hit = targetAt(x, y);
+      dragging = { pane, x, y, target: hit?.target ?? null, shape: hit?.shape ?? null };
     };
     const stop = (e: PointerEvent | KeyboardEvent) => {
       window.removeEventListener('pointermove', moveTo); window.removeEventListener('pointerup', stop); window.removeEventListener('keydown', cancel);
-      if (dragging?.zone && e.type === 'pointerup') onchange(move(layout, dragging.pane, dragging.zone));
+      const target = dragging?.target;
+      if (target && e.type === 'pointerup') onchange('edge' in target ? dockEdge(layout, pane, target.edge) : dock(layout, pane, target.group, target.zone, target.index));
       dragging = null;
     };
     const cancel = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); stop(e); } };
     window.addEventListener('pointermove', moveTo); window.addEventListener('pointerup', stop); window.addEventListener('keydown', cancel);
   }
 
-  function clamp(dock: 'left' | 'right' | 'bottom', value: number) {
-    const rect = area?.getBoundingClientRect();
-    const room = dock === 'bottom' ? (rect?.height ?? 800) - 160 : (rect?.width ?? 1200) - 320;
-    return Math.round(Math.max(minSize[dock], Math.min(value, room)));
+  function sizesFor(gutter: Gutter, sizes: number[], delta: number) {
+    const next = [...sizes];
+    const pair = (sizes[gutter.index] + sizes[gutter.index + 1]) * gutter.span;
+    const min = Math.min(MIN[gutter.dir], pair / 2);
+    const first = Math.max(min, Math.min(pair - min, sizes[gutter.index] * gutter.span + delta));
+    next[gutter.index] = first / gutter.span; next[gutter.index + 1] = (pair - first) / gutter.span;
+    return next;
   }
-  function resize(dock: 'left' | 'right' | 'bottom', value: number) {
-    onchange({ ...layout, size: { ...layout.size, [dock]: clamp(dock, value) } });
+  function splitAt(path: number[]) {
+    let node = layout.root;
+    for (const index of path) node = node?.kind === 'split' ? node.children[index] : null;
+    return node?.kind === 'split' ? node : null;
   }
-  function startResize(event: PointerEvent, dock: 'left' | 'right' | 'bottom') {
-    if (event.button !== 0 || !area) return;
+  function startResize(event: PointerEvent, gutter: Gutter) {
+    const split = splitAt(gutter.path);
+    if (event.button !== 0 || !split) return;
     event.preventDefault();
     const handle = event.currentTarget as HTMLElement;
     handle.setPointerCapture(event.pointerId);
-    resizing = dock;
-    const rect = area.getBoundingClientRect();
-    const update = (e: PointerEvent) => resize(dock, dock === 'left' ? e.clientX - rect.left : dock === 'right' ? rect.right - e.clientX : rect.bottom - e.clientY);
+    resizing = gutter.dir;
+    const start = gutter.dir === 'row' ? event.clientX : event.clientY;
+    const sizes = [...split.sizes];
+    const update = (e: PointerEvent) => onchange(resize(layout, gutter.path, sizesFor(gutter, sizes, (gutter.dir === 'row' ? e.clientX : e.clientY) - start)));
     const stop = () => { handle.removeEventListener('pointermove', update); handle.removeEventListener('pointerup', stop); handle.removeEventListener('lostpointercapture', stop); resizing = null; };
     handle.addEventListener('pointermove', update); handle.addEventListener('pointerup', stop); handle.addEventListener('lostpointercapture', stop);
   }
-  function resizeKey(event: KeyboardEvent, dock: 'left' | 'right' | 'bottom') {
-    const grow = dock === 'left' ? 'ArrowRight' : dock === 'right' ? 'ArrowLeft' : 'ArrowUp';
-    const shrink = dock === 'left' ? 'ArrowLeft' : dock === 'right' ? 'ArrowRight' : 'ArrowDown';
-    const step = event.shiftKey ? 64 : 16;
-    if (event.key === grow) resize(dock, layout.size[dock] + step);
-    else if (event.key === shrink) resize(dock, layout.size[dock] - step);
-    else return;
+  function resizeKey(event: KeyboardEvent, gutter: Gutter) {
+    const split = splitAt(gutter.path);
+    const keys = gutter.dir === 'row' ? { ArrowLeft: -1, ArrowRight: 1 } : { ArrowUp: -1, ArrowDown: 1 };
+    const sign = keys[event.key as keyof typeof keys];
+    if (!split || !sign) return;
     event.preventDefault();
+    onchange(resize(layout, gutter.path, sizesFor(gutter, split.sizes, sign * (event.shiftKey ? 64 : 16))));
   }
+  function equalize(gutter: Gutter) {
+    const split = splitAt(gutter.path);
+    if (!split) return;
+    const sizes = [...split.sizes]; const half = (sizes[gutter.index] + sizes[gutter.index + 1]) / 2;
+    sizes[gutter.index] = half; sizes[gutter.index + 1] = half;
+    onchange(resize(layout, gutter.path, sizes));
+  }
+  function menuAction(pane: string, action: MenuAction) {
+    onchange(action === 'hide' ? setVisible(layout, pane, false) : dockEdge(layout, pane, action));
+  }
+  const label = (gutter: Gutter) => gutter.dir === 'row' ? 'Resize the panes on either side' : 'Resize the panes above and below';
 </script>
 
-<div bind:this={area} class="dock-area" class:compact class:dragging={!!dragging} class:resizing={!!resizing} data-resizing={resizing}
-  style:grid-template-columns={compact ? undefined : grid.columns} style:grid-template-rows={compact ? undefined : grid.rows} style:grid-template-areas={compact ? undefined : grid.areas}>
+<div bind:this={area} bind:clientWidth={width} bind:clientHeight={height} class="dock-area" class:compact class:dragging={!!dragging} data-resizing={resizing}>
   {#if !compact}
-    {#each used as dock (dock)}
-      {@const items = layout.docks[dock].filter(pane => info.has(pane))}
-      {@const current = info.get(layout.active[dock]) ?? info.get(items[0])}
-      <section class="dock-frame" style:grid-area={dock} aria-label={`${names[dock]} dock`}>
+    {#each groups as group (group.id)}
+      {@const current = info.get(group.active)}
+      <section class="dock-frame" data-group={group.id} style={box(measured.groups.get(group.id))} aria-label={`${current?.title ?? 'Pane'} group`}>
         <header class="dock-head">
-          <div class="dock-tabs" role="tablist" aria-label={`${names[dock]} dock panes`}>
-            {#each items as pane (pane)}
+          <div class="dock-tabs" role="tablist" aria-label="Panes in this group">
+            {#each group.panes as pane (pane)}
               {@const meta = info.get(pane)}
-              {#if meta}<button role="tab" id={`dock-tab-${pane}`} class="dock-tab" aria-selected={layout.active[dock] === pane} aria-controls={`pane-${pane}`} title="Drag to another dock" onpointerdown={(event) => startDrag(event, pane)} onclick={() => onactivate(pane)}><Icon name={meta.icon} size={14} /><span>{meta.title}</span></button>{/if}
+              {#if meta}<button role="tab" id={`dock-tab-${pane}`} class="dock-tab" aria-selected={group.active === pane} aria-controls={`pane-${pane}`} title="Drag onto another pane to dock it there" onpointerdown={(event) => startDrag(event, pane)} onclick={() => onactivate(pane)}><Icon name={meta.icon} size={14} /><span>{meta.title}</span></button>{/if}
             {/each}
           </div>
-          {#if current}<div class="dock-move"><Select label={`Move ${current.title}`} value={dock} options={dockOptions} onchange={(to) => onchange(move(layout, current.id, to))}>{#snippet trigger()}<Icon name="layout" size={15} />{/snippet}</Select></div>{/if}
+          {#if current}<div class="dock-move"><Select label={`Arrange ${current.title}`} value={'' as MenuAction} options={menu} onchange={(action) => menuAction(current.id, action)}>{#snippet trigger()}<Icon name="layout" size={15} />{/snippet}</Select></div>{/if}
         </header>
-        {#if dock !== 'center'}
-          {@const side = dock}
-          <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (a focusable separator is the ARIA splitter pattern) -->
-          <div class="dock-resize {side}" role="separator" tabindex="0" aria-label={`Resize ${names[side].toLowerCase()} dock`} aria-orientation={side === 'bottom' ? 'horizontal' : 'vertical'} aria-valuenow={layout.size[side]} aria-valuemin={minSize[side]}
-            onpointerdown={(event) => startResize(event, side)} onkeydown={(event) => resizeKey(event, side)} ondblclick={() => resize(side, side === 'bottom' ? 260 : side === 'left' ? 344 : 360)}></div>
-        {/if}
       </section>
     {/each}
+    {#each measured.gutters as gutter (`${gutter.path.join('.')}:${gutter.index}`)}
+      {@const split = splitAt(gutter.path)}
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (a focusable separator is the ARIA splitter pattern) -->
+      <div class="dock-gutter {gutter.dir}" style={box(gutter.rect)} role="separator" tabindex="0" aria-label={label(gutter)} aria-orientation={gutter.dir === 'row' ? 'vertical' : 'horizontal'}
+        aria-valuenow={Math.round((split?.sizes[gutter.index] ?? 0) * 100)} aria-valuemin={0} aria-valuemax={100}
+        onpointerdown={(event) => startResize(event, gutter)} onkeydown={(event) => resizeKey(event, gutter)} ondblclick={() => equalize(gutter)}></div>
+    {/each}
   {/if}
-  {#each placed as { pane, dock } (pane)}
-    <div class="pane" id={`pane-${pane}`} role={compact ? undefined : 'tabpanel'} aria-labelledby={compact ? undefined : `dock-tab-${pane}`} style:grid-area={compact ? undefined : dock} data-dock={dock} hidden={!visible(pane, dock)}>{@render content(pane)}</div>
+  {#each placed as { pane, group } (pane)}
+    <div class="pane" id={`pane-${pane}`} role={compact ? undefined : 'tabpanel'} aria-labelledby={compact ? undefined : `dock-tab-${pane}`} style={compact ? undefined : body(measured.groups.get(group.id))} hidden={compact ? pane !== focus : group.active !== pane}>{@render content(pane)}</div>
   {/each}
   {#if dragging}
     <div class="drop-overlay" aria-hidden="true">
-      {#if dragging.zone}<div class="drop-preview {dragging.zone}"><span>Dock {names[dragging.zone].toLowerCase()}</span></div>{/if}
+      {#if dragging.shape}<div class="drop-preview" style={box(dragging.shape)}></div>{/if}
+      <span class="drag-ghost" style:transform={`translate(${Math.min(dragging.x + 12, width - 150)}px, ${Math.min(dragging.y + 10, height - 34)}px)`}><Icon name={info.get(dragging.pane)?.icon ?? 'layout'} size={14} />{info.get(dragging.pane)?.title}</span>
     </div>
   {/if}
 </div>

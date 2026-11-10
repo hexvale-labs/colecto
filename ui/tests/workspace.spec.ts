@@ -250,30 +250,106 @@ test('activating an existing message tab clears an invalidated refresh', async (
   await expect(page.getByRole('heading', { name: 'First retained tab' })).toBeVisible();
 });
 
-test('docks panes by menu, drag and keyboard, keeps an open draft, and remembers the layout', async ({ page }) => {
+test('docks panes by dragging onto edges and tab strips, keeps an open draft, and remembers the layout', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
   const subject = page.getByLabel('Subject', { exact: true });
   await subject.fill('Moving house');
-  await page.getByRole('button', { name: 'Move Reader' }).click();
-  await page.getByRole('option', { name: 'Dock bottom' }).click();
-  await expect(page.getByRole('region', { name: 'Bottom dock' }).getByRole('tab', { name: 'Reader' })).toBeVisible();
+  const group = (tab: string) => page.locator('.dock-frame', { has: page.getByRole('tab', { name: tab, exact: true }) });
+  async function drag(tab: string, x: number, y: number) {
+    await page.getByRole('tab', { name: tab, exact: true }).hover();
+    await page.mouse.down();
+    await page.mouse.move(x, y, { steps: 8 });
+    await expect(page.locator('.drop-preview')).toBeVisible();
+    await page.mouse.up();
+  }
+  // The account switcher starts under the mail list.
+  const mail = (await group('Mail').boundingBox())!;
+  expect((await group('Accounts').boundingBox())!.y).toBeGreaterThan(mail.y + mail.height - 2);
+  // Dropping on the reader's right edge splits its space.
+  let reader = (await group('Reader').boundingBox())!;
+  await drag('Accounts', reader.x + reader.width - 30, reader.y + reader.height / 2);
+  reader = (await group('Reader').boundingBox())!;
+  expect((await group('Accounts').boundingBox())!.x).toBeGreaterThanOrEqual(reader.x + reader.width);
   await expect(subject).toHaveValue('Moving house');
-  const viewport = page.viewportSize()!;
-  await page.getByRole('tab', { name: 'Mail' }).hover();
-  await page.mouse.down();
-  await page.mouse.move(viewport.width - 60, viewport.height / 3, { steps: 8 });
-  await page.mouse.up();
-  await expect(page.getByRole('region', { name: 'Right dock' }).getByRole('tab', { name: 'Mail' })).toBeVisible();
+  // Dropping on a tab strip adds a tab instead; the hidden reader keeps the draft.
+  const head = (await group('Reader').locator('.dock-head').boundingBox())!;
+  await drag('Mail', head.x + head.width - 80, head.y + head.height / 2);
+  await expect(group('Reader').getByRole('tab')).toHaveText(['Reader', 'Mail']);
+  await expect(page.getByRole('tab', { name: 'Mail', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(subject).toHaveValue('Moving house');
-  const handle = page.getByRole('separator', { name: 'Resize bottom dock' });
+  const handle = page.getByRole('separator').first();
   const before = Number(await handle.getAttribute('aria-valuenow'));
   await handle.focus();
-  await page.keyboard.press('ArrowUp');
-  await expect(handle).toHaveAttribute('aria-valuenow', String(before + 16));
+  await page.keyboard.press('Shift+ArrowLeft');
+  await expect(handle).not.toHaveAttribute('aria-valuenow', String(before));
+  await page.getByRole('tab', { name: 'Reader', exact: true }).click();
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
+  await page.getByRole('button', { name: 'Arrange Accounts' }).click();
+  await page.getByRole('option', { name: 'Hide this pane' }).click();
+  await expect(page.getByRole('tab', { name: 'Accounts', exact: true })).toHaveCount(0);
+  // The layout is stored by the Host, so a reload restores it.
   await page.reload();
-  await expect(page.getByRole('region', { name: 'Right dock' }).getByRole('tab', { name: 'Mail' })).toBeVisible();
-  await expect(page.getByRole('separator', { name: 'Resize bottom dock' })).toHaveAttribute('aria-valuenow', String(before + 16));
+  await expect(group('Reader').getByRole('tab')).toHaveText(['Reader', 'Mail']);
+  await expect(page.getByRole('tab', { name: 'Accounts', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.getByRole('group', { name: 'Account switcher' }).getByLabel('Show in the workspace').check();
+  await page.getByRole('button', { name: 'Back to mail', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Accounts', exact: true })).toBeVisible();
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('layout reset');
+  await page.keyboard.press('Enter');
+  await expect(group('Mail').getByRole('tab')).toHaveText(['Mail']);
+});
+
+test('command runner closes on Escape and outside clicks, finds mail, sorts and navigates', async ({ page }) => {
+  const inbox = [
+    { id: 'maya', sender: 'Maya Chen', address: 'maya@example.test', subject: 'A small plan for the weekend', body: 'Hey, I found a little bookshop by the river.', date: 'Today' },
+    { id: 'studio', sender: 'Studio North', address: 'studio@example.test', subject: 'Notes from our last conversation', body: 'A few things to keep close.', date: 'Today' },
+    { id: 'alex', sender: 'Alex Rivera', address: 'alex@example.test', subject: 'Plain text, with a little character', body: 'Hello', date: 'Today' },
+  ];
+  await page.route('**/api/v1/messages**', route => {
+    const url = new URL(route.request().url());
+    if (/\/(cache|content)$/.test(url.pathname)) return route.fallback();
+    const q = (url.searchParams.get('q') ?? '').toLowerCase();
+    if (url.pathname.endsWith('/refresh')) return route.fulfill({ json: inbox.filter(m => `${m.subject} ${m.body}`.toLowerCase().includes(q)) });
+    return route.fulfill({ json: inbox.find(m => url.pathname.endsWith(`/${m.id}`)) });
+  });
+  await page.goto('/');
+  const runner = page.getByRole('dialog', { name: 'Commands' });
+  await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
+  await page.keyboard.press('Control+k');
+  await expect(runner).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(runner).toBeHidden();
+  await page.getByRole('button', { name: 'Commands', exact: true }).click();
+  await expect(runner).toBeVisible();
+  await page.mouse.click(8, page.viewportSize()!.height - 8);
+  await expect(runner).toBeHidden();
+  // Typing searches the loaded mail as well as commands.
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('bookshop');
+  await expect(runner.getByRole('option', { name: /A small plan for the weekend/ })).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'A small plan for the weekend' })).toBeVisible();
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('sort sender');
+  await page.keyboard.press('Enter');
+  const senders = await page.locator('.mail-item .item-sender').allTextContents();
+  expect(senders).toEqual([...senders].sort((a, b) => a.toLocaleLowerCase().localeCompare(b.toLocaleLowerCase())));
+  await expect(page.getByText('Sorted sender a–z')).toBeVisible();
+  await page.getByRole('button', { name: 'Clear sorting' }).click();
+  await expect(page.getByText('Sorted sender a–z')).toHaveCount(0);
+  // The last result hands the words to the provider's search.
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('weekend');
+  await runner.getByRole('option', { name: 'Search Inbox for “weekend”' }).click();
+  await expect(page.getByLabel('Search Inbox')).toHaveValue('weekend');
+  await expect(page.getByRole('button', { name: /Studio North/ })).toHaveCount(0);
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('go drafts');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('navigation', { name: 'Mail folders' }).getByRole('button', { name: /Drafts/ })).toHaveAttribute('aria-current', 'page');
 });

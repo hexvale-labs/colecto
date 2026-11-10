@@ -70,7 +70,11 @@ export function createServices(account: string) {
 }
 export type ReaderService = ReturnType<typeof createServices>['reader'];
 export type ComposerService = ReturnType<typeof createServices>['composer'];
+/** Owner preferences, stored by the Host in Turso. `workspace` is the dock layout. */
+export interface Preferences { mcp: boolean; account: string | null; workspace: unknown }
 export const hostService = {
+  preferences: () => request<Preferences>('host', 'demo', '/preferences'),
+  savePreferences: (input: Partial<Preferences>) => request<Preferences>('host', 'demo', '/preferences', input),
   sendRequests: () => request<PendingSend[]>('host', 'demo', '/send-requests'),
   decideSend: (id: string, decision: 'approve' | 'reject') => request<PendingSend>('host', 'demo', `/send-requests/${encodeURIComponent(id)}/${decision}`, {}),
   apiKeys: () => request<ApiKey[]>('host', 'demo', '/api-keys'),

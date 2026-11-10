@@ -33,9 +33,9 @@ verify: fmt-check check lint test ui-check ui-unit ui-build
 setup-ui:
     cd ui && bun install --frozen-lockfile
 
-# Install Chromium for the browser tests (once per machine).
+# Install Chromium and WebKit for the browser tests (once per machine; WebKit also needs system libraries).
 setup-browser:
-    cd ui && bunx playwright install chromium
+    cd ui && bunx playwright install --with-deps chromium webkit
 
 # Check Svelte components and TypeScript.
 ui-check:

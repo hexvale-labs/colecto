@@ -141,8 +141,9 @@ private directories and ownership-safe cleanup. See [deployment](daemon.md).
 Core accounts, the encrypted credential vault, drafts, local labels, and Inbox/Sent
 snapshots persist in one owner-local embedded Turso database, `colecto.db`.
 Account identifiers namespace records and snapshots inside that file; child mail
-stores share its connection handle. Host policy/settings consolidation follows this
-Core storage migration. The OS keyring, password-derived keys and process locks
+stores share its connection handle. Host extension policy, API keys, send approvals and
+owner preferences (workspace layout, selected account, MCP switch) live in the same
+database; no application configuration is written as JSON files. The OS keyring, password-derived keys and process locks
 retain their roles outside Turso. Credential AAD and cleanup journals are preserved.
 
 Snapshots are
@@ -167,7 +168,8 @@ data, including empty/search responses; failed provider queries preserve data. T
 and caching, not a complete incremental sync engine. Provider flags, labels,
 full-history pagination, and offline mutations still need explicit contracts.
 
-The client uses a dockable, dark-only pane layout (see `DESIGN.md`), one Settings screen,
+The client uses a dark-only workspace of dockable panes that split like a game engine's
+editor (see `DESIGN.md`), one Settings screen,
 optional account profile names, and account-bound open-message tabs. Mobile layout is checked
 in browser tests; Android-native lifecycle, FCM, UnifiedPush, battery use, and
 physical-device keyboard behavior remain separate platform validation work.
