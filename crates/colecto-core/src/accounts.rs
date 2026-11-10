@@ -13,8 +13,10 @@ use std::{
 
 pub struct Accounts {
     vault: Vault,
+    database: crate::Database,
     directory: std::path::PathBuf,
     stores: BTreeMap<String, Arc<Mutex<MailStore>>>,
+    snapshots: BTreeMap<String, crate::SnapshotHandle>,
 }
 fn invalid(message: &str) -> Error {
     Error::Invalid(message.into())
@@ -23,7 +25,7 @@ fn busy() -> Error {
     invalid("Mail operation in progress. Try again when it finishes.")
 }
 fn prepare_connection(
-    store: &MailStore,
+    store: &mut MailStore,
     settings: &AccountSettings,
     secret: &str,
 ) -> Result<crate::PreparedConnection, Error> {
@@ -53,13 +55,18 @@ fn connect(store: &mut MailStore, settings: &AccountSettings, secret: &str) -> R
 
 impl Accounts {
     /// Host-owned data, including extension policy, lives beside account stores.
+    pub fn database(&self) -> crate::Database {
+        self.database.clone()
+    }
+
     pub fn data_directory(&self) -> &std::path::Path {
         &self.directory
     }
 
     pub fn open(mut legacy: MailStore, backend: Arc<dyn SecretStore>) -> Result<Self, Error> {
         let directory = legacy.directory.clone();
-        let mut vault = Vault::open(directory.clone(), backend)?;
+        let database = legacy.database.clone();
+        let mut vault = Vault::open(directory.clone(), database.clone(), backend)?;
         let mut ids = HashSet::new();
         for account in vault.accounts() {
             if (account.id != DEMO_ACCOUNT
@@ -129,13 +136,21 @@ impl Accounts {
             if account.id != DEMO_ACCOUNT {
                 stores.insert(
                     account.id.clone(),
-                    Arc::new(Mutex::new(MailStore::open(
+                    Arc::new(Mutex::new(MailStore::open_with_database(
                         directory.join("accounts").join(&account.id),
+                        database.clone(),
+                        &account.id,
                     )?)),
                 );
             }
         }
+        let snapshots = stores
+            .iter()
+            .map(|(id, store)| (id.clone(), store.lock().unwrap().snapshot_handle()))
+            .collect();
         let mut accounts = Self {
+            snapshots,
+            database,
             vault,
             stores,
             directory,
@@ -174,6 +189,39 @@ impl Accounts {
                 }
             })
             .collect()
+    }
+    pub fn cached_message(
+        &self,
+        id: &str,
+        message_id: &str,
+    ) -> Result<Option<colecto_extension_api::Message>, Error> {
+        let snapshots = self
+            .snapshots
+            .get(id)
+            .ok_or(Error::Missing)?
+            .read()
+            .map_err(crate::storage)?;
+        Ok(snapshots
+            .values()
+            .flat_map(|s| &s.messages)
+            .find(|m| m.id == message_id)
+            .cloned())
+    }
+    pub fn cached(&self, id: &str, folder: &str) -> Result<crate::MailSnapshot, Error> {
+        crate::validate_query(folder, "")?;
+        let snapshot = self
+            .snapshots
+            .get(id)
+            .ok_or(Error::Missing)?
+            .read()
+            .map_err(crate::storage)?;
+        Ok(snapshot
+            .get(folder)
+            .cloned()
+            .unwrap_or_else(|| crate::MailSnapshot {
+                folder: folder.into(),
+                ..Default::default()
+            }))
     }
     pub fn store(&self, id: &str) -> Result<Arc<Mutex<MailStore>>, Error> {
         self.stores.get(id).cloned().ok_or(Error::Missing)
@@ -232,13 +280,15 @@ impl Accounts {
         }
         let handle = match self.stores.get(&id) {
             Some(store) => store.clone(),
-            None => Arc::new(Mutex::new(MailStore::open(
+            None => Arc::new(Mutex::new(MailStore::open_with_database(
                 self.directory.clone().join("accounts").join(&id),
+                self.database.clone(),
+                &id,
             )?)),
         };
         let mut store = handle.try_lock().map_err(|_| busy())?;
         // Validate without changing the active transport before persistence.
-        let prepared = prepare_connection(&store, &settings, &secret.0)?;
+        let prepared = prepare_connection(&mut store, &settings, &secret.0)?;
         let mut records = self.vault.accounts().to_vec();
         records.retain(|a| a.id != id);
         records.push(crate::credentials::SavedAccount {
@@ -261,6 +311,7 @@ impl Accounts {
                 .is_some_and(|s| s.0 == secret.0)
         {
             store.apply_connection(prepared);
+            self.snapshots.insert(id.clone(), store.snapshot_handle());
             drop(store);
             self.stores.insert(id.clone(), handle);
         }
@@ -382,5 +433,43 @@ impl Accounts {
             }
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+    #[test]
+    fn failed_registry_transaction_never_stages_a_system_key() {
+        struct NoKeys;
+        impl SecretStore for NoKeys {
+            fn get(&self, _: &str) -> Result<String, Error> {
+                panic!("No key should exist")
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), Error> {
+                panic!("Failed database write must precede keyring writes")
+            }
+            fn delete(&self, _: &str) -> Result<(), Error> {
+                panic!("No key should exist")
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut accounts =
+            Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(NoKeys)).unwrap();
+        let before = accounts.database.get_record("core", "vault", 1).unwrap();
+        futures_executor::block_on(
+            accounts
+                .database
+                .connection()
+                .unwrap()
+                .execute("PRAGMA query_only=1", ()),
+        )
+        .unwrap();
+        let input = serde_json::from_value(serde_json::json!({"id":null,"name":"A","address":"a@example.test","protocol":"imap","imap_host":"imap.example.test","imap_port":993,"smtp_host":"smtp.example.test","smtp_port":587,"username":"a","secret":"secret"})).unwrap();
+        assert!(accounts.upsert(input).is_err());
+        assert_eq!(
+            accounts.database.get_record("core", "vault", 1).unwrap(),
+            before
+        );
     }
 }

@@ -3,7 +3,7 @@ async function openExtensions(page: import('@playwright/test').Page) {
   if (await settings.count()) await settings.click();
   await page.getByRole('button', { name: 'Extensions', exact: true }).click();
 }
-import { test, expect } from '@playwright/test';
+import { test, expect, ownerToken } from './fixtures';
 
 test('reads sample messages as text and returns to the inbox on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -25,14 +25,14 @@ test('creates a draft, reloads it, updates it, and reopens it', async ({ page })
   await page.getByLabel('Subject', { exact: true }).fill('Coffee by the river');
   await page.getByLabel('Message', { exact: true }).fill('Saturday sounds lovely. 世界');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
   await page.reload();
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await page.getByRole('button', { name: /Coffee by the river/ }).click();
   await expect(page.getByLabel('Message', { exact: true })).toHaveValue('Saturday sounds lovely. 世界');
   await page.getByLabel('Subject', { exact: true }).fill('Sunday by the river');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
   await page.reload();
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await page.getByRole('button', { name: /Sunday by the river/ }).click();
@@ -58,7 +58,7 @@ test('keeps unsaved edits when navigation is canceled or saving fails', async ({
 });
 
 test('recovers from a mailbox load failure and handles an empty folder', async ({ page }) => {
-  await page.route('**/api/v1/messages', route => route.fulfill({ status: 503, json: { error: 'Mailbox unavailable' } }), { times: 1 });
+  await page.route('**/api/v1/messages/refresh*', route => route.fulfill({ status: 503, json: { error: 'Mailbox unavailable' } }), { times: 1 });
   await page.goto('/');
   await expect(page.getByRole('alert')).toContainText('Mailbox unavailable');
   await page.getByRole('button', { name: 'Try again' }).click();
@@ -70,7 +70,7 @@ test('recovers from a mailbox load failure and handles an empty folder', async (
 
 test('shows a failed draft-open error and recovery on a narrow screen', async ({ page, request }) => {
   const response = await request.post('/api/v1/drafts', {
-    headers: { origin: 'http://127.0.0.1:4179', 'x-colecto-extension': 'composer', 'x-colecto-account': 'demo' },
+    headers: { authorization: `Bearer ${ownerToken}`, origin: 'http://127.0.0.1:4179', 'x-colecto-extension': 'composer', 'x-colecto-account': 'demo' },
     data: { recipient: '', subject: 'Open failure example', body: 'Still saved' },
   });
   expect(response.ok()).toBe(true);
@@ -115,7 +115,7 @@ test('sending preserves edits on failure and prevents duplicate submission after
 
 test('manages encrypted accounts, switches drafts and protects unsaved changes', async ({ page }) => {
   test.setTimeout(90000);
-  await page.route('**/api/v1/messages', route => route.request().headers()['x-colecto-account'] !== 'demo' ? route.fulfill({ json: [] }) : route.continue());
+  await page.route('**/api/v1/messages/refresh*', route => route.request().headers()['x-colecto-account'] !== 'demo' ? route.fulfill({ json: [] }) : route.continue());
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -143,7 +143,7 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
   await page.getByLabel('Current account').selectOption('demo');
   await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Work only');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
   await page.getByLabel('Current account').selectOption('demo');
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await expect(page.getByRole('button', { name: /Work only/ })).toHaveCount(0);
@@ -168,7 +168,7 @@ test('late account responses cannot replace the selected inbox', async ({ page }
   const gate = new Promise<void>(resolve => release = resolve);
   let started!: () => void;
   const pending = new Promise<void>(resolve => started = resolve);
-  await page.route('**/api/v1/messages', async route => {
+  await page.route('**/api/v1/messages/refresh*', async route => {
     const id = route.request().headers()['x-colecto-account'];
     if (id === 'a') { started(); await gate; }
     await route.fulfill({ json: id === 'demo' ? [] : [{ id: 'same-id', sender: id, address: `${id}@example.test`, subject: `Inbox ${id}`, body: 'Preview', date: 'Today' }] });
@@ -178,7 +178,7 @@ test('late account responses cannot replace the selected inbox', async ({ page }
   await pending;
   await page.getByLabel('Current account').selectOption('b');
   await expect(page.getByRole('button', { name: /Inbox b/ })).toBeVisible();
-  const late = page.waitForResponse(response => response.url().endsWith('/api/v1/messages') && response.request().headers()['x-colecto-account'] === 'a');
+  const late = page.waitForResponse(response => response.url().includes('/api/v1/messages/refresh') && response.request().headers()['x-colecto-account'] === 'a');
   release();
   await (await late).finished();
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -195,7 +195,7 @@ test('waits for restored account before allowing compose', async ({ page }) => {
     await gate;
     await route.fulfill({ json: [{ id: 'remembered', settings: { name: 'Remembered', address: 'remembered@example.test', protocol: 'imap', imap_host: '', imap_port: 993, smtp_host: '', smtp_port: 587, username: '', session_url: '' }, connected: true, configured: true }] });
   });
-  await page.route('**/api/v1/messages', route => route.fulfill({ json: [] }));
+  await page.route('**/api/v1/messages/refresh*', route => route.fulfill({ json: [] }));
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Compose', exact: true })).toBeDisabled();
   release();
@@ -246,4 +246,109 @@ test('installs Wasm disabled, consents to account access, revokes and removes it
   await expect(panel.getByRole('checkbox', { name: 'account.read', exact: true })).not.toBeChecked();
   await panel.getByRole('button', { name: 'Remove extension', exact: true }).click();
   await expect(panel).toHaveCount(0);
+});
+
+test('owner generates a scoped key, sees its secret once, and revokes it on a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'API keys', exact: true }).click();
+  await page.getByLabel('Key name', { exact: true }).fill('Phone assistant');
+  await page.getByRole('checkbox', { name: 'Demo account', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'messages.list', exact: true }).check();
+  await page.getByRole('button', { name: 'Generate API key', exact: true }).click();
+  const secret = page.getByRole('textbox', { name: 'API key secret', exact: true });
+  await expect(secret).toHaveValue(/^colecto_/);
+  const issuedSecret = await secret.inputValue();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Dismiss secret' }).click();
+  await expect(secret).toHaveCount(0);
+  await page.reload();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'API keys', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Phone assistant', exact: true })).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(issuedSecret);
+  await expect(secret).toHaveCount(0);
+  await page.getByRole('button', { name: 'Revoke Phone assistant', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('API key revoked.');
+  await expect(page.getByRole('button', { name: 'Revoke Phone assistant', exact: true })).toHaveCount(0);
+});
+
+test('a rejected owner bearer preserves draft edits until the owner reconnects', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  await page.getByLabel('Subject', { exact: true }).fill('Keep edits through owner reconnect');
+  await page.route('**/api/v1/drafts', route => route.fulfill({ status: 401, json: { error: 'Owner authentication required' } }), { times: 1 });
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page.getByLabel('Daemon access token')).toBeVisible();
+  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Keep edits through owner reconnect');
+  await page.getByLabel('Daemon access token').fill(ownerToken);
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
+  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Keep edits through owner reconnect');
+});
+
+test('an ordinary browser needs the local owner token before it can connect', async ({ browser }) => {
+  const page = await browser.newPage();
+  try {
+    await page.goto('http://127.0.0.1:4179/');
+    await expect(page.getByLabel('Daemon access token')).toBeVisible();
+    await page.getByLabel('Daemon access token').fill('wrong-owner-token');
+    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect(page.getByLabel('Daemon access token')).toBeVisible();
+    await page.getByLabel('Daemon access token').fill(ownerToken);
+    await page.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+    await expect(page.getByLabel('Daemon access token')).toHaveCount(0);
+  } finally { await page.close(); }
+});
+
+test('another loopback port receives no owner credential after legitimate owner login', async ({ page }) => {
+  const { createServer } = await import('node:http');
+  let captured: import('node:http').IncomingHttpHeaders = {};
+  const server = createServer((request, response) => {
+    if (request.url === '/api/capture') captured = request.headers;
+    response.writeHead(200, { 'content-type': 'text/html' });
+    response.end('<!doctype html><title>Other local service</title>Other local service');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+    const port = (server.address() as import('node:net').AddressInfo).port;
+    await page.goto(`http://127.0.0.1:${port}/`);
+    await page.evaluate(async () => { await fetch('/api/capture'); });
+    expect(Boolean(captured.authorization)).toBe(false);
+    expect(Boolean(captured.cookie?.includes('colecto_owner='))).toBe(false);
+    expect(await page.evaluate(() => sessionStorage.getItem('colecto.token'))).toBeNull();
+    const replay = await page.request.get('http://127.0.0.1:4179/api/v1/accounts', { headers: { origin: 'http://127.0.0.1:4179', 'x-colecto-extension': 'host', ...(captured.cookie ? { cookie: captured.cookie } : {}) } });
+    expect(replay.status()).toBe(401);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('owner reviews the complete immutable automation snapshot on a phone and sees uncertain delivery', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const request = { id: 'review-1', requester: 'assistant-key', account: 'demo', from: 'owner@example.test', created_at: 1, expires_at: Math.floor(Date.now() / 1000) + 600, status: 'pending', snapshot: { id: null, recipient: 'recipient@example.test', subject: 'Review exact content', body: '<script>untrusted content</script>\nOriginal message body' } };
+  await page.route('**/api/v1/send-requests', route => route.fulfill({ json: [request] }));
+  await page.route('**/api/v1/api-keys', route => route.fulfill({ json: [{ id: 'assistant-key', name: 'Research assistant' }] }));
+  let approvals = 0;
+  await page.route('**/api/v1/send-requests/review-1/approve', route => { approvals++; return route.fulfill({ json: { ...request, status: 'uncertain' } }); });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Send approvals', exact: true }).click();
+  const review = page.getByRole('article', { name: 'Delivery request: Review exact content' });
+  await expect(review).toContainText('Research assistant');
+  await expect(review).toContainText('owner@example.test');
+  await expect(review).toContainText('recipient@example.test');
+  await expect(review).toContainText('<script>untrusted content</script>');
+  await expect(review).toContainText('Original message body');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await review.getByRole('button', { name: 'Approve and send', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Delivery outcome is uncertain');
+  await expect(review.getByRole('button', { name: 'Approve and send', exact: true })).toHaveCount(0);
+  expect(approvals).toBe(1);
 });

@@ -8,7 +8,7 @@ background receiving currently polls the latest 100 Inbox messages.
 
 The client defaults to dark mode. Open the gear beside the profile at the bottom
 of the sidebar for one Settings pane: appearance, accounts and credentials,
-server connections, and extensions. Choose System, Dark, or Light. Account profile
+server connections, scoped API keys, and extensions. Choose System, Dark, or Light. Account profile
 names are optional and fall back to the email address. Opening mail adds closable,
 account-specific tabs; Inbox, Drafts, and Sent remain below the open tabs.
 
@@ -31,7 +31,21 @@ just demo
 
 Open **http://127.0.0.1:4173**. Stop with Ctrl+C. The demo binds only to IPv4
 loopback; open the printed address exactly, rather than `localhost`. The Host
-serves the built UI and API from the same origin.
+serves the built UI and API from the same origin. The browser prompts for the
+owner access token: open the private `.colecto-demo/owner-token` file locally and
+copy its contents into that prompt. With `COLECTO_DATA_DIR`, use `owner-token`
+inside that directory instead. The Host generates the file with Unix mode `0600`
+and tightens its owned data directory to `0700`; it never prints the secret or
+puts it in a URL. Do not share or commit this file. An existing non-private token
+file is rejected; correct its ownership/permissions before restarting.
+
+The native app (`just native`) connects automatically, injecting its local owner
+credential only at the exact local service origin. Remote HTTPS navigation
+receives no local credential. Ordinary browsers retain the entered owner token
+only for that browser session. In Settings → API keys, create separately scoped
+keys for automation, selecting explicit accounts and operations. Copy each key
+when created; it cannot be recovered later. Scoped keys cannot manage settings
+or directly send mail.
 
 Use **Compose** to write a note, then **Save draft**. Open **Drafts** to resume it.
 Leaving an edited draft asks before discarding unsaved changes. Saving failures
@@ -75,7 +89,8 @@ Run `just` for all recipes. After editing UI source, `just demo` rebuilds it.
 - `colecto-extension-api`: version 1 wire types for the operations used today.
 - `colecto-core`: TLS IMAP/SMTP, prototype JMAP, MIME plain-text decoding, sample messages, draft
   validation, IDs, and atomic JSON storage.
-- `colecto-host`: loopback HTTP/static adapter; validates Host/origin and built-in
+- `colecto-host`: authenticated loopback HTTP/static adapter; validates explicit owner bearers,
+  scoped API keys, Host/origin, and built-in
   module grants scoped to an explicitly selected account, persisted extension policy,
   and isolated Wasm panels. API bodies are bounded to 512000 bytes.
 - `ui/src/extensions`: replaceable bundled mailbox, reader, and composer views.

@@ -61,3 +61,25 @@ kept separate. Build an alternate binary before passing it with `--binary`.
 Keep at least one real provider and physical Android device in later performance
 validation: sample mail does not represent IMAP reconnects, MIME-heavy mail,
 large folders, device battery drain, or FCM/UnifiedPush delivery.
+
+### Embedded mail cache
+
+Mail snapshots use the official local Rust `turso` 0.7.2 engine with default
+features disabled, avoiding its optional process-wide mimalloc allocator. Local
+operations use a narrow `futures-executor` adapter: no nested Tokio runtime and no
+per-account runtime/thread. Cached folder lists and retained reads use independent
+account-bound snapshots, so provider network work does not hold their lock.
+Inbox and Sent share the existing 100-message/12 MB serialized-content budget per
+account; when the newly fetched folder needs the space, its transaction
+evicts the other folder. Search results stay in the existing bounded reader cache.
+Bounded serialization checks aggregate message bytes before allocating encoded
+content and stops encoding at the byte limit. The database and WAL are created
+only after the containing directory is private.
+
+Run `just perf-check` for the final integrated security feature comparison and
+refresh the baseline from that run, preserving earlier timestamped samples.
+
+The existing plaintext cache is not encrypted by the credential vault. Explicit
+Disconnect and vault Lock clear the active memory snapshots; failure to reach a
+provider leaves them intact. Retained database snapshots are selected again only
+after the configured provider identity reconnects.

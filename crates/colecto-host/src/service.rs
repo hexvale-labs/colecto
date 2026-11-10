@@ -1,5 +1,9 @@
 //! Reusable mail service, independent of the UI process and service supervisor.
-use crate::{Host, build_app};
+use crate::{
+    Host,
+    api_keys::{self, ApiKeys, Principal},
+    build_app,
+};
 use axum::{
     Router,
     extract::{Request, State},
@@ -68,28 +72,77 @@ impl AccessPolicy {
         })
     }
 }
+#[derive(Clone)]
+struct Authentication {
+    policy: AccessPolicy,
+    keys: Arc<Mutex<ApiKeys>>,
+}
 async fn authenticate(
-    State(policy): State<AccessPolicy>,
-    request: Request,
+    State(auth): State<Authentication>,
+    mut request: Request,
     next: Next,
 ) -> Response {
-    if request.uri().path().starts_with("/api/")
-        && let Some(token) = policy.token
-    {
-        let supplied = request
-            .headers()
-            .get(header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok())
+    if !request.uri().path().starts_with("/api/") {
+        return next.run(request).await;
+    }
+    let session_request = request.uri().path() == "/api/v1/session";
+    let headers = request.headers();
+    let bearer = headers.get(header::AUTHORIZATION);
+    let principal = if let Some(bearer) = bearer {
+        let supplied = bearer
+            .to_str()
+            .ok()
             .and_then(|h| h.strip_prefix("Bearer "))
             .unwrap_or("");
-        if supplied.as_bytes().ct_eq(token.as_bytes()).unwrap_u8() != 1 {
-            return (
-                StatusCode::UNAUTHORIZED,
-                axum::Json(serde_json::json!({"error":"Enter the daemon access token to connect"})),
-            )
-                .into_response();
+        if auth
+            .policy
+            .token
+            .as_ref()
+            .is_some_and(|token| supplied.as_bytes().ct_eq(token.as_bytes()).unwrap_u8() == 1)
+        {
+            Some(Principal::Owner)
+        } else {
+            auth.keys
+                .lock()
+                .ok()
+                .and_then(|mut keys| keys.authenticate(supplied, api_keys::now()).ok())
+        }
+    } else {
+        None
+    };
+    let Some(principal) = principal else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({"error":"Enter the daemon access token to connect"})),
+        )
+            .into_response();
+    };
+    if matches!(principal, Principal::ApiKey(_)) {
+        let path = request.uri().path();
+        if !matches!(
+            path,
+            "/api/v1/account"
+                | "/api/v1/messages"
+                | "/api/v1/drafts"
+                | "/api/v1/labels"
+                | "/api/v1/send"
+                | "/api/v1/mcp"
+        ) && !path.starts_with("/api/v1/messages/")
+            && !path.starts_with("/api/v1/drafts/")
+            && !(request.method() == axum::http::Method::GET
+                && path.starts_with("/api/v1/send-requests/"))
+        {
+            return crate::forbidden().into_response();
         }
     }
+    if session_request {
+        if request.method() != axum::http::Method::POST {
+            return StatusCode::METHOD_NOT_ALLOWED.into_response();
+        }
+        return axum::Json(true).into_response();
+    }
+
+    request.extensions_mut().insert(principal);
     next.run(request).await
 }
 
@@ -103,9 +156,36 @@ pub struct MailService {
 }
 impl MailService {
     pub fn new(accounts: Accounts, policy: AccessPolicy, assets: PathBuf) -> Result<Self, String> {
+        match std::fs::canonicalize(&assets) {
+            Ok(root) if accounts.data_directory().starts_with(&root) => {
+                return Err("Static assets must not contain the private data directory".into());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("Cannot validate static assets directory".into()),
+        }
+        let mut policy = policy;
+        if policy.token.is_none() {
+            policy.token = Some(Arc::new(Zeroizing::new(
+                crate::runtime::local_owner_token(accounts.data_directory())
+                    .map_err(|error| error.to_string())?,
+            )));
+        }
         let extensions = crate::extensions::Extensions::open(accounts.data_directory())
             .map_err(|e| e.to_string())?;
+        let keys = Arc::new(Mutex::new(ApiKeys::open(accounts.data_directory())?));
+        let auth = Authentication {
+            policy: policy.clone(),
+            keys: keys.clone(),
+        };
+        let approvals = Arc::new(Mutex::new(crate::approvals::Approvals::open(
+            accounts.data_directory(),
+            api_keys::now(),
+        )?));
         let host = Host {
+            approvals,
+            status_polls: Arc::default(),
+            keys,
             accounts: Arc::new(Mutex::new(accounts)),
             extensions: Arc::new(Mutex::new(extensions)),
             authority: policy.authority.clone(),
@@ -116,6 +196,7 @@ impl MailService {
         let stream_events = events.clone();
         let (closing, stopped) = tokio::sync::watch::channel(false);
         let router = build_app(host.clone(), assets)
+            .nest_service("/api/v1/mcp", crate::mcp::http(host.clone()))
             .route(
                 "/api/v1/events",
                 get(move |headers: axum::http::HeaderMap| {
@@ -161,11 +242,11 @@ impl MailService {
                     }
                 }),
             )
+            .layer(middleware::from_fn_with_state(auth, authenticate))
             .layer(middleware::from_fn_with_state(
                 host.clone(),
                 crate::boundary,
-            ))
-            .layer(middleware::from_fn_with_state(policy, authenticate));
+            ));
         Ok(Self {
             host,
             router,
@@ -186,6 +267,11 @@ impl MailService {
         self.refresh_until_stopped(receiver).await;
     }
     async fn refresh_until_stopped(&self, stop: tokio::sync::watch::Receiver<bool>) {
+        if let Ok(mut approvals) = self.host.approvals.lock()
+            && approvals.maintain(api_keys::now()).is_err()
+        {
+            eprintln!("Could not expire retained delivery requests");
+        }
         let stores = {
             let Ok(accounts) = self.host.accounts.lock() else {
                 return;

@@ -9,6 +9,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+rmcp.workspace = true
 toml.workspace = true
 serde.workspace = true
 wasmi.workspace = true
@@ -18,6 +19,8 @@ colecto-extension-api.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 subtle.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
@@ -25,6 +28,9 @@ tower-http.workspace = true
 keyring.workspace = true
 zeroize.workspace = true
 serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
 
 [features]
 native = ["dep:tauri", "dep:tauri-build"]

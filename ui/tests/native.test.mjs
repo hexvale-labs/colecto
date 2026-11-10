@@ -2,7 +2,7 @@ import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,7 +27,11 @@ test('native window starts with its loopback service and bundled registry', asyn
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.ok(url && windowFound, `Native window did not start: ${errors}`);
-    const response = await fetch(`${url}/api/v1/extensions`, { headers: { 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' } });
+    const ownerToken = (await readFile(join(directory, 'owner-token'), 'utf8')).trim();
+    const session = await fetch(`${url}/api/v1/session`, { method: 'POST', headers: { origin: url, authorization: `Bearer ${ownerToken}` } });
+    assert.equal(session.status, 200);
+    assert.equal(session.headers.get('set-cookie'), null);
+    const response = await fetch(`${url}/api/v1/extensions`, { headers: { authorization: `Bearer ${ownerToken}`, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' } });
     assert.equal(response.status, 200);
     const extensions = await response.json();
     assert.equal(extensions.length, 4);

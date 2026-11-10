@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { createInterface } from 'node:readline';
 const require = createRequire(new URL('../ui/package.json', import.meta.url));
@@ -9,6 +11,8 @@ const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] }
 process.once('SIGTERM', async () => { await browser.close(); process.exit(1); });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+  const ownerToken = readFileSync(join(process.env.COLECTO_DATA_DIR, 'owner-token'), 'utf8').trim();
+  await page.addInitScript(({ origin, token }) => { if (window.location.origin === origin) sessionStorage.setItem('colecto.token', token); }, { origin: base, token: ownerToken });
   await page.goto(base);
   await page.getByRole('button', { name: /Maya Chen/ }).waitFor();
   console.log('READY');

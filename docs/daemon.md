@@ -71,7 +71,7 @@ select the trusted origin. Cross-origin browser clients are not enabled.
 
 The native shell permits navigation to HTTPS server origins selected in settings;
 remote pages receive no native IPC grants. Static UI assets are public so the login interface can load. Every `/api/`
-request requires `Authorization: Bearer <token>` before module/account grants
+request requires an explicit owner or scoped API-key bearer before operation grants
 are checked. Never put the token in a URL. Serve the UI from this same daemon
 origin; its login/settings interface keeps the token in session storage.
 
@@ -85,9 +85,15 @@ install -d -m 700 "$HOME/.local/run/colecto"
 COLECTO_SOCKET="$HOME/.local/run/colecto/mail.sock" \
 COLECTO_DATA_DIR="$HOME/.local/state/colecto" \
 ./target/debug/colecto-daemon
+auth_file=$(mktemp)
+printf 'Authorization: Bearer %s\n' "$(cat "$HOME/.local/state/colecto/owner-token")" > "$auth_file"
 curl --unix-socket "$HOME/.local/run/colecto/mail.sock" \
-  -H 'Host: localhost' -H 'x-colecto-extension: host' \
+  -H "@$auth_file" -X POST -H 'Origin: http://localhost' \
+  -H 'Host: localhost' http://localhost/api/v1/session
+curl --unix-socket "$HOME/.local/run/colecto/mail.sock" \
+  -H "@$auth_file" -H 'Host: localhost' -H 'x-colecto-extension: host' \
   -H 'x-colecto-account: demo' http://localhost/api/v1/accounts
+rm "$auth_file"
 ```
 
 Unix socket mode is local-only and requires an existing private parent directory
@@ -149,7 +155,9 @@ generic notifications without sender, subject or body. The optional
 That file sets the public origin and absolute token-file path.
 
 `GET /api/v1/events` is an authenticated SSE stream requiring Host capability
-headers. It starts with `ready`, then emits `mail` with `{account, ids}` for
+headers and an explicit owner bearer. Cookie-only streaming is rejected; use
+a streaming HTTP client that can attach Authorization, not a cookie-dependent
+browser EventSource or a token in the URL. It starts with `ready`, then emits `mail` with `{account, ids}` for
 newly observed inbox IDs, and `resync` if a slow subscriber misses events. The
 stream is bounded and has no historical replay. Desktop notifications may be
 missed during disconnection; opening the client fetches the current mail state.
@@ -192,3 +200,109 @@ Subsystem checks passed: `cargo test -p colecto-host --all-targets --locked`
 The process test keeps an SSE subscription open during SIGTERM and verifies
 that both the stream and process exit before the owned socket disappears.
 The existing upstream `imap-proto` future-compatibility warning remains.
+
+## Owner bearers and scoped API keys
+
+Every API call requires an explicit `Authorization: Bearer <token>` header with
+the owner bearer or a scoped API key. Cookies never establish owner authority,
+in local or remote mode. The bundled UI keeps the owner bearer in sessionStorage,
+which belongs to its exact origin (scheme, hostname, and port), and explicitly
+sends it on each request. Another loopback service does not receive it through
+automatic browser cookie behavior.
+
+`POST /api/v1/session` validates an owner bearer with exact configured `Host` and
+`Origin`; it issues no cookie, session, or additional credential. Headers alone
+cannot authenticate an OS user. Local startup generates `owner-token` in the data
+directory with mode `0600`. It tightens an existing data directory to `0700` only
+after verifying it belongs to the current OS user; a foreign-owned directory
+fails with an actionable error. Read that private file to connect an ordinary
+browser. Its contents are never printed or put in the URL. The native shell
+injects it only at its exact local origin; HTTPS server navigation receives no
+local credential. Remote deployments continue to use `COLECTO_TOKEN_FILE` instead
+of a generated local token. Restart after owner token rotation.
+
+Settings → API keys generates named keys for explicitly selected accounts and
+capabilities, with optional expiry. Copy the secret when created: list responses
+contain metadata only. Revocation and expiry are checked on each request. New
+accounts receive no existing key grants. A supplied invalid or scoped bearer
+never falls back to a privileged cookie or local bootstrap. Scoped keys cannot
+manage accounts, credentials, extensions, other keys, events, or owner-token validation.
+Direct delivery is denied for scoped callers, including keys with `messages.send`;
+reviewed send requests belong to the later approval/MCP slice.
+
+Automation uses `Authorization: Bearer <key>` plus `x-colecto-account`.
+`x-colecto-extension` cannot confer scoped privileges. Retain the configured
+`Host`; mutation requests also require the configured `Origin`. For owner Unix
+socket calls, send the private owner bearer explicitly on every request, together
+with `Host: localhost` and `Origin: http://localhost` for mutations. The
+`/api/v1/session` validation step is optional and confers no ongoing authority.
+
+`api-keys.json` is a versioned private policy file: random public IDs and SHA-256
+verifiers, never full secrets. Secrets contain 256 random bits independently of
+the ID. Atomic writes use private files, fsync, and rename. Corrupt, unsupported,
+or non-private policy fails closed; missing policy authenticates no keys.
+Policy permits at most 128 retained keys, 80 bytes per name, 64 explicit accounts
+per key, and eight existing capabilities. Revoked metadata is retained. Last-used
+metadata is updated at most once per minute per key; this is approximate activity
+metadata, not an audit log. Keep the data directory private and owned by its OS
+user. Windows filesystem ACL validation remains outside the tested Unix path.
+
+Configured static assets must not contain the private data directory; startup rejects overlapping roots so private owner credentials cannot become public assets.
+
+## Scoped automation and MCP
+
+Generate a named API key in Settings → API keys, selecting each account and
+operation explicitly. `messages.send` grants permission to **request** delivery.
+It never permits an API caller or MCP client to approve or deliver mail directly.
+Review requests in Settings → Send approvals. The owner composer still sends
+when the owner presses Send. Routing headers cannot turn a scoped key into an
+owner.
+
+The shared local Host and daemon expose `/api/v1/mcp` using the official Rust
+MCP SDK (`rmcp` 3.9.0), stateless Streamable HTTP JSON responses and the stable
+`2025-11-25` protocol. Configure `Authorization: Bearer <scoped-key>` in your
+client. There is no OAuth authorization server, discovery or dynamic client
+registration; clients that require OAuth discovery are not supported. Host
+validation remains required; a supplied browser Origin must match the service.
+Nonbrowser MCP requests may omit Origin because every request requires an
+explicit bearer. All calls recheck current key policy, including revocation and
+expiry after initialization.
+
+For stdio clients, build `colecto-mcp` with `just build`, then configure the
+executable with one argument, such as `https://mail.example.com/api/v1/mcp`
+(or `http://127.0.0.1:4173/api/v1/mcp` locally). Set `COLECTO_MCP_KEY_FILE` to a
+private `0600` file containing a scoped key. `COLECTO_MCP_KEY` is an alternative
+environment variable; do not put secrets in arguments or URLs. The broker
+connects to the already running Host rather than opening a separate mail store.
+Only MCP JSON goes to stdout. Errors go to stderr without credential contents.
+Input lines are limited to 512000 bytes and responses to 1000000 bytes; oversized
+messages fail rather than truncate. Redirects are disabled.
+
+Tools expose `account.read`, `messages.list`, `messages.read`, `drafts.list`,
+`drafts.read`, `drafts.write`, `labels.list`, `messages.label`, `messages.send` and `send.status`.
+Each takes `account`; reads/status also take `id`, writes/send take `draft`, and
+label updates take `label`. Message lists accept `folder` and `q`. Discovery
+confers no grants. Invalid inputs and operation failures return structured tool
+errors; authentication failures use HTTP 401. No approval tool exists.
+
+The HTTP equivalent is `POST /api/v1/send` with an explicit scoped bearer,
+`x-colecto-account`, matching `Origin` and a `DraftInput` JSON body. A successful
+request returns `{ "id": "…", "status": "pending", "expires_at": … }`, which
+means **waiting for human approval**, never sent. Poll
+`GET /api/v1/send-requests/{id}` or MCP `send.status` at most once per second.
+Only the requesting key can inspect its statuses; only the owner can list full
+snapshots or approve/reject. Requests expire in 10 minutes; at most 16 pending
+requests per key and 128 retained requests per installation are allowed.
+Snapshots are at most 110000 serialized bytes in this slice. Retained snapshots
+are purged after 24 hours on journal access/restart or the existing receive maintenance pass; they are local plaintext in
+a private `send-approvals.json`. Do not store the data directory under static
+assets. Edits require a new request.
+
+Approval rechecks the requesting key, account connection and From identity,
+then persists `submitting` before initiating transport once. Replaying approval
+cannot submit again. Transport failures become `uncertain`; on restart, an
+interrupted `submitting` also becomes `uncertain`. Never automatically retry an
+uncertain request: check Sent or contact the recipient. This provides at-most-once
+application initiation, not exactly-once SMTP delivery. A disconnected reviewing
+browser does not cancel an already initiated send. Reject, expiry, revoked keys,
+removed/disconnected accounts or missing grants prevent initiation.

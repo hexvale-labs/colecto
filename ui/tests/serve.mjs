@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const directory = mkdtempSync(join(tmpdir(), 'colecto-ui-'));
+writeFileSync(join(directory, 'owner-token'), 'b'.repeat(64), { mode: 0o600 });
 const child = spawn('../target/debug/colecto-host', {
   env: { ...process.env, COLECTO_PORT: '4179', COLECTO_DATA_DIR: directory }, stdio: 'inherit',
 });

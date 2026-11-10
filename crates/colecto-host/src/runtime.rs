@@ -182,7 +182,10 @@ pub fn read_token(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        if metadata.uid() != rustix::process::geteuid().as_raw() {
+            return Err("Token file must be owned by the current OS user".into());
+        }
         if metadata.permissions().mode() & 0o077 != 0 {
             return Err("Token file must be readable only by its owner (chmod 600)".into());
         }
@@ -246,4 +249,50 @@ impl Drop for OwnedSocket {
             let _ = std::fs::remove_file(&self.path);
         }
     }
+}
+
+/// Load the OS-user owner's local bootstrap credential without exposing it over HTTP.
+pub fn local_owner_token(directory: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let handle = std::fs::File::open(directory)?;
+        let metadata = handle.metadata()?;
+        if !metadata.is_dir() || metadata.uid() != rustix::process::geteuid().as_raw() {
+            return Err("Local data directory must be owned by the current OS user".into());
+        }
+        handle.set_permissions(std::fs::Permissions::from_mode(0o700))?;
+    }
+    let path = directory.join("owner-token");
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(&path) {
+        Ok(mut file) => {
+            use std::io::Write;
+            file.write_all(crate::api_keys::random()?.as_bytes())?;
+            file.sync_all()?;
+            #[cfg(unix)]
+            std::fs::File::open(directory)?.sync_all()?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    let token = read_token(&path)?;
+    if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("Invalid local owner-token file; stop the service and restore or remove the file before restarting".into());
+    }
+    Ok(token)
+}
+
+pub fn owner_initialization_script(origin: &str, token: &str) -> String {
+    format!(
+        "if (window.location.origin === {}) {{ window.sessionStorage.setItem('colecto.token', {}); }}",
+        serde_json::to_string(origin).expect("serialize origin"),
+        serde_json::to_string(token).expect("serialize owner credential")
+    )
 }

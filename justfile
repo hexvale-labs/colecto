@@ -27,7 +27,7 @@ lint:
     cargo clippy --workspace --all-targets --locked -- -D warnings
 
 # Run the routine verification suite.
-verify: fmt-check check lint test ui-check ui-build
+verify: fmt-check check lint test ui-check ui-unit ui-build
 
 # Install the locked frontend dependencies.
 setup-ui:
@@ -40,6 +40,10 @@ setup-browser:
 # Check Svelte components and TypeScript.
 ui-check:
     cd ui && bun run --bun check
+
+# Check browser service error handling without starting a browser or mail service.
+ui-unit:
+    bun test ./ui/tests/api.test.mjs
 
 # Build the bundled UI for the local Host.
 ui-build:

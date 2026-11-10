@@ -1,4 +1,8 @@
 //! Trusted HTTP adapter for bundled UI and isolated Wasm extensions.
+pub mod api_keys;
+pub mod approvals;
+pub mod mcp;
+use api_keys::{ApiKeys, Principal};
 mod extensions;
 pub mod notifications;
 pub mod runtime;
@@ -28,6 +32,9 @@ use tower_http::services::ServeDir;
 
 #[derive(Clone)]
 struct Host {
+    keys: Arc<Mutex<ApiKeys>>,
+    approvals: Arc<Mutex<approvals::Approvals>>,
+    status_polls: Arc<Mutex<std::collections::HashMap<String, std::time::Instant>>>,
     accounts: Arc<Mutex<Accounts>>,
     extensions: Arc<Mutex<extensions::Extensions>>,
     authority: String,
@@ -38,7 +45,44 @@ struct Host {
 struct Failure(StatusCode, String);
 impl IntoResponse for Failure {
     fn into_response(self) -> Response {
-        (self.0, Json(ApiError { error: self.1 })).into_response()
+        let category = self.category();
+        (
+            self.0,
+            Json(ApiError {
+                error: self.1,
+                category,
+            }),
+        )
+            .into_response()
+    }
+}
+impl Failure {
+    fn category(&self) -> colecto_extension_api::ErrorCategory {
+        use colecto_extension_api::ErrorCategory::*;
+        if self.1.contains("uncertain outcome") {
+            DeliveryUncertain
+        } else if self.1.starts_with("Mail server rejected authentication")
+            || self.1.starts_with("JMAP HTTP 401:")
+            || self.1.starts_with("JMAP HTTP 403:")
+        {
+            ProviderAuthentication
+        } else if self.1.starts_with("Mail server timed out") {
+            ProviderTimeout
+        } else if self.1.starts_with("Mail server TLS") {
+            ProviderTls
+        } else if self.1.starts_with("JMAP HTTP 429:") {
+            ProviderRateLimited
+        } else {
+            match self.0 {
+                StatusCode::UNAUTHORIZED => Authentication,
+                StatusCode::FORBIDDEN => Forbidden,
+                StatusCode::BAD_REQUEST => InvalidRequest,
+                StatusCode::NOT_FOUND => NotFound,
+                StatusCode::BAD_GATEWAY => Provider,
+                StatusCode::CONFLICT => Conflict,
+                _ => StorageOrService,
+            }
+        }
     }
 }
 impl From<Error> for Failure {
@@ -78,6 +122,8 @@ pub fn app_with_accounts(accounts: Accounts, authority: String, assets: PathBuf)
 
 fn build_app(host: Host, assets: PathBuf) -> Router {
     let api = Router::new()
+        .route("/api-keys", get(list_api_keys).post(mint_api_key))
+        .route("/api-keys/{id}", axum::routing::delete(revoke_api_key))
         .route("/extensions", get(list_extensions).post(install_extension))
         .route(
             "/extensions/{id}",
@@ -92,8 +138,20 @@ fn build_app(host: Host, assets: PathBuf) -> Router {
         .route("/security", get(security).post(security_action))
         .route("/account", get(account))
         .route("/send", axum::routing::post(send))
+        .route("/send-requests", get(list_send_requests))
+        .route("/send-requests/{id}", get(send_request))
+        .route(
+            "/send-requests/{id}/approve",
+            axum::routing::post(approve_send),
+        )
+        .route(
+            "/send-requests/{id}/reject",
+            axum::routing::post(reject_send),
+        )
         .route("/labels", get(labels).post(update_label))
         .route("/messages", get(messages))
+        .route("/messages/cache", get(cached_messages))
+        .route("/messages/refresh", axum::routing::post(messages))
         .route("/messages/{id}", get(message))
         .route("/drafts", get(drafts).post(save_draft))
         .route("/drafts/{id}", get(draft))
@@ -116,7 +174,7 @@ async fn boundary(State(host): State<Host>, request: Request, next: Next) -> Res
     );
     let origin_ok = match origin {
         Some(value) => value == host.origin,
-        None => !mutation,
+        None => !mutation || request.uri().path() == "/api/v1/mcp",
     };
     let mut response = if !authority_ok || !origin_ok {
         forbidden().into_response()
@@ -144,11 +202,28 @@ async fn boundary(State(host): State<Host>, request: Request, next: Next) -> Res
 
 // Headers route trusted bundled callers only. Wasm identities are bound by the
 // Host invocation and can never use this direct HTTP service path.
-fn grant(host: &Host, headers: &HeaderMap, operation: Capability) -> Result<String, Failure> {
+fn grant(
+    host: &Host,
+    principal: &Principal,
+    headers: &HeaderMap,
+    operation: Capability,
+) -> Result<String, Failure> {
     let account = headers
         .get("x-colecto-account")
         .and_then(|v| v.to_str().ok())
         .ok_or_else(forbidden)?;
+    if let Principal::ApiKey(id) = principal {
+        return if host.keys.lock().map_err(|_| forbidden())?.allows(
+            id,
+            account,
+            operation,
+            api_keys::now(),
+        ) {
+            Ok(account.to_owned())
+        } else {
+            Err(forbidden())
+        };
+    }
     let extension = headers
         .get("x-colecto-extension")
         .and_then(|v| v.to_str().ok())
@@ -321,6 +396,28 @@ fn extension_service(
     }
     // Already authorized operations may finish after a later revocation.
     drop(extensions);
+    if request.operation == Capability::MessagesRead
+        && let Some(message) = host
+            .accounts
+            .lock()
+            .map_err(|_| "Account service unavailable")?
+            .cached_message(account, request.id.as_deref().ok_or("Message ID required")?)
+            .map_err(|_| "Mail cache unavailable")?
+    {
+        return serde_json::to_value(message)
+            .map_err(|_| "Cannot serialize service response".into());
+    }
+    if request.operation == Capability::MessagesList {
+        return serde_json::to_value(
+            host.accounts
+                .lock()
+                .map_err(|_| "Account service unavailable")?
+                .cached(account, "inbox")
+                .map_err(|_| "Mail cache unavailable")?
+                .messages,
+        )
+        .map_err(|_| "Cannot serialize service response".into());
+    }
     let handle = host
         .accounts
         .lock()
@@ -406,17 +503,19 @@ fn inbox_folder() -> String {
 }
 async fn labels(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
 ) -> Result<Json<std::collections::BTreeMap<String, Vec<String>>>, Failure> {
-    let account = grant(&host, &headers, Capability::MessagesList)?;
+    let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
     with_store(host, account, |s| s.labels()).await.map(Json)
 }
 async fn update_label(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     input: Result<Json<colecto_extension_api::LabelInput>, JsonRejection>,
 ) -> Result<Json<std::collections::BTreeMap<String, Vec<String>>>, Failure> {
-    let account = grant(&host, &headers, Capability::MessagesLabel)?;
+    let account = grant(&host, &principal, &headers, Capability::MessagesLabel)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
     with_store(host, account, move |s| {
         s.update_label(&input.name, input.message_id.as_deref(), input.remove)
@@ -424,40 +523,112 @@ async fn update_label(
     .await
     .map(Json)
 }
+fn redact_list_bodies(
+    host: &Host,
+    principal: &Principal,
+    account: &str,
+    messages: &mut [Message],
+) -> Result<(), Failure> {
+    if let Principal::ApiKey(id) = principal
+        && !host.keys.lock().map_err(|_| forbidden())?.allows(
+            id,
+            account,
+            Capability::MessagesRead,
+            api_keys::now(),
+        )
+    {
+        for message in messages {
+            message.body.clear();
+        }
+    }
+    Ok(())
+}
+async fn cached_messages(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    Query(query): Query<MessageQuery>,
+) -> Result<Json<colecto_core::MailSnapshot>, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
+    if !query.q.is_empty() {
+        return Err(Failure(
+            StatusCode::BAD_REQUEST,
+            "Cached snapshots do not run provider searches".into(),
+        ));
+    }
+    let mut snapshot = host
+        .accounts
+        .lock()
+        .map_err(|_| forbidden())?
+        .cached(&account, &query.folder)
+        .map_err(Failure::from)?;
+    redact_list_bodies(&host, &principal, &account, &mut snapshot.messages)?;
+    Ok(Json(snapshot))
+}
 async fn messages(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Query(query): Query<MessageQuery>,
 ) -> Result<Json<Vec<Message>>, Failure> {
-    let account = grant(&host, &headers, Capability::MessagesList)?;
-    with_store(host, account, move |s| s.query(&query.folder, &query.q))
-        .await
-        .map(Json)
+    let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
+    let mut messages = with_store(host.clone(), account.clone(), move |s| {
+        s.query(&query.folder, &query.q)
+    })
+    .await?;
+    redact_list_bodies(&host, &principal, &account, &mut messages)?;
+    Ok(Json(messages))
 }
 async fn message(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Message>, Failure> {
-    let account = grant(&host, &headers, Capability::MessagesRead)?;
+    let account = grant(&host, &principal, &headers, Capability::MessagesRead)?;
+    if let Some(message) = host
+        .accounts
+        .lock()
+        .map_err(|_| forbidden())?
+        .cached_message(&account, &id)
+        .map_err(Failure::from)?
+    {
+        return Ok(Json(message));
+    }
     with_store(host, account, move |s| {
         s.message(&id).cloned().ok_or(Error::Missing)
     })
     .await
     .map(Json)
 }
-async fn drafts(State(host): State<Host>, headers: HeaderMap) -> Result<Json<Vec<Draft>>, Failure> {
-    let account = grant(&host, &headers, Capability::DraftsList)?;
-    with_store(host, account, |s| Ok(s.drafts().to_vec()))
-        .await
-        .map(Json)
+async fn drafts(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Draft>>, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::DraftsList)?;
+    let mut drafts = with_store(host.clone(), account.clone(), |s| Ok(s.drafts().to_vec())).await?;
+    if let Principal::ApiKey(id) = &principal
+        && !host.keys.lock().map_err(|_| forbidden())?.allows(
+            id,
+            &account,
+            Capability::DraftsRead,
+            api_keys::now(),
+        )
+    {
+        for draft in &mut drafts {
+            draft.body.clear();
+        }
+    }
+    Ok(Json(drafts))
 }
 async fn draft(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Draft>, Failure> {
-    let account = grant(&host, &headers, Capability::DraftsRead)?;
+    let account = grant(&host, &principal, &headers, Capability::DraftsRead)?;
     with_store(host, account, move |s| {
         s.draft(&id).cloned().ok_or(Error::Missing)
     })
@@ -466,32 +637,41 @@ async fn draft(
 }
 async fn save_draft(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     input: Result<Json<DraftInput>, JsonRejection>,
 ) -> Result<Json<Draft>, Failure> {
-    let account = grant(&host, &headers, Capability::DraftsWrite)?;
+    let account = grant(&host, &principal, &headers, Capability::DraftsWrite)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
     with_store(host, account, move |s| s.save_draft(input))
         .await
         .map(Json)
 }
 
-async fn account(State(host): State<Host>, headers: HeaderMap) -> Result<Json<bool>, Failure> {
-    let account = grant(&host, &headers, Capability::AccountRead)?;
+async fn account(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+) -> Result<Json<bool>, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::AccountRead)?;
     with_store(host, account, |s| Ok(s.connected()))
         .await
         .map(Json)
 }
 async fn send(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     input: Result<Json<DraftInput>, JsonRejection>,
-) -> Result<Json<bool>, Failure> {
-    let account = grant(&host, &headers, Capability::MessagesSend)?;
+) -> Result<Json<serde_json::Value>, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::MessagesSend)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
+    if let Principal::ApiKey(id) = principal {
+        return request_delivery(host, id, account, input).await.map(Json);
+    }
     with_store(host, account, move |s| {
         s.send(input)?;
-        Ok(true)
+        Ok(serde_json::json!(true))
     })
     .await
     .map(Json)
@@ -604,6 +784,233 @@ async fn security_action(
     .map(Json)
 }
 
+async fn list_api_keys(
+    State(host): State<Host>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<api_keys::KeyMetadata>>, Failure> {
+    host_grant(&headers)?;
+    Ok(Json(host.keys.lock().map_err(|_| forbidden())?.list()))
+}
+async fn mint_api_key(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    input: Result<Json<api_keys::KeyInput>, JsonRejection>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    let Json(input) =
+        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid API key settings".into()))?;
+    let accounts = host.accounts.lock().map_err(|_| forbidden())?.list();
+    if input
+        .accounts
+        .iter()
+        .any(|id| !accounts.iter().any(|a| &a.id == id))
+    {
+        return Err(forbidden());
+    }
+    let (key, secret) = host
+        .keys
+        .lock()
+        .map_err(|_| forbidden())?
+        .mint(input, api_keys::now())
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+    Ok(Json(serde_json::json!({"key":key,"secret":secret})))
+}
+async fn revoke_api_key(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<bool>, Failure> {
+    host_grant(&headers)?;
+    host.keys
+        .lock()
+        .map_err(|_| forbidden())?
+        .revoke(&id, api_keys::now())
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+    Ok(Json(true))
+}
+
+fn approval_failure(error: String) -> Failure {
+    Failure(StatusCode::CONFLICT, error)
+}
+fn require_owner(principal: &Principal, headers: &HeaderMap) -> Result<(), Failure> {
+    if !matches!(principal, Principal::Owner) {
+        return Err(forbidden());
+    }
+    host_grant(headers)
+}
+async fn request_delivery(
+    host: Host,
+    key: String,
+    account: String,
+    input: DraftInput,
+) -> Result<serde_json::Value, Failure> {
+    tokio::task::spawn_blocking(move || {
+        let accounts = host.accounts.lock().map_err(|_| forbidden())?;
+        let info = accounts.list().into_iter()
+            .find(|a| a.id == account && a.connected)
+            .ok_or_else(forbidden)?;
+        let from = info.settings.ok_or_else(forbidden)?.address;
+        let mut keys = host.keys.lock().map_err(|_| forbidden())?;
+        if !keys.allows(&key, &account, Capability::MessagesSend, api_keys::now()) {
+            return Err(forbidden());
+        }
+        let request = host.approvals.lock().map_err(|_| forbidden())?
+            .create(&key, &account, &from, input, api_keys::now())
+            .map_err(approval_failure)?;
+        Ok(serde_json::json!({"id":request.id,"status":request.status,"expires_at":request.expires_at}))
+    }).await.map_err(|_| approval_failure("Delivery request service unavailable".into()))?
+}
+
+async fn list_send_requests(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<approvals::PendingSend>>, Failure> {
+    require_owner(&principal, &headers)?;
+    Ok(Json(
+        host.approvals
+            .lock()
+            .map_err(|_| forbidden())?
+            .list(api_keys::now())
+            .map_err(approval_failure)?,
+    ))
+}
+async fn request_status(
+    host: &Host,
+    principal: &Principal,
+    id: &str,
+    account: Option<&str>,
+) -> Result<serde_json::Value, Failure> {
+    if let Principal::ApiKey(key) = principal {
+        let mut polls = host.status_polls.lock().map_err(|_| forbidden())?;
+        if polls
+            .get(key)
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1))
+        {
+            return Err(Failure(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Poll at most once per second".into(),
+            ));
+        }
+        if polls.len() >= 128 {
+            polls.retain(|_, t| t.elapsed() < std::time::Duration::from_secs(1));
+        }
+        polls.insert(key.clone(), std::time::Instant::now());
+    }
+    let request = host
+        .approvals
+        .lock()
+        .map_err(|_| forbidden())?
+        .get(id, api_keys::now())
+        .map_err(|_| Failure(StatusCode::NOT_FOUND, "Delivery request not found".into()))?;
+    if account.is_some_and(|account| request.account != account) {
+        return Err(Failure(
+            StatusCode::NOT_FOUND,
+            "Delivery request not found".into(),
+        ));
+    }
+    if let Principal::ApiKey(key) = principal
+        && (request.requester != *key
+            || !host.keys.lock().map_err(|_| forbidden())?.allows(
+                key,
+                &request.account,
+                Capability::MessagesSend,
+                api_keys::now(),
+            ))
+    {
+        return Err(Failure(
+            StatusCode::NOT_FOUND,
+            "Delivery request not found".into(),
+        ));
+    }
+    Ok(serde_json::json!({"id":request.id,"status":request.status,"expires_at":request.expires_at}))
+}
+async fn send_request(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    request_status(&host, &principal, &id, None).await.map(Json)
+}
+async fn reject_send(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<approvals::PendingSend>, Failure> {
+    require_owner(&principal, &headers)?;
+    host.approvals
+        .lock()
+        .map_err(|_| forbidden())?
+        .reject(&id, api_keys::now())
+        .map(Json)
+        .map_err(approval_failure)
+}
+async fn approve_send(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<approvals::PendingSend>, Failure> {
+    require_owner(&principal, &headers)?;
+    let permit = host.execution.clone().try_acquire_owned().map_err(|_| {
+        Failure(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Mail service busy; try again".into(),
+        )
+    })?;
+    // This worker survives an HTTP client disconnect. Persist submitting before touching transport.
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let accounts = host.accounts.lock().map_err(|_| forbidden())?;
+        let request = host
+            .approvals
+            .lock()
+            .map_err(|_| forbidden())?
+            .get(&id, api_keys::now())
+            .map_err(approval_failure)?;
+        let info = accounts
+            .list()
+            .into_iter()
+            .find(|a| {
+                a.id == request.account
+                    && a.connected
+                    && a.settings
+                        .as_ref()
+                        .is_some_and(|s| s.address == request.from)
+            })
+            .ok_or_else(forbidden)?;
+        let store = accounts.store(&info.id).map_err(Failure::from)?;
+        let store = store.lock().map_err(|_| forbidden())?;
+        let mut keys = host.keys.lock().map_err(|_| forbidden())?;
+        if !keys.allows(
+            &request.requester,
+            &request.account,
+            Capability::MessagesSend,
+            api_keys::now(),
+        ) {
+            return Err(forbidden());
+        }
+        let snapshot = host
+            .approvals
+            .lock()
+            .map_err(|_| forbidden())?
+            .begin(&id, api_keys::now())
+            .map_err(approval_failure)?;
+        drop(keys);
+        drop(accounts);
+        let sent = store.send(snapshot).is_ok();
+        let mut approvals = host.approvals.lock().map_err(|_| forbidden())?;
+        approvals.finish(&id, sent).map_err(approval_failure)?;
+        approvals
+            .get(&id, api_keys::now())
+            .map(Json)
+            .map_err(approval_failure)
+    })
+    .await
+    .map_err(|_| approval_failure("Delivery outcome uncertain; do not retry".into()))?
+}
+
 #[cfg(test)]
 mod extension_service_tests {
     use super::*;
@@ -631,6 +1038,11 @@ mod extension_service_tests {
             )
             .unwrap();
         let host = Host {
+            keys: Arc::new(Mutex::new(ApiKeys::open(dir.path()).unwrap())),
+            approvals: Arc::new(Mutex::new(
+                approvals::Approvals::open(dir.path(), api_keys::now()).unwrap(),
+            )),
+            status_polls: Arc::default(),
             accounts: Arc::new(Mutex::new(accounts)),
             extensions: Arc::new(Mutex::new(extensions)),
             authority: "127.0.0.1:4173".into(),

@@ -9,6 +9,8 @@
   import { onMount, tick } from 'svelte';
   import ExtensionPanel from '../ExtensionPanel.svelte';
   import { mailExtensions } from './registry';
+  import ApiKeys from '../ApiKeys.svelte';
+  import SendApprovals from '../SendApprovals.svelte';
   import AccountSettings from '../AccountSettings.svelte';
   import { createServices, hostService } from '../lib/api';
   import type { Draft, MailItem, AccountInfo, SecurityInfo } from '../lib/api';
@@ -23,7 +25,7 @@
   let security = $state<SecurityInfo>({ protected: false, locked: false, cleanup_pending: false });
   let accountId = $state('demo');
   let settingsOpen = $state(false);
-  let settingsPage = $state<'Accounts' | 'Appearance' | 'Servers' | 'Extensions'>('Accounts');
+  let settingsPage = $state<'Accounts' | 'Appearance' | 'Servers' | 'Extensions' | 'API keys' | 'Send approvals'>('Accounts');
   let tabs = $state<{ account: string; id: string; subject: string; folder: 'Inbox' | 'Sent' }[]>([]);
   let currentTabs = $derived(tabs.filter(tab => tab.account === accountId));
   let query = $state('');
@@ -62,7 +64,7 @@
     catch { serverError = 'Enter an HTTPS server address, or HTTP for a local server. Do not include credentials or an access token.'; }
   }
   function settingsTab(next: typeof settingsPage) { if (next === settingsPage || !canLeave()) return; dirty = false; settingsPage = next; if (next === 'Extensions') onsettings(); }
-  function activateTab(tab: typeof tabs[number]) { if (!canLeave()) return; clearView(); ++listGeneration; loading = false; settingsOpen = false; view = { kind: 'message', id: tab.id, folder: tab.folder }; }
+  function activateTab(tab: typeof tabs[number]) { if (!canLeave()) return; clearView(); invalidateList(); settingsOpen = false; view = { kind: 'message', id: tab.id, folder: tab.folder }; }
   async function closeTab(id: string) {
     const index = currentTabs.findIndex(tab => tab.id === id);
     const active = view?.kind === 'message' && view.id === id;
@@ -78,7 +80,7 @@
   }
 
   let panelId = $state<string | null>(null);
-  function openPanel(id: string) { if (!canLeave()) return; clearView(); ++listGeneration; settingsOpen = false; panelId = id; }
+  function openPanel(id: string) { if (!canLeave()) return; clearView(); invalidateList(); settingsOpen = false; panelId = id; }
   let accountError = $state('');
   let services = $derived(createServices(accountId));
   let activeAccount = $derived(accounts.find(a => a.id === accountId));
@@ -95,13 +97,13 @@
   }
   function selectAccount(next: string) {
     if (!accounts.some(account => account.id === next) || !canLeave()) return;
-    clearView(); ++listGeneration; items = []; labels = {}; labelFilter = ''; labelError = '';
+    clearView(); invalidateList(); items = []; fetchedAt = null; labels = {}; labelFilter = ''; labelError = '';
     accountId = next; try { localStorage.setItem('colecto.account', next); } catch { /* Selection persistence is optional. */ } connected = accounts.find(a => a.id === next)?.connected ?? false;
     settingsOpen = false; query = ''; folder = 'Inbox'; void loadList();
   }
   function manageAccounts() {
     if (!canLeave()) return;
-    clearView(); ++listGeneration; settingsOpen = true; settingsPage = 'Accounts';
+    clearView(); invalidateList(); settingsOpen = true; settingsPage = 'Accounts';
     void refreshAccounts().catch(e => accountError = (e as Error).message);
   }
   function closeSettings() {
@@ -112,6 +114,8 @@
   let items = $state<MailItem[]>([]);
   let view = $state<View>(null);
   let loading = $state(true);
+  let fetching = $state(false);
+  let fetchedAt = $state<number | null>(null);
   let error = $state('');
   let openError = $state('');
   let dirty = $state(false);
@@ -129,7 +133,7 @@
     ...Object.keys(labels).filter(() => view?.kind === 'message').map(name => ({ id: `assign-${name}`, name: `${labels[name].includes(view?.kind === 'message' ? view.id : '') ? 'Remove' : 'Add'} label: ${name}`, run: () => { if (view?.kind === 'message') void label(name, view.id, labels[name].includes(view.id)); }, disabled: loading })),
     { id: 'refresh', name: 'Refresh current mailbox', run: () => void loadList(), disabled: settingsOpen || !!panelId },
     { id: 'back', name: 'Back to message list', run: back },
-    ...(['Accounts', 'Appearance', 'Servers', 'Extensions'] as const).map(page => ({ id: `settings-${page}`, name: `Settings: ${page}`, run: () => { manageAccounts(); if (settingsOpen && !dirty) settingsTab(page); } })),
+    ...(['Accounts', 'Appearance', 'Servers', 'Extensions', 'API keys', 'Send approvals'] as const).map(page => ({ id: `settings-${page}`, name: `Settings: ${page}`, run: () => { manageAccounts(); if (settingsOpen && !dirty) settingsTab(page); } })),
     ...accounts.map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
     ...currentTabs.map(tab => ({ id: `tab-${tab.id}`, name: `Open message: ${tab.subject}`, run: () => activateTab(tab) })),
     ...extensionStates.filter(extension => !extension.bundled && extension.enabled).map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => openPanel(extension.manifest.id) })),
@@ -138,6 +142,7 @@
     ...(view?.kind === 'draft' ? ['Save draft', ...(connected ? ['Send message'] : [])].map(name => ({ id: name, name, run: () => { document.querySelector<HTMLButtonElement>(`.composer [data-command="${name === 'Save draft' ? 'save' : 'send'}"]`)?.click(); } })) : []),
     ...(view?.kind === 'message' ? [{ id: 'close-tab', name: 'Close current message tab', run: () => { if (view?.kind === 'message') void closeTab(view.id); } }] : []),
   ].map(command => ({ ...command, disabled: command.disabled || busy || labeling || !initialized })));
+  function invalidateList() { ++listGeneration; loading = false; fetching = false; }
   async function loadList() {
     if (labeling) return;
     const generation = ++listGeneration;
@@ -146,8 +151,14 @@
     const requestedQuery = query.trim();
     const requestedAccount = accountId;
     const inboxService = services.inbox;
-    loading = true; error = ''; openError = '';
+    loading = items.length === 0; fetching = true; error = ''; openError = '';
     try {
+      if (requestedFolder !== 'Drafts' && !requestedQuery) {
+        const snapshot = await inboxService.cached(requestedFolder === 'Sent' ? 'sent' : 'inbox');
+        if (generation !== listGeneration || requestedAccount !== accountId) return;
+        items = snapshot.messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date }));
+        fetchedAt = snapshot.fetched_at; loading = false;
+      }
       const normalizedQuery = requestedQuery.toLocaleLowerCase();
       const [nextLabels, result] = await Promise.all([
         inboxService.labels(),
@@ -155,15 +166,17 @@
           ? inboxService.messages(requestedFolder === 'Sent' ? 'sent' : 'inbox', requestedQuery).then(messages => messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date })))
           : inboxService.drafts().then(drafts => drafts.filter(draft => [draft.recipient, draft.subject, draft.body].some(text => text.toLocaleLowerCase().includes(normalizedQuery))).slice().reverse().map(d => ({ id: d.id, name: d.recipient || 'No recipient', subject: d.subject, preview: d.body, date: 'Draft' }))),
       ]);
-      if (generation === listGeneration && requestedAccount === accountId) { items = result; labels = nextLabels; appliedQuery = requestedQuery; }
+      if (generation === listGeneration && requestedAccount === accountId) { items = result; labels = nextLabels; appliedQuery = requestedQuery; fetchedAt = Math.floor(Date.now() / 1000); }
     } catch (e) { if (generation === listGeneration) error = (e as Error).message; }
-    finally { if (generation === listGeneration) loading = false; }
+    finally { if (generation === listGeneration) { loading = false; fetching = false; } }
   }
   function canLeave() { return initialized && !busy && !labeling && (!dirty || window.confirm('Discard unsaved changes? Your last saved draft will be kept.')); }
   function clearView() { panelId = null; ++openGeneration; view = null; dirty = false; openError = ''; opening = false; }
   function navigate(next: 'Inbox' | 'Drafts' | 'Sent') {
     if (!canLeave()) return;
-    clearView(); settingsOpen = false; query = ''; labelFilter = ''; folder = next; void loadList();
+    clearView(); settingsOpen = false; query = ''; labelFilter = '';
+    if (next !== folder) { items = []; fetchedAt = null; appliedQuery = ''; }
+    folder = next; void loadList();
   }
   function compose() { if (!Composer || !canLeave()) return; clearView(); settingsOpen = false; view = { kind: 'draft', draft: null }; }
   function back() { if (!canLeave()) return; clearView(); }
@@ -231,10 +244,12 @@
   <main class="workspace">
     {#if accountError}<div class="account-error error-box" role="alert">{accountError}<button class="text-button" onclick={() => { accountError = ''; void refreshAccounts().catch(e => accountError = (e as Error).message); }}>Retry account settings</button></div>{/if}
     {#if settingsOpen}<section class="settings-page" aria-label="Settings"><header class="settings-header"><div><div class="eyebrow">YOUR WORKSPACE</div><h1 tabindex="-1">Settings</h1></div><button class="secondary" disabled={busy} onclick={closeSettings}>Back to mail</button></header>
-      <nav class="settings-nav" aria-label="Settings sections">{#each ['Accounts', 'Appearance', 'Servers', 'Extensions'] as page}<button class:active={settingsPage === page} aria-current={settingsPage === page ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(page as typeof settingsPage)}>{page}</button>{/each}</nav>
+      <nav class="settings-nav" aria-label="Settings sections">{#each ['Accounts', 'Appearance', 'Servers', 'Extensions', 'API keys', 'Send approvals'] as page}<button class:active={settingsPage === page} aria-current={settingsPage === page ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(page as typeof settingsPage)}>{page}</button>{/each}</nav>
       {#if settingsPage === 'Accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} />
       {:else if settingsPage === 'Appearance'}<section class="settings-card"><h2>Appearance</h2><p>Choose a theme for this device. System follows your device’s color preference.</p><label class="field">Color theme<select value={appearance.theme} onchange={(event) => setTheme(event.currentTarget.value as Theme)}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label></section>
       {:else if settingsPage === 'Servers'}<section class="settings-card"><h2>Mail service</h2><p>Your current service is <strong>{window.location.origin}</strong>. Accounts and saved drafts belong to this service.</p><p>To use a remote daemon, open its HTTPS address. Your credentials stay on that server. Local services can also use HTTP on loopback.</p><form onsubmit={visitServer}><label class="field">Server address<input type="url" bind:value={serverUrl} placeholder="https://mail.example.com" required autocomplete="url" /></label>{#if serverError}<p class="error-box" role="alert">{serverError}</p>{/if}<button class="secondary">Open server</button></form><button class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></section>
+      {:else if settingsPage === 'Send approvals'}<SendApprovals />
+      {:else if settingsPage === 'API keys'}<ApiKeys {accounts} />
       {:else}{@render extensionSettings()}{/if}
     </section>
     {:else if panelId}{#key `${accountId}:${panelId}`}<ExtensionPanel id={panelId} account={accountId} onback={() => navigate('Inbox')} />{/key}
@@ -243,7 +258,7 @@
       {#if labelFilter}<button class="text-button" disabled={labeling || loading || busy} aria-label={`Delete label ${labelFilter}`} onclick={() => { if (window.confirm(`Delete label “${labelFilter}”? Messages will be kept.`)) void label(labelFilter, undefined, true); }}>Delete label</button>{/if}
       <form onsubmit={(event) => { event.preventDefault(); void label(labelName); }}><input id="new-label" aria-label="New label" placeholder="New label" maxlength="80" bind:value={labelName} /><button class="text-button" aria-label="Create label" disabled={!labelName.trim() || labeling || loading || busy}>Add</button></form></div>
       {#if labelError}<p class="error-box" role="alert">{labelError}</p>{/if}
-      <Mailbox items={visibleItems} searching={!!appliedQuery || !!labelFilter} {selected} {folder} {loading} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} /></div>{:else}<p class="error-box">Mailbox extension disabled. Open Extensions to enable it.</p>{/if}
+      <Mailbox items={visibleItems} searching={!!appliedQuery || !!labelFilter} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} /></div>{:else}<p class="error-box">Mailbox extension disabled. Open Extensions to enable it.</p>{/if}
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
         {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} folder={view.folder} {accountLabel} {labels} labeling={labeling || loading || busy} {labelError} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />

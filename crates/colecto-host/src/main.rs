@@ -27,6 +27,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             colecto_host::AccessPolicy::local(authority.clone()),
             assets,
         )?;
+        let owner_token =
+            zeroize::Zeroizing::new(colecto_host::runtime::local_owner_token(&directory)?);
+        let initialization = colecto_host::runtime::owner_initialization_script(
+            &format!("http://{authority}"),
+            &owner_token,
+        );
         let application = service.router();
         let (_stop, stop) = tokio::sync::watch::channel(false);
         tokio::spawn(service.run_background(std::time::Duration::from_secs(60), stop));
@@ -47,6 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tauri::Builder::default()
                 .setup(move |app| {
                     tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::External(url))
+                        .initialization_script(initialization)
                         .title("Colecto")
                         .inner_size(1200.0, 800.0)
                         .on_navigation(move |destination| {

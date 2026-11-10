@@ -1,5 +1,5 @@
 //! Credential persistence; plaintext is never written to the account registry.
-use crate::{Error, storage};
+use crate::{Database, Error, storage};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
     fs,
-    io::Write,
     path::PathBuf,
     sync::Arc,
 };
@@ -56,6 +55,7 @@ pub(crate) type Secrets = BTreeMap<String, Secret>;
 
 pub(crate) struct Vault {
     directory: PathBuf,
+    database: Database,
     state: State,
     backend: Arc<dyn SecretStore>,
     pub secrets: Option<Secrets>,
@@ -104,12 +104,33 @@ pub(crate) fn identifier() -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 impl Vault {
-    pub fn open(directory: PathBuf, backend: Arc<dyn SecretStore>) -> Result<Self, Error> {
-        let state: State = match fs::read(directory.join("accounts.json")) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| {
+    pub fn open(
+        directory: PathBuf,
+        database: Database,
+        backend: Arc<dyn SecretStore>,
+    ) -> Result<Self, Error> {
+        let canonical = database.contains_record("core", "vault")?;
+        let bytes = if canonical {
+            Some(
+                database
+                    .get_record("core", "vault", 1)?
+                    .ok_or_else(|| storage("Authoritative credential vault was removed"))?,
+            )
+        } else {
+            match fs::metadata(directory.join("accounts.json")) {
+                Ok(metadata) if metadata.len() > 32_000_000 => {
+                    return Err(storage("Account registry exceeds its size limit"));
+                }
+                Ok(_) => Some(fs::read(directory.join("accounts.json")).map_err(storage)?),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(storage(error)),
+            }
+        };
+        let state: State = match bytes {
+            Some(bytes) => serde_json::from_slice(&bytes).map_err(|_| {
                 invalid("Invalid account registry; preserve accounts.json before recovery")
             })?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => State {
+            None => State {
                 version: 1,
                 accounts: vec![],
                 mode: Mode::System {
@@ -119,7 +140,6 @@ impl Vault {
                 },
                 cleanup: vec![],
             },
-            Err(e) => return Err(storage(e)),
         };
         if state.version != 1 {
             return Err(invalid("Unsupported account registry version"));
@@ -153,12 +173,12 @@ impl Vault {
         }
         let mut vault = Self {
             directory,
+            database,
             state,
             backend,
             secrets: None,
             key: None,
         };
-        vault.cleanup()?;
         if let Mode::System {
             entry,
             nonce,
@@ -189,6 +209,20 @@ impl Vault {
                 None => BTreeMap::new(),
             });
         }
+        if !canonical {
+            let serialized = serde_json::to_vec(&vault.state).map_err(storage)?;
+            let canonical = vault
+                .database
+                .initialize_record("core", "vault", 1, &serialized)?;
+            if canonical != serialized {
+                return Self::open(
+                    vault.directory.clone(),
+                    vault.database.clone(),
+                    vault.backend.clone(),
+                );
+            }
+        }
+        vault.cleanup()?;
         Ok(vault)
     }
     pub fn accounts(&self) -> &[SavedAccount] {
@@ -204,14 +238,14 @@ impl Vault {
         self.secrets.is_none()
     }
     fn write(&self, state: &State) -> Result<(), Error> {
-        let mut file = tempfile::NamedTempFile::new_in(&self.directory).map_err(storage)?;
-        file.write_all(&serde_json::to_vec(state).map_err(storage)?)
-            .map_err(storage)?;
-        file.as_file().sync_all().map_err(storage)?;
-        file.persist(self.directory.join("accounts.json"))
-            .map_err(storage)?;
-        Ok(())
+        self.database.set_record(
+            "core",
+            "vault",
+            1,
+            &serde_json::to_vec(state).map_err(storage)?,
+        )
     }
+
     pub fn cleanup(&mut self) -> Result<(), Error> {
         self.sync_directory()?;
         for id in &self.state.cleanup {

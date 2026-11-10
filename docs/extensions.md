@@ -151,3 +151,42 @@ limit. Writes are atomic; invalid or unreadable stores are never silently reset.
 Labels are local service metadata, unencrypted, and do not sync with providers.
 Filtering applies to the current bounded Inbox/Sent search result, not full
 provider history. Drafts are searchable locally but do not accept message labels.
+
+## HTTP principal authentication
+
+Bundled UI account/module headers route operations only after owner bearer
+authentication. Every local and remote owner request explicitly supplies
+`Authorization: Bearer <owner-token>`; cookies never establish owner authority.
+Local mode uses a private OS-user-owned `owner-token` file; loopback headers alone
+cannot establish ownership. Remote mode uses the configured owner bearer. The
+native shell injects the local token only at its exact local origin, never into
+a remote server page. The browser keeps the bearer in origin-scoped sessionStorage
+and does not automatically send it to another port. `POST /api/v1/session` only
+validates an owner bearer with exact Host/Origin; it creates no cookie or session.
+API keys use explicit account/capability grants independent of extension headers
+and cannot invoke Host controls or directly send mail. Wasm service calls retain
+their existing Host-bound extension grants.
+See [daemon authentication](daemon.md#owner-bearers-and-scoped-api-keys).
+
+### Cached folders and error categories
+
+`GET /api/v1/messages` retains its provider-query behavior.
+`POST /api/v1/messages/refresh?folder=inbox|sent&q=...` explicitly queries the
+provider; an empty search updates that folder's bounded snapshot.
+`GET /api/v1/messages/cache?folder=inbox|sent` reads without provider access and
+returns `{folder, messages, fetched_at}`; `fetched_at` is Unix seconds or null
+for unknown freshness. Cached searches are rejected rather than mistaken for
+complete provider search results. Failed refreshes preserve prior snapshots.
+Network outages keep cached readers available. Explicit owner Disconnect and
+vault Lock clear active snapshots; on-disk snapshots remain for identity-checked
+reconnect. They do not make cached messages accessible while locked/disconnected.
+MCP exposes `messages.cached` and `messages.refresh` alongside compatible
+`messages.list`. All require `messages.list`.
+
+For API keys, message-list bodies require the same account's `messages.read`;
+draft-list bodies require `drafts.read`. Without the read grant, bodies are empty
+strings and metadata remains available. Owner, bundled, and existing Wasm grant
+semantics remain unchanged. HTTP and MCP errors include a stable `category` plus
+a readable `error`. Known provider status codes are safe bounded details; raw
+server descriptions, URLs and credentials are never copied into errors.
+`delivery_uncertain` means check Sent and request status before sending again.

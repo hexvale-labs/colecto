@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, ownerToken } from './fixtures';
 
 test('defaults dark and remembers explicit and system appearance', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' });
@@ -21,9 +21,10 @@ test('keeps separate closable message tabs and has a sent folder on mobile', asy
   const messages = [{ id: 'maya', sender: 'Maya Chen', address: 'maya@example.test', subject: 'A small plan for the weekend', body: 'Coffee?', date: 'Today' }, { id: 'alex', sender: 'Alex Rivera', address: 'alex@example.test', subject: 'Plain text, with a little character', body: 'Hello', date: 'Today' }];
   await page.route('**/api/v1/messages**', route => {
     const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/cache')) return route.fallback();
     if (url.searchParams.get('folder') === 'sent') return route.fulfill({ json: [] });
     const id = url.pathname.split('/').at(-1);
-    return route.fulfill({ json: id === 'messages' ? messages : messages.find(message => message.id === id) });
+    return route.fulfill({ json: id === 'refresh' ? messages : messages.find(message => message.id === id) });
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
@@ -54,7 +55,9 @@ test('remote access token stays in the session and reconnecting preserves a draf
   const requireToken = true;
   await page.route('**/api/v1/**', route => {
     if (requireToken && route.request().headers().authorization !== 'Bearer sample-owner-token') return route.fulfill({ status: 401, json: { error: 'Enter the daemon access token to connect' } });
-    return route.continue();
+    const headers = { ...route.request().headers() };
+    headers.authorization = `Bearer ${ownerToken}`;
+    return route.continue({ headers });
   });
   await page.goto('/');
   await page.getByLabel('Daemon access token').fill('sample-owner-token');
@@ -74,7 +77,7 @@ test('profile names fall back to email and message tabs stay with their account'
   const accounts = ['a', 'b'].map(id => ({ id, configured: true, connected: false, settings: { name: '', address: `${id}@example.test`, protocol: 'imap', imap_host: '', imap_port: 993, smtp_host: '', smtp_port: 587, username: '', session_url: '' } }));
   await page.route('**/api/v1/labels', route => route.fulfill({ json: {} }));
   await page.route('**/api/v1/accounts', route => route.fulfill({ json: accounts }));
-  await page.route('**/api/v1/messages', route => {
+  await page.route('**/api/v1/messages/refresh*', route => {
     const account = route.request().headers()['x-colecto-account'];
     return route.fulfill({ json: [{ id: 'same-id', sender: account, address: `${account}@example.test`, subject: `Mail for ${account}`, body: 'Body', date: 'Today' }] });
   });
@@ -111,7 +114,7 @@ test('account action labels use email when the optional profile name is empty', 
 
 test('mobile controls stay reachable and mail text stays selectable on narrow screens', async ({ page }) => {
   const message = { id: 'mobile-reader', sender: 'Maya Chen', address: 'maya@example.test', subject: 'Reading on a phone', body: 'Selectable message text.\n'.repeat(100), date: 'Today' };
-  await page.route('**/api/v1/messages**', route => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/messages') ? [message] : message }));
+  await page.route('**/api/v1/messages**', route => new URL(route.request().url()).pathname.endsWith('/cache') ? route.fallback() : route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/refresh') ? [message] : message }));
   await page.setViewportSize({ width: 320, height: 640 });
   await page.goto('/');
   const folders = page.getByRole('navigation', { name: 'Mail folders' });
@@ -157,7 +160,8 @@ test('worst-case mail remains usable at narrow widths and enlarged text', async 
   const { worst } = await import('../src/lib/stress-fixtures');
   await page.route('**/api/v1/messages**', route => {
     const id = new URL(route.request().url()).pathname.split('/').at(-1);
-    return route.fulfill({ json: id === 'messages' ? worst : worst.find(message => message.id === id) });
+    if (id === 'cache') return route.fallback();
+    return route.fulfill({ json: id === 'refresh' ? worst : worst.find(message => message.id === id) });
   });
   for (const width of [320, 390, 1280]) {
     await page.setViewportSize({ width, height: 900 });
@@ -203,4 +207,60 @@ test('search command keeps focus and send command uses the existing send flow', 
   await page.getByRole('combobox', { name: 'Search commands' }).fill('Send message');
   await page.keyboard.press('Enter');
   await expect(page.getByRole('status')).toHaveText('Accepted by mail server');
+});
+
+test('shows cached mail during refresh and preserves reader and editor after proxy failure', async ({ page }) => {
+  const cached = { id: 'cache-reader', sender: 'Maya Chen', address: 'maya@example.test', subject: 'Previously fetched mail', body: 'Cached content remains readable.', date: 'Today' };
+  await page.route('**/api/v1/messages/cache?*', route => route.fulfill({ json: { folder: 'inbox', messages: [cached], fetched_at: 1 } }));
+  await page.route('**/api/v1/messages/cache-reader', route => route.fulfill({ json: cached }));
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => release = resolve);
+  await page.route('**/api/v1/messages/refresh*', async route => {
+    await gate;
+    return route.fulfill({ status: 502, contentType: 'text/html', body: '<h1>Proxy unavailable SECRET</h1>' });
+  });
+  await page.goto('/');
+  await expect(page.getByText('Fetching latest messages…')).toBeVisible();
+  await page.getByRole('button', { name: /Maya Chen/ }).click();
+  await expect(page.getByRole('region', { name: 'Message reader' })).toBeVisible();
+  release();
+  await expect(page.getByRole('alert')).toContainText('HTTP 502');
+  await expect(page.getByRole('alert')).not.toContainText('SECRET');
+  await expect(page.getByRole('region', { name: 'Message reader' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  await page.getByLabel('Subject', { exact: true }).fill('Keep unsaved draft');
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('HTTP 502');
+  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Keep unsaved draft');
+});
+
+test('activating an existing message tab clears an invalidated refresh', async ({ page }) => {
+  const messages = [
+    { id: 'first-tab', sender: 'First sender', address: 'first@example.test', subject: 'First retained tab', body: 'First body', date: 'Today' },
+    { id: 'second-tab', sender: 'Second sender', address: 'second@example.test', subject: 'Second retained tab', body: 'Second body', date: 'Today' },
+  ];
+  await page.route('**/api/v1/messages/cache?*', route => route.fulfill({ json: { folder: 'inbox', messages, fetched_at: 1 } }));
+  await page.route('**/api/v1/messages/*-tab', route => route.fulfill({ json: messages.find(message => route.request().url().endsWith(message.id)) }));
+  let refreshes = 0;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => release = resolve);
+  await page.route('**/api/v1/messages/refresh*', async route => {
+    if (++refreshes > 1) await gate;
+    return route.fulfill({ json: messages });
+  });
+  await page.goto('/');
+  const refresh = page.getByRole('button', { name: 'Refresh', exact: true });
+  await expect(refresh).toBeEnabled();
+  await page.getByRole('button', { name: /First sender/ }).click();
+  await page.getByRole('button', { name: /Second sender/ }).click();
+  await refresh.click();
+  await expect(page.getByText('Fetching latest messages…')).toBeVisible();
+  await page.getByRole('navigation', { name: 'Open messages' }).getByRole('button', { name: 'First retained tab', exact: true }).click();
+  const settled = page.waitForResponse(response => response.url().includes('/messages/refresh'));
+  release();
+  await settled;
+  await expect(page.getByText('Fetching latest messages…')).toBeHidden();
+  await expect(refresh).toBeEnabled();
+  await expect(page.getByRole('heading', { name: 'First retained tab' })).toBeVisible();
 });

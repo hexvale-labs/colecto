@@ -93,7 +93,7 @@
 {/snippet}
 
 {#if authRequired}
-  <dialog class="connect-page" aria-label="Connect to mail service" use:connectDialog oncancel={(event) => event.preventDefault()}><form onsubmit={connect}><div class="eyebrow">COLECTO SERVER</div><h1>Connect to your mail</h1><p>Enter this daemon’s access token. It stays in this browser session only.</p><label class="field">Daemon access token<input type="password" bind:value={token} autocomplete="off" required /></label>{#if error}<p role="alert" class="error-box">{error}</p>{/if}<button class="primary" disabled={busy}>Connect</button></form></dialog>
+  <dialog class="connect-page" aria-label="Connect to mail service" use:connectDialog oncancel={(event) => event.preventDefault()}><form onsubmit={connect}><div class="eyebrow">COLECTO SERVER</div><h1>Connect to your mail</h1><p>Enter this daemon’s owner access token. For a local service, use the owner-token file in your Colecto data directory. The native app connects automatically. The token stays in this browser session only.</p><label class="field">Daemon access token<input type="password" bind:value={token} autocomplete="off" required /></label>{#if error}<p role="alert" class="error-box">{error}</p>{/if}<button class="primary" disabled={busy}>Connect</button></form></dialog>
 {/if}
 
 {#if managing}

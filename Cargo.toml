@@ -8,6 +8,9 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+turso = { version = "=0.7.2", default-features = false }
+futures-executor = "0.3"
+rmcp = { version = "=3.9.0", default-features = false, features = ["server", "client", "transport-streamable-http-server", "transport-streamable-http-client-reqwest", "reqwest-native-tls"] }
 toml = "0.9"
 wasmi = "2"
 wat = "1"
@@ -19,7 +22,10 @@ tempfile = "3"
 axum = "0.8"
 futures-util = "0.3"
 subtle = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
+sha2 = "0.10"
+getrandom = "0.3"
+rustix = { version = "1", features = ["process"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "io-std", "io-util", "process"] }
 tower-http = { version = "0.6", features = ["fs", "set-header"] }
 tower = { version = "0.5", features = ["util"] }
 colecto-core = { path = "crates/colecto-core" }

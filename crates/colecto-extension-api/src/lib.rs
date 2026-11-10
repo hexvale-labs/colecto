@@ -33,9 +33,27 @@ pub struct DraftInput {
     pub body: String,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCategory {
+    Authentication,
+    Forbidden,
+    InvalidRequest,
+    NotFound,
+    Provider,
+    ProviderAuthentication,
+    ProviderTimeout,
+    ProviderTls,
+    ProviderRateLimited,
+    Conflict,
+    StorageOrService,
+    DeliveryUncertain,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiError {
     pub error: String,
+    pub category: ErrorCategory,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

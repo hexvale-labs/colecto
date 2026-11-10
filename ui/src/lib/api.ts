@@ -1,6 +1,8 @@
 // Version 1 wire contracts mirror colecto-extension-api. Rust validates all input.
 export type Labels = Record<string, string[]>;
 export interface Message { id: string; sender: string; address: string; subject: string; body: string; date: string }
+export interface MailSnapshot { folder: string; messages: Message[]; fetched_at: number | null }
+export class ServiceError extends Error { constructor(message: string, readonly category: string, readonly status?: number) { super(message); this.name = 'ServiceError'; } }
 export interface Draft { id: string; recipient: string; subject: string; body: string }
 export interface DraftInput { id?: string; recipient: string; subject: string; body: string }
 export interface MailItem { id: string; name: string; subject: string; preview: string; date: string }
@@ -13,9 +15,12 @@ export function setAccessToken(token: string) { transientToken = token; try { if
 function accessToken() { try { return sessionStorage.getItem('colecto.token') ?? ''; } catch { return transientToken; } }
 
 async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE'): Promise<T> {
+  const delivery = path === '/send' || (path.startsWith('/send-requests/') && path.endsWith('/approve'));
+  const deliveryWarning = 'Delivery status is unknown. Check Sent and delivery requests before sending again.';
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, {
+      credentials: 'omit',
       method: method ?? (input === undefined ? 'GET' : 'POST'),
       headers: {
         ...(accessToken() ? { Authorization: `Bearer ${accessToken()}` } : {}),
@@ -25,11 +30,12 @@ async function request<T>(extension: string, account: string, path: string, inpu
       ...(input === undefined ? {} : { body: JSON.stringify(input) }),
     });
   } catch {
-    throw new Error('Cannot reach Colecto. Check that your mail service is running, then try again.');
+    throw new ServiceError(delivery ? deliveryWarning : 'Cannot reach Colecto. Check that your mail service is running, then try again.', delivery ? 'delivery_uncertain' : 'network');
   }
   if (response.status === 401) window.dispatchEvent(new Event('colecto-auth-required'));
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status}). Please try again.`);
+  if (!response.ok) throw new ServiceError(typeof data?.error === 'string' ? data.error : `Mail service returned HTTP ${response.status}. ${delivery ? 'Check delivery status before sending again.' : 'Try again when the service is available.'}`, typeof data?.category === 'string' ? data.category : 'server', response.status);
+  if (data === null) throw new ServiceError(delivery ? deliveryWarning : 'Mail service returned an unreadable response. Check your connection and try again.', delivery ? 'delivery_uncertain' : 'invalid_response', response.status);
   return data as T;
 }
 
@@ -37,9 +43,10 @@ async function request<T>(extension: string, account: string, path: string, inpu
 export function createServices(account: string) {
   return {
     inbox: {
+      cached: (folder: 'inbox' | 'sent' = 'inbox') => request<MailSnapshot>('inbox', account, `/messages/cache?folder=${folder}`),
       labels: () => request<Labels>('inbox', account, '/labels'),
       connected: () => request<boolean>('inbox', account, '/account'),
-      messages: (folder: 'inbox' | 'sent' = 'inbox', query = '') => { const params = new URLSearchParams(); if (folder !== 'inbox') params.set('folder', folder); if (query) params.set('q', query); return request<Message[]>('inbox', account, `/messages${params.size ? `?${params}` : ''}`); },
+      messages: (folder: 'inbox' | 'sent' = 'inbox', query = '') => { const params = new URLSearchParams(); if (folder !== 'inbox') params.set('folder', folder); if (query) params.set('q', query); return request<Message[]>('inbox', account, `/messages/refresh${params.size ? `?${params}` : ''}`, {}); },
       drafts: () => request<Draft[]>('inbox', account, '/drafts'),
     },
     reader: { label: (name: string, message_id?: string, remove = false) => request<Labels>('reader', account, '/labels', { name, message_id, remove }), read: (id: string) => request<Message>('reader', account, `/messages/${encodeURIComponent(id)}`) },
@@ -53,6 +60,11 @@ export function createServices(account: string) {
 export type ReaderService = ReturnType<typeof createServices>['reader'];
 export type ComposerService = ReturnType<typeof createServices>['composer'];
 export const hostService = {
+  sendRequests: () => request<PendingSend[]>('host', 'demo', '/send-requests'),
+  decideSend: (id: string, decision: 'approve' | 'reject') => request<PendingSend>('host', 'demo', `/send-requests/${encodeURIComponent(id)}/${decision}`, {}),
+  apiKeys: () => request<ApiKey[]>('host', 'demo', '/api-keys'),
+  mintApiKey: (input: ApiKeyInput) => request<{key: ApiKey; secret: string}>('host', 'demo', '/api-keys', input),
+  revokeApiKey: (id: string) => request<boolean>('host', 'demo', `/api-keys/${encodeURIComponent(id)}`, {}, 'DELETE'),
   accounts: () => request<AccountInfo[]>('host', 'demo', '/accounts'),
   save: (input: AccountSettings & { id?: string; secret: string }) => request<AccountInfo>('host', 'demo', '/accounts', input),
   disconnect: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}/disconnect`, {}),
@@ -76,3 +88,8 @@ export const extensionHost = {
   update: (account: string, id: string, enabled: boolean, grants: Capability[]) =>
     request<boolean>('host', account, `/extensions/${encodeURIComponent(id)}`, { enabled, grants }),
 };
+
+export interface ApiKeyInput { name: string; accounts: string[]; capabilities: Capability[]; expires_at?: number }
+export interface ApiKey extends ApiKeyInput { id: string; created_at: number; last_used_at: number | null; revoked_at: number | null }
+
+export interface PendingSend { id: string; requester: string; account: string; from: string; snapshot: DraftInput | null; created_at: number; expires_at: number; status: 'pending' | 'rejected' | 'expired' | 'submitting' | 'sent' | 'uncertain' }
