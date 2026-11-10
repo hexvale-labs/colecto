@@ -167,7 +167,7 @@ data, including empty/search responses; failed provider queries preserve data. T
 and caching, not a complete incremental sync engine. Provider flags, labels,
 full-history pagination, and offline mutations still need explicit contracts.
 
-The client uses a two-column dark-only layout (see `DESIGN.md`), one Settings pane,
+The client uses a dockable, dark-only pane layout (see `DESIGN.md`), one Settings screen,
 optional account profile names, and account-bound open-message tabs. Mobile layout is checked
 in browser tests; Android-native lifecycle, FCM, UnifiedPush, battery use, and
 physical-device keyboard behavior remain separate platform validation work.

@@ -28,3 +28,19 @@ test('renders HTML in a script-free sandbox, gates remote images, and prefills r
   await expect(page.getByRole('textbox', { name: 'Subject', exact: true })).toHaveValue('Re: A quieter place for your mail');
   await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue(/> Hello formatted world/);
 });
+
+test('keeps designed mail on its light sheet even when it ships dark-mode rules', async ({ page }) => {
+  const html = '<style>@media (prefers-color-scheme: dark) { .copy { color: #fff !important } }</style><table bgcolor="#e1f2e8"><tr><td class="copy" style="color:#222">Welcome aboard</td></tr></table>';
+  const message = { id: 'designed', sender: 'Support', address: 'support@example.test', subject: 'Welcome aboard', body: 'Welcome aboard', date: 'Today' };
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.route('**/api/v1/messages**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/designed/content')) return route.fulfill({ json: { text: 'Welcome aboard', html, attachments: [], message_id: '', references: '', reply_to: '', to: '', cc: '' } });
+    if (path.endsWith('/cache') || path.endsWith('/content')) return route.fallback();
+    return route.fulfill({ json: path.endsWith('/refresh') ? [message] : message });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Support/ }).click();
+  const cell = page.frameLocator('iframe[title="Message content"]').getByText('Welcome aboard');
+  await expect(cell).toHaveCSS('color', 'rgb(34, 34, 34)');
+});

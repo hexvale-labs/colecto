@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import MailShell from './extensions/MailShell.svelte';
   import Select from './Select.svelte';
+  import FilePick from './FilePick.svelte';
   import mark from './assets/logo-square.svg';
   import { extensionHost, hostService, setAccessToken } from './lib/api';
   import type { AccountInfo, Capability, ExtensionState } from './lib/api';
@@ -67,26 +68,35 @@
 
 {#snippet extensionSettings()}
   <section class="extension-settings" aria-labelledby="extensions-title">
-    <header class="section-head"><h2 id="extensions-title">Extensions</h2><p>Install isolated Wasm packages, turn extensions on or off, and decide which account data each one can use. Changes apply to new requests and are kept across restarts.</p></header>
-    <form onsubmit={install}>
+    <header class="section-head"><h2 id="extensions-title">Extensions</h2><p>Turn extensions on or off and decide which account data each one may use. Changes apply to new requests and are kept across restarts.</p></header>
+    <form class="settings-card" onsubmit={install}>
       <fieldset disabled={busy || loading}><legend>Install extension</legend>
-        <p>Choose a TOML manifest and its Wasm binary. Author names are self-reported, not verified.</p>
-        <label for="extension-manifest">TOML manifest</label><input id="extension-manifest" type="file" accept=".toml" required bind:files={manifestFile} />
-        <label for="extension-module">Wasm module</label><input id="extension-module" type="file" accept=".wasm" required bind:files={moduleFile} />
-        <button class="secondary" type="submit" disabled={!manifestFile?.length || !moduleFile?.length}>Install disabled</button>
+        <p>Pick a TOML manifest and its Wasm binary. It installs turned off, with no account access. Author names are self-reported, not verified.</p>
+        <div class="file-grid">
+          <FilePick id="extension-manifest" label="TOML manifest" hint="extension.toml, up to 8 KiB" accept=".toml" bind:files={manifestFile} />
+          <FilePick id="extension-module" label="Wasm module" hint="module.wasm, up to 64 KiB" accept=".wasm" bind:files={moduleFile} />
+        </div>
+        <button class="primary" type="submit" disabled={!manifestFile?.length || !moduleFile?.length}>Install disabled</button>
       </fieldset>
+      {#if installNotice}<p class="settings-notice" role="status">{installNotice}</p>{/if}
     </form>
-    {#if installNotice}<p role="status">{installNotice}</p>{/if}
-    <div class="field-row"><span class="row-label" id="permission-account-label">Permissions for</span><Select label="Permissions for account" value={account} disabled={busy || loading} options={accounts.map(item => ({ value: item.id, label: item.settings?.name || item.settings?.address || 'Demo account' }))} onchange={(next) => { account = next; void reload(); }} /></div>
+    <div class="extension-list-head">
+      <h3>Installed</h3>
+      <div class="field-row"><span class="row-label" id="permission-account-label">Permissions for</span><Select label="Permissions for account" value={account} disabled={busy || loading} options={accounts.map(item => ({ value: item.id, label: item.settings?.name || item.settings?.address || 'Demo account' }))} onchange={(next) => { account = next; void reload(); }} /></div>
+    </div>
     {#each extensions as extension (extension.manifest.id)}
-      <fieldset disabled={busy || loading}>
-        <legend>{extension.manifest.name}</legend>
-        <p>{extension.manifest.description}</p><p class="meta">{extension.bundled ? 'Bundled, trusted application code' : 'Third-party, isolated Wasm'}. By {extension.manifest.author} · API {extension.manifest.api_version}</p>
-        <label class="switch"><input type="checkbox" checked={extension.enabled} onchange={(event) => void update(extension, event.currentTarget.checked, extension.grants)} /><span>Enabled for all accounts</span></label>
-        {#if extension.manifest.capabilities.length}<div class="grants">{#each extension.manifest.capabilities as capability}
+      <fieldset class="settings-card extension-card" class:off={!extension.enabled} disabled={busy || loading}>
+        <legend class="sr-only">{extension.manifest.name}</legend>
+        <div class="extension-top">
+          <span class="extension-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1)}</span>
+          <div class="extension-title"><strong class="extension-name" aria-hidden="true">{extension.manifest.name}</strong><p class="meta"><span class="tag" class:trusted={extension.bundled}>{extension.bundled ? 'Bundled' : 'Third-party · Wasm'}</span>By {extension.manifest.author} · API {extension.manifest.api_version}</p></div>
+          <label class="switch"><input type="checkbox" checked={extension.enabled} onchange={(event) => void update(extension, event.currentTarget.checked, extension.grants)} /><span class="sr-only">Enabled for all accounts</span></label>
+        </div>
+        <p class="extension-description">{extension.manifest.description}</p>
+        {#if extension.manifest.capabilities.length}<div class="grants"><span class="grants-title">Account access</span>{#each extension.manifest.capabilities as capability}
           <label class="choice"><input type="checkbox" checked={extension.grants.includes(capability)} onchange={(event) => void update(extension, extension.enabled, event.currentTarget.checked ? [...extension.grants, capability] : extension.grants.filter(c => c !== capability))} /> <code>{capability}</code></label>
         {/each}</div>{/if}
-        {#if !extension.bundled}<button class="secondary" onclick={() => void remove(extension)}>Remove extension</button>{/if}
+        {#if !extension.bundled}<button class="text-button danger-text" onclick={() => void remove(extension)}>Remove extension</button>{/if}
       </fieldset>
     {/each}
   </section>
