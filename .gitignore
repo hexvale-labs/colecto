@@ -6,3 +6,4 @@
 /.colecto-demo/
 /crates/colecto-host/gen/
 .vite/
+__pycache__/
