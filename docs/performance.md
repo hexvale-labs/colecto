@@ -19,7 +19,7 @@ mean/median, commit/dirty status, executable/UI hashes, machine/kernel/CPU, work
 build profile, and browser-driver/Node versions. These files are ignored by git
 but persist locally. Keep or archive this directory for long-term trends; in CI,
 upload `performance-results/*.json` as retained artifacts and restore prior
-history before measuring. There is no CI service configured in this repository.
+history before measuring. CI runs `just verify` and `just ui-test`, but not `just perf`, so it records no history yet.
 The committed initial sample in `docs/performance-baseline.json` is evidence from
 one development machine, not a universal budget. Refresh that committed sample
 from the final integrated run after feature changes; git history then retains

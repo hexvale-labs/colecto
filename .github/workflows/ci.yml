@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux build dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev libdbus-1-dev pkg-config
@@ -41,14 +41,14 @@ jobs:
           bun-version-file: ui/package.json
 
       - name: Cache Bun packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('ui/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('ui/bun.lock') }}
@@ -60,7 +60,7 @@ jobs:
 
       - name: Upload Playwright traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: ui/test-results/
