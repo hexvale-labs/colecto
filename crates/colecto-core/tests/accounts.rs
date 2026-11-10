@@ -51,6 +51,7 @@ fn account_stores_and_restart_are_isolated() {
         recipient: String::new(),
         subject: "A only".into(),
         body: String::new(),
+        ..Default::default()
     };
     accounts
         .store(&a.id)
@@ -156,6 +157,7 @@ fn tampered_vault_is_not_overwritten_and_reset_keeps_drafts() {
             recipient: String::new(),
             subject: "Keep me".into(),
             body: String::new(),
+            ..Default::default()
         })
         .unwrap();
     accounts.protect("a strong master password").unwrap();
@@ -468,6 +470,7 @@ fn legacy_vault_and_account_documents_import_once_and_survive_sources_moved_asid
             recipient: String::new(),
             subject: "Imported".into(),
             body: "Keep".into(),
+            ..Default::default()
         })
         .unwrap();
     original

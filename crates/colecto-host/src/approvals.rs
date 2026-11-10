@@ -150,6 +150,10 @@ impl Approvals {
             );
         }
         colecto_core::validate_draft(&snapshot).map_err(|_| "Invalid outgoing message")?;
+        // Approvals show the owner text only, so they never carry files or forwards.
+        if !snapshot.attachments.is_empty() || snapshot.forward_of.is_some() {
+            return Err("Delivery requests cannot include attachments or forwards".into());
+        }
         if serde_json::to_vec(&snapshot)
             .map_err(|_| "Invalid outgoing message")?
             .len()
@@ -245,6 +249,7 @@ mod tests {
             recipient: "a@example.test".into(),
             subject: "reviewed".into(),
             body: "original".into(),
+            ..Default::default()
         }
     }
     #[test]
@@ -291,6 +296,13 @@ mod tests {
         let mut approvals = Approvals::open(dir.path(), 10).unwrap();
         let mut invalid = input();
         invalid.recipient = "not-an-address".into();
+        let mut forward = input();
+        forward.forward_of = Some("imap-1-1".into());
+        assert!(
+            approvals
+                .create("key", "work", "me@example.test", forward, 10)
+                .is_err()
+        );
         assert!(
             approvals
                 .create("key", "account", "from", invalid, 10)

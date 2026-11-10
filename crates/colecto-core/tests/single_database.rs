@@ -11,6 +11,7 @@ fn canonical_drafts_and_labels_ignore_stale_legacy_files() {
             recipient: "a@example.com".into(),
             subject: "canonical".into(),
             body: "body".into(),
+            ..Default::default()
         })
         .unwrap();
     store.update_label("Work", None, false).unwrap();

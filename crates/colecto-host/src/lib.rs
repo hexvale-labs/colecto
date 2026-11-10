@@ -21,8 +21,8 @@ use axum::{
 use colecto_core::{Accounts, Error, MailStore, SecretStore};
 use colecto_extension_api::{
     AccountInfo, AccountInput, ApiError, Capability, Draft, DraftInput, ExtensionInstallInput,
-    ExtensionPolicyInput, ExtensionRunInput, ExtensionState, ExtensionView, Message, SecurityInfo,
-    SecurityInput,
+    ExtensionPolicyInput, ExtensionRunInput, ExtensionState, ExtensionView, Message,
+    MessageContent, SecurityInfo, SecurityInput,
 };
 use std::{
     path::PathBuf,
@@ -137,7 +137,11 @@ fn build_app(host: Host, assets: PathBuf) -> Router {
         )
         .route("/security", get(security).post(security_action))
         .route("/account", get(account))
-        .route("/send", axum::routing::post(send))
+        // Base64 attachments up to 25 MB, plus the message text.
+        .route(
+            "/send",
+            axum::routing::post(send).layer(DefaultBodyLimit::max(36_000_000)),
+        )
         .route("/send-requests", get(list_send_requests))
         .route("/send-requests/{id}", get(send_request))
         .route(
@@ -153,6 +157,11 @@ fn build_app(host: Host, assets: PathBuf) -> Router {
         .route("/messages/cache", get(cached_messages))
         .route("/messages/refresh", axum::routing::post(messages))
         .route("/messages/{id}", get(message))
+        .route("/messages/{id}/content", get(message_content))
+        .route(
+            "/messages/{id}/attachments/{index}",
+            get(message_attachment),
+        )
         .route("/drafts", get(drafts).post(save_draft))
         .route("/drafts/{id}", get(draft))
         .fallback(|| async { Failure(StatusCode::NOT_FOUND, "API route not found".into()) });
@@ -185,7 +194,9 @@ async fn boundary(State(host): State<Host>, request: Request, next: Next) -> Res
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static(
-            "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            // Email HTML renders in a script-free sandboxed srcdoc frame that inherits
+            // this policy; the frame adds its own stricter policy for remote images.
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
         ),
     );
     headers.insert(
@@ -601,6 +612,49 @@ async fn message(
     .await
     .map(Json)
 }
+async fn message_content(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<MessageContent>, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::MessagesRead)?;
+    with_store(host, account, move |s| s.content(&id))
+        .await
+        .map(Json)
+}
+async fn message_attachment(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    Path((id, index)): Path<(String, usize)>,
+) -> Result<Response, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::MessagesRead)?;
+    let (info, data) = with_store(host, account, move |s| s.attachment(&id, index)).await?;
+    let name: String = info
+        .name
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || b"._-".contains(&byte) {
+                (byte as char).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect();
+    // Never let the browser render untrusted attachment bytes in the app origin.
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename*=UTF-8''{name}"),
+            ),
+        ],
+        data,
+    )
+        .into_response())
+}
 async fn drafts(
     State(host): State<Host>,
     axum::Extension(principal): axum::Extension<Principal>,
@@ -666,6 +720,10 @@ async fn send(
 ) -> Result<Json<serde_json::Value>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesSend)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
+    // Forwarding re-reads the original message, so it needs read access too.
+    if input.forward_of.is_some() {
+        grant(&host, &principal, &headers, Capability::MessagesRead)?;
+    }
     if let Principal::ApiKey(id) = principal {
         return request_delivery(host, id, account, input).await.map(Json);
     }

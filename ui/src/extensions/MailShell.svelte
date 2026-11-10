@@ -126,7 +126,7 @@
   let selected = $derived(view?.kind === 'message' ? view.id : view?.kind === 'draft' ? view.draft?.id ?? null : null);
   let visibleItems = $derived(labelFilter ? items.filter(item => labels[labelFilter]?.includes(item.id)) : items);
   let commands: Command[] = $derived([
-    { id: 'compose', name: 'Compose a new message', run: compose, disabled: !Composer },
+    { id: 'compose', name: 'Compose a new message', run: () => compose(), disabled: !Composer },
     ...(['Inbox', 'Drafts', 'Sent'] as const).map(next => ({ id: next, name: `Go to ${next}`, run: () => navigate(next) })),
     { id: 'search', name: 'Search emails', run: () => void searchMail(), disabled: !Mailbox },
     { id: 'new-label', name: 'Create a local label', run: () => void searchMail('new-label'), disabled: !Reader },
@@ -178,7 +178,7 @@
     if (next !== folder) { items = []; fetchedAt = null; appliedQuery = ''; }
     folder = next; void loadList();
   }
-  function compose() { if (!Composer || !canLeave()) return; clearView(); settingsOpen = false; view = { kind: 'draft', draft: null }; }
+  function compose(draft: Draft | null = null) { if (!Composer || !canLeave()) return; clearView(); settingsOpen = false; view = { kind: 'draft', draft }; }
   function back() { if (!canLeave()) return; clearView(); }
   async function open(id: string) {
     if (!canLeave()) return;
@@ -218,7 +218,7 @@
 <div class="app-shell" class:detail-open={view !== null} class:settings-open={settingsOpen}>
   <aside class="sidebar">
     <a class="brand" href="/" onclick={(event) => { event.preventDefault(); navigate('Inbox'); }} aria-label="Colecto home"><span class="brand-mark" aria-hidden="true">c</span>colecto<span class="brand-dot">.</span></a>
-    <button class="compose-button" disabled={busy || !initialized} onclick={compose}><span aria-hidden="true">＋</span> Compose</button>
+    <button class="compose-button" disabled={busy || !initialized} onclick={() => compose()}><span aria-hidden="true">＋</span> Compose</button>
     <button class="secondary command-trigger" onclick={() => runner.open()}>Commands <kbd>Ctrl / ⌘ K</kbd></button>
     {#if currentTabs.length}<nav class="open-messages" aria-label="Open messages">
       {#each currentTabs as tab (tab.id)}<div class="message-tab" class:active={view?.kind === 'message' && view.id === tab.id}>
@@ -261,10 +261,10 @@
       <Mailbox items={visibleItems} searching={!!appliedQuery || !!labelFilter} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} /></div>{:else}<p class="error-box">Mailbox extension disabled. Open Extensions to enable it.</p>{/if}
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
-        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} folder={view.folder} {accountLabel} {labels} labeling={labeling || loading || busy} {labelError} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />
+        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} folder={view.folder} {accountLabel} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />
         {:else if view?.kind === 'draft' && Composer}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
         {:else}
-          <section class="welcome"><div class="eyebrow">{accountLabel}</div><h2>Your mail, in focus.</h2><p>{opening ? 'Opening your draft…' : 'Select a message to read, or compose a new one.'}</p><button class="secondary" disabled={busy || !initialized} onclick={compose}>New message</button></section>
+          <section class="welcome"><div class="eyebrow">{accountLabel}</div><h2>Your mail, in focus.</h2><p>{opening ? 'Opening your draft…' : 'Select a message to read, or compose a new one.'}</p><button class="secondary" disabled={busy || !initialized} onclick={() => compose()}>New message</button></section>
         {/if}
       {/key}
     </div>{/if}

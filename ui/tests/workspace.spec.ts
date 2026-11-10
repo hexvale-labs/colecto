@@ -114,7 +114,7 @@ test('account action labels use email when the optional profile name is empty', 
 
 test('mobile controls stay reachable and mail text stays selectable on narrow screens', async ({ page }) => {
   const message = { id: 'mobile-reader', sender: 'Maya Chen', address: 'maya@example.test', subject: 'Reading on a phone', body: 'Selectable message text.\n'.repeat(100), date: 'Today' };
-  await page.route('**/api/v1/messages**', route => new URL(route.request().url()).pathname.endsWith('/cache') ? route.fallback() : route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/refresh') ? [message] : message }));
+  await page.route('**/api/v1/messages**', route => /\/(cache|content)$/.test(new URL(route.request().url()).pathname) ? route.fallback() : route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/refresh') ? [message] : message }));
   await page.setViewportSize({ width: 320, height: 640 });
   await page.goto('/');
   const folders = page.getByRole('navigation', { name: 'Mail folders' });

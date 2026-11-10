@@ -80,9 +80,10 @@ refresh are not implemented. Redirects are rejected; supply the final session UR
 This is an experimental transport following [RFC 8620](https://www.rfc-editor.org/rfc/rfc8620)
 and [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621), not a full sync client.
 It uses the primary mail account, fetches the latest 100 Inbox messages without
-marking them seen, displays plain text (up to 100000 bytes per body part), and
+marking them seen, lists plain text (up to 100000 bytes per body part), opens the raw message on
+demand for HTML and attachments, and
 keeps drafts local. HTTP responses are limited to 8000000 bytes, with 30-second
-request timeouts. HTML, attachments, changes/push, and pagination are unsupported.
+request timeouts. Sending attachments, changes/push, and pagination are unsupported.
 The existing extension API and UI are shared by both transports.
 
 Sending requires submission capability, a matching identity, and mailboxes with

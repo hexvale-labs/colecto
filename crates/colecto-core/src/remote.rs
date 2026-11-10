@@ -1,8 +1,9 @@
 //! Single-account TLS mail transports. Credentials stay in the trusted core.
-use crate::{Error, validate};
+use crate::{Error, mime::Attachment};
 use colecto_extension_api::{DraftInput, Message};
 use lettre::{
-    SmtpTransport, Transport, message::header::ContentType,
+    SmtpTransport, Transport,
+    message::{MultiPart, SinglePart, header::ContentType},
     transport::smtp::authentication::Credentials,
 };
 use mailparse::MailHeaderMap;
@@ -85,13 +86,7 @@ impl MailAccount {
         self.query_with_identity(folder, search)
             .map(|(messages, _)| messages)
     }
-    pub(crate) fn query_with_identity(
-        &self,
-        folder: &str,
-        search: &str,
-    ) -> Result<(Vec<Message>, String), Error> {
-        self.validate()?;
-        crate::validate_query(folder, search)?;
+    fn login(&self) -> Result<imap::Session<native_tls::TlsStream<TcpStream>>, Error> {
         let timeout = Duration::from_secs(30);
         let addresses = (self.imap_host.as_str(), self.imap_port)
             .to_socket_addrs()
@@ -114,36 +109,83 @@ impl MailAccount {
         })?;
         let mut client = imap::Client::new(stream);
         client.read_greeting().map_err(imap_error)?;
-        let mut session = client
+        client
             .login(&self.username, &self.password)
             .map_err(|(error, _)| match error {
                 imap::error::Error::No(_) => Error::Transport(
                     "Mail server rejected authentication. Check your username and password.".into(),
                 ),
                 error => imap_error(error),
-            })?;
+            })
+    }
+    pub(crate) fn query_with_identity(
+        &self,
+        folder: &str,
+        search: &str,
+    ) -> Result<(Vec<Message>, String), Error> {
+        self.validate()?;
+        crate::validate_query(folder, search)?;
+        let mut session = self.login()?;
         let result = query_session_with_identity(&mut session, folder, search);
         let _ = session.logout();
         result
     }
-
-    pub fn send(&self, input: &DraftInput) -> Result<(), Error> {
+    /// Fetch one complete message by its Colecto ID without marking it seen.
+    pub(crate) fn fetch_raw(&self, id: &str) -> Result<Vec<u8>, Error> {
         self.validate()?;
-        validate(&input.recipient, &input.subject, &input.body)?;
-        let email = lettre::Message::builder()
+        let (name, validity, uid) = parse_id(id)?;
+        let mut session = self.login()?;
+        let result = fetch_session(&mut session, &name, validity, uid);
+        let _ = session.logout();
+        result
+    }
+
+    fn build(
+        &self,
+        input: &DraftInput,
+        attachments: &[Attachment],
+    ) -> Result<lettre::Message, Error> {
+        crate::validate_draft(input)?;
+        let mut builder = lettre::Message::builder()
             .from(
                 self.address
                     .parse()
                     .map_err(|_| Error::Invalid("Invalid sender address".into()))?,
             )
-            .to(input
-                .recipient
-                .parse()
-                .map_err(|_| Error::Invalid("Enter one valid recipient email address".into()))?)
-            .subject(&input.subject)
-            .header(ContentType::TEXT_PLAIN)
-            .body(input.body.clone())
-            .map_err(|_| Error::Invalid("Invalid outgoing message".into()))?;
+            .subject(&input.subject);
+        for mailbox in crate::mailboxes(&input.recipient)? {
+            builder = builder.to(mailbox);
+        }
+        for mailbox in crate::mailboxes(&input.cc)? {
+            builder = builder.cc(mailbox);
+        }
+        if !input.in_reply_to.is_empty() {
+            builder = builder.in_reply_to(input.in_reply_to.clone());
+        }
+        if !input.references.is_empty() {
+            builder = builder.references(input.references.clone());
+        }
+        let text = SinglePart::plain(input.body.clone());
+        let email = if attachments.is_empty() {
+            builder.singlepart(text)
+        } else {
+            let mut parts = MultiPart::mixed().singlepart(text);
+            for file in attachments {
+                let content_type = ContentType::parse(&file.content_type)
+                    .unwrap_or_else(|_| ContentType::parse("application/octet-stream").unwrap());
+                parts = parts.singlepart(
+                    lettre::message::Attachment::new(file.name.clone())
+                        .body(file.data.clone(), content_type),
+                );
+            }
+            builder.multipart(parts)
+        };
+        email.map_err(|_| Error::Invalid("Invalid outgoing message".into()))
+    }
+
+    pub(crate) fn send(&self, input: &DraftInput, attachments: &[Attachment]) -> Result<(), Error> {
+        self.validate()?;
+        let email = self.build(input, attachments)?;
         let builder = if self.smtp_port == 465 {
             SmtpTransport::relay(&self.smtp_host)
         } else {
@@ -152,7 +194,7 @@ impl MailAccount {
         .map_err(remote)?;
         builder
             .port(self.smtp_port)
-            .timeout(Some(Duration::from_secs(30)))
+            .timeout(Some(Duration::from_secs(60)))
             .credentials(Credentials::new(
                 self.username.clone(),
                 self.password.clone(),
@@ -162,6 +204,66 @@ impl MailAccount {
             .map_err(smtp_error)?;
         Ok(())
     }
+}
+
+/// IDs are `imap-{validity}-{uid}` for Inbox and `imap-{hex name}-{validity}-{uid}` otherwise.
+fn parse_id(id: &str) -> Result<(String, u32, u32), Error> {
+    let parts: Vec<_> = id
+        .strip_prefix("imap-")
+        .ok_or(Error::Missing)?
+        .split('-')
+        .collect();
+    let (name, numbers) = match parts.as_slice() {
+        [validity, uid] => ("INBOX".to_owned(), (validity, uid)),
+        [hex, validity, uid] if hex.len() % 2 == 0 => {
+            let bytes = (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| Error::Missing)?;
+            (
+                String::from_utf8(bytes).map_err(|_| Error::Missing)?,
+                (validity, uid),
+            )
+        }
+        _ => return Err(Error::Missing),
+    };
+    let parse = |value: &&str| value.parse::<u32>().map_err(|_| Error::Missing);
+    Ok((name, parse(numbers.0)?, parse(numbers.1)?))
+}
+
+fn fetch_session<T: std::io::Read + std::io::Write>(
+    session: &mut imap::Session<T>,
+    name: &str,
+    validity: u32,
+    uid: u32,
+) -> Result<Vec<u8>, Error> {
+    let mailbox = session.examine(name).map_err(imap_error)?;
+    if mailbox.uid_validity != Some(validity) {
+        return Err(Error::Missing);
+    }
+    let sizes = session
+        .uid_fetch(uid.to_string(), "(UID RFC822.SIZE)")
+        .map_err(imap_error)?;
+    let size = sizes
+        .iter()
+        .find(|item| item.uid == Some(uid))
+        .ok_or(Error::Missing)?
+        .size
+        .unwrap_or(u32::MAX);
+    if size as usize > crate::mime::MAX_RAW {
+        return Err(Error::Invalid(
+            "This message is larger than 30 MB and cannot be opened here".into(),
+        ));
+    }
+    let fetched = session
+        .uid_fetch(uid.to_string(), "(UID BODY.PEEK[])")
+        .map_err(imap_error)?;
+    fetched
+        .iter()
+        .find_map(|item| item.body())
+        .map(<[u8]>::to_vec)
+        .ok_or(Error::Missing)
 }
 
 #[cfg(test)]
@@ -224,15 +326,26 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
     let mut messages = Vec::new();
     for header in headers.iter().rev() {
         let uid = header.uid.ok_or_else(|| remote("Missing UID"))?;
-        if header.size.unwrap_or(u32::MAX) > 2_000_000 {
-            continue;
-        }
+        // Large messages list from headers only; the reader fetches them on demand.
+        let large = header.size.unwrap_or(u32::MAX) > 2_000_000;
         let fetched = session
-            .uid_fetch(uid.to_string(), "(UID BODY.PEEK[])")
+            .uid_fetch(
+                uid.to_string(),
+                if large {
+                    "(UID BODY.PEEK[HEADER])"
+                } else {
+                    "(UID BODY.PEEK[])"
+                },
+            )
             .map_err(imap_error)?;
         for item in fetched.iter() {
-            let raw = item.body().ok_or_else(|| remote("Missing body"))?;
+            let raw = if large { item.header() } else { item.body() }
+                .ok_or_else(|| remote("Missing body"))?;
             let mut message = parse_message(raw, validity, uid)?;
+            if large {
+                message.body =
+                    "This message is larger than 2 MB. Open it to load everything.".into();
+            }
             if folder != "inbox" {
                 let namespace: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
                 message.id = format!("imap-{namespace}-{validity}-{uid}");
@@ -264,28 +377,10 @@ fn sent_mailbox(names: &[imap::types::Name]) -> Result<String, Error> {
         .ok_or_else(|| Error::Invalid("The provider did not advertise a Sent mailbox and no standard Sent folder was found".into()))
 }
 
-fn text_body(mail: &mailparse::ParsedMail<'_>) -> Result<String, Error> {
-    if mail.ctype.mimetype == "text/plain"
-        && mail.get_content_disposition().disposition != mailparse::DispositionType::Attachment
-    {
-        return mail.get_body().map_err(remote);
-    }
-    for part in &mail.subparts {
-        if part.get_content_disposition().disposition == mailparse::DispositionType::Attachment {
-            continue;
-        }
-        let text = text_body(part)?;
-        if !text.is_empty() {
-            return Ok(text);
-        }
-    }
-    Ok(String::new())
-}
-
 fn parse_message(raw: &[u8], validity: u32, uid: u32) -> Result<Message, Error> {
     let mail = mailparse::parse_mail(raw).map_err(remote)?;
     let from = mail.headers.get_first_value("From").unwrap_or_default();
-    let body = crate::bounded_body(text_body(&mail)?);
+    let body = crate::bounded_body(crate::mime::text(&mail)?);
     Ok(Message {
         id: format!("imap-{validity}-{uid}"),
         sender: from.clone(),
@@ -293,7 +388,7 @@ fn parse_message(raw: &[u8], validity: u32, uid: u32) -> Result<Message, Error> 
         subject: mail.headers.get_first_value("Subject").unwrap_or_default(),
         date: mail.headers.get_first_value("Date").unwrap_or_default(),
         body: if body.is_empty() {
-            "No plain-text body available. HTML and attachments are not displayed.".into()
+            "This message has no readable text.".into()
         } else {
             body
         },
@@ -438,6 +533,141 @@ mod tests {
         assert_eq!(message.subject, "Hello 世界");
         assert_eq!(message.body, "Hello");
     }
+    fn mock_imap(steps: Vec<(&'static str, String)>) -> std::thread::JoinHandle<()> {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        MOCK.with(|cell| cell.set(Some(address)));
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(socket.try_clone().unwrap());
+            write!(socket, "* OK ready\r\n").unwrap();
+            for (expected, response) in steps {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let (tag, command) = line.split_once(' ').unwrap();
+                assert!(command.starts_with(expected), "unexpected: {command}");
+                write!(socket, "{response}{tag} OK complete\r\n").unwrap();
+            }
+        })
+    }
+    thread_local!(static MOCK: std::cell::Cell<Option<std::net::SocketAddr>> = const { std::cell::Cell::new(None) });
+    fn mock_session() -> imap::Session<TcpStream> {
+        let address = MOCK.with(|cell| cell.get()).unwrap();
+        let mut client = imap::Client::new(TcpStream::connect(address).unwrap());
+        client.read_greeting().unwrap();
+        client.login("me", "secret").unwrap()
+    }
+    #[test]
+    fn lists_large_messages_from_headers_and_fetches_them_on_demand() {
+        let header = "From: big@example.test\r\nSubject: Big\r\n\r\n";
+        let raw = format!("{header}Full body");
+        let server = mock_imap(vec![
+            ("LOGIN", String::new()),
+            (
+                "EXAMINE",
+                "* 1 EXISTS\r\n* OK [UIDVALIDITY 7] ok\r\n".into(),
+            ),
+            (
+                "FETCH 1:*",
+                "* 1 FETCH (UID 5 RFC822.SIZE 3000000)\r\n".into(),
+            ),
+            (
+                "UID FETCH 5 (UID BODY.PEEK[HEADER])",
+                format!(
+                    "* 1 FETCH (UID 5 BODY[HEADER] {{{}}}\r\n{header})\r\n",
+                    header.len()
+                ),
+            ),
+            (
+                "EXAMINE",
+                "* 1 EXISTS\r\n* OK [UIDVALIDITY 8] changed\r\n".into(),
+            ),
+            (
+                "EXAMINE",
+                "* 1 EXISTS\r\n* OK [UIDVALIDITY 7] ok\r\n".into(),
+            ),
+            (
+                "UID FETCH 5 (UID RFC822.SIZE)",
+                "* 1 FETCH (UID 5 RFC822.SIZE 3000000)\r\n".into(),
+            ),
+            (
+                "UID FETCH 5 (UID BODY.PEEK[])",
+                format!("* 1 FETCH (UID 5 BODY[] {{{}}}\r\n{raw})\r\n", raw.len()),
+            ),
+        ]);
+        let mut session = mock_session();
+        let messages = query_session(&mut session, "inbox", "").unwrap();
+        assert_eq!(messages[0].subject, "Big");
+        assert!(messages[0].body.contains("larger than 2 MB"));
+        let (name, validity, uid) = parse_id(&messages[0].id).unwrap();
+        assert!(matches!(
+            fetch_session(&mut session, &name, validity, uid),
+            Err(Error::Missing)
+        ));
+        assert_eq!(
+            fetch_session(&mut session, &name, validity, uid).unwrap(),
+            raw.as_bytes()
+        );
+        server.join().unwrap();
+    }
+    #[test]
+    fn message_ids_round_trip_folder_names() {
+        assert_eq!(parse_id("imap-7-42").unwrap(), ("INBOX".into(), 7, 42));
+        assert_eq!(
+            parse_id("imap-4f7574626f782061726368697665-7-42").unwrap(),
+            ("Outbox archive".into(), 7, 42)
+        );
+        assert!(parse_id("imap-zz-7-42").is_err());
+        assert!(parse_id("jmap-7").is_err());
+    }
+    #[test]
+    fn builds_threaded_replies_with_attachments_for_many_recipients() {
+        let account = MailAccount {
+            imap_host: "localhost".into(),
+            imap_port: 993,
+            smtp_host: "localhost".into(),
+            smtp_port: 587,
+            username: "user".into(),
+            password: "secret".into(),
+            address: "me@example.test".into(),
+        };
+        let input = DraftInput {
+            recipient: "Ann <ann@example.test>, bob@example.test".into(),
+            cc: "cat@example.test".into(),
+            subject: "Re: Plans".into(),
+            body: "Sounds good".into(),
+            in_reply_to: "<m1@example.test>".into(),
+            references: "<m0@example.test> <m1@example.test>".into(),
+            ..Default::default()
+        };
+        let file = Attachment {
+            name: "notes.txt".into(),
+            content_type: "text/plain".into(),
+            data: b"hello".to_vec(),
+        };
+        let email = String::from_utf8(account.build(&input, &[file]).unwrap().formatted()).unwrap();
+        for expected in [
+            "To: Ann <ann@example.test>, bob@example.test",
+            "Cc: cat@example.test",
+            "In-Reply-To: <m1@example.test>",
+            "References: <m0@example.test> <m1@example.test>",
+            "Content-Disposition: attachment; filename=\"notes.txt\"",
+        ] {
+            assert!(email.contains(expected), "missing {expected} in {email}");
+        }
+        assert!(
+            account
+                .build(
+                    &DraftInput {
+                        recipient: String::new(),
+                        ..input
+                    },
+                    &[]
+                )
+                .is_err()
+        );
+    }
     #[test]
     fn rejects_insecure_smtp_and_invalid_recipient_before_connecting() {
         let mut account = MailAccount {
@@ -452,12 +682,16 @@ mod tests {
         assert!(matches!(account.validate(), Err(Error::Invalid(_))));
         account.smtp_port = 587;
         assert!(matches!(
-            account.send(&DraftInput {
-                id: None,
-                recipient: "bad\r\nBcc: victim@example.test".into(),
-                subject: "Hi".into(),
-                body: "Hello".into()
-            }),
+            account.send(
+                &DraftInput {
+                    id: None,
+                    recipient: "bad\r\nBcc: victim@example.test".into(),
+                    subject: "Hi".into(),
+                    body: "Hello".into(),
+                    ..Default::default()
+                },
+                &[]
+            ),
             Err(Error::Invalid(_))
         ));
     }
