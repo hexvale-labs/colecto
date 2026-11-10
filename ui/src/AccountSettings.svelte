@@ -51,10 +51,10 @@
   }
 </script>
 <section class="account-settings" aria-labelledby="settings-title">
-  <header class="settings-header"><div><div class="eyebrow">COLECTO SETTINGS</div><h2 id="settings-title">Accounts &amp; security</h2><p>Your accounts, kept separate. Your credentials, protected.</p></div></header>
+  <header class="section-head"><h2 id="settings-title">Accounts &amp; security</h2><p>Each account keeps its own mail and drafts. Credentials stay in your system’s credential store unless you protect them with a master password.</p></header>
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   {#if notice}<p class="settings-notice" role="status">{notice}</p>{/if}
-  <div class="settings-grid">
+  <div class="settings-stack">
     <section class="settings-card" aria-label="Saved accounts"><h2>Mail accounts</h2><p>Inbox and drafts stay with their account.</p>
       <ul class="account-list">{#each accounts as account (account.id)}<li><div><strong>{account.settings?.name || account.settings?.address || 'Demo account'}</strong><span>{account.settings?.address ?? 'Sample mail · local drafts'}</span><small>{account.configured ? security.locked ? 'Locked' : 'Configured · connection checked in Inbox' : account.settings ? 'Disconnected · drafts kept' : 'Local sample'}</small></div>
       {#if account.settings}<div class="account-actions"><button class="text-button" disabled={working || security.locked} onclick={() => edit(account)}>Edit / reconnect<span class="sr-only"> {account.settings.name || account.settings.address}</span></button>{#if account.configured}<button class="text-button danger-text" disabled={working || security.locked} onclick={() => { if (window.confirm(`Disconnect ${account.settings?.name || account.settings?.address}? Local drafts will be kept.`)) void run(async () => { await hostService.disconnect(account.id); notice = 'Account disconnected. Local drafts kept.'; }); }}>Disconnect<span class="sr-only"> {account.settings.name || account.settings.address}</span></button>{/if}</div>{/if}</li>{/each}</ul>
@@ -77,13 +77,13 @@
       <form onsubmit={save}><fieldset disabled={working || security.locked}><div class="form-grid">
         <label class="field">Account name (optional)<input maxlength="100" autocomplete="off" bind:value={settings.name} placeholder="Work or Personal" /></label>
         <label class="field">Email address<input required type="email" maxlength="320" autocomplete="email" autocapitalize="none" bind:value={settings.address} placeholder="you@example.com" /></label>
-        <label class="field">Protocol<select bind:value={settings.protocol}><option value="imap">IMAP + SMTP</option><option value="jmap">JMAP</option></select></label>
+        <fieldset class="field segmented-field"><legend>Protocol</legend><div class="segmented"><label><input type="radio" name="protocol" value="imap" bind:group={settings.protocol} />IMAP + SMTP</label><label><input type="radio" name="protocol" value="jmap" bind:group={settings.protocol} />JMAP</label></div></fieldset>
         {#if settings.protocol === 'imap'}
           <label class="field">Username<input required maxlength="320" autocomplete="username" autocapitalize="none" bind:value={settings.username} /></label>
           <label class="field">IMAP host<input required maxlength="253" autocapitalize="none" bind:value={settings.imap_host} placeholder="imap.example.com" /></label>
           <label class="field">IMAP port<input required type="number" min="1" max="65535" bind:value={settings.imap_port} /></label>
           <label class="field">SMTP host<input required maxlength="253" autocapitalize="none" bind:value={settings.smtp_host} placeholder="smtp.example.com" /></label>
-          <label class="field">SMTP port<select bind:value={settings.smtp_port}><option value={587}>587 · STARTTLS</option><option value={465}>465 · TLS</option></select></label>
+          <fieldset class="field segmented-field"><legend>SMTP port</legend><div class="segmented"><label><input type="radio" name="smtp-port" value={587} bind:group={settings.smtp_port} />587 STARTTLS</label><label><input type="radio" name="smtp-port" value={465} bind:group={settings.smtp_port} />465 TLS</label></div></fieldset>
         {:else}<label class="field wide-field">JMAP session URL<input required type="url" maxlength="2048" autocapitalize="none" bind:value={settings.session_url} placeholder="https://mail.example.com/.well-known/jmap" /></label>{/if}
         <label class="field wide-field">{settings.protocol === 'imap' ? 'Password or app password' : 'JMAP bearer token'}<input type="password" required={!editing} maxlength="8192" autocomplete="new-password" bind:value={secret} placeholder={editing ? 'Leave blank to keep saved credential' : ''} /></label>
       </div><div class="button-row"><button class="primary" type="submit">{working ? 'Saving…' : 'Save account'}</button>{#if editing}<button class="secondary" type="button" onclick={resetForm}>Cancel editing</button>{/if}</div></fieldset></form>

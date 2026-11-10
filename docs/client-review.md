@@ -1,7 +1,7 @@
 # Client usability and motion review
 
 The shell now exposes Ctrl/Cmd+K commands for compose/save/send, folder navigation,
-search, refresh, account switching, open tabs, extensions, settings and themes.
+search, refresh, account switching, open tabs, extensions and settings.
 Configuration and credential changes still use their existing forms. Keyboard
 selection and dialog opening have no animation. The modal traps focus using the
 native dialog and restores the prior connected element on dismissal.
@@ -34,7 +34,7 @@ current provider query cap; full-history pagination is not implemented.
 Browser regression cases exercise 320px, 390px and 1280px, enlarged root text,
 long values, empty subjects, and emoji initials. Enlarged root text is not a
 substitute for physical-device zoom testing. Native/physical devices remain
-unchecked. The preview can be used to inspect light/dark themes manually.
+unchecked.
 
 ## Animation review
 

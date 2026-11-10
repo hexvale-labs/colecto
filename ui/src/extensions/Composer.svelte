@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { Draft, ComposerService, OutgoingAttachment } from '../lib/api';
+  import Icon from '../Icon.svelte';
   let { connected, sender, draft, service, onback, ondirty, onbusy, onsaved }: {
     connected: boolean; sender: string; draft: Draft | null; service: ComposerService; onback: () => void;
     ondirty: (dirty: boolean) => void; onbusy: (busy: boolean) => void; onsaved: (draft: Draft) => void;
@@ -61,23 +62,30 @@
   }
 
 </script>
+
 <section class="detail composer" aria-label="Draft editor">
-  <header class="detail-toolbar"><button class="text-button back" disabled={saving} onclick={onback}>← Back to list</button><span class="toolbar-label">COMPOSE</span><span class="pill">Draft</span></header>
   <form class="compose-form" onsubmit={save}>
-    <div class="compose-heading"><div class="eyebrow">{heading}</div><h2>{id ? 'Your draft' : heading === 'REPLY' ? 'Reply' : heading === 'FORWARD' ? 'Forward' : 'New message'}</h2><p>Write, save, or send.</p></div>
-    <div class="sender-account"><span>From</span><strong>{sender}</strong></div>
-    <fieldset disabled={saving || sent}>
-      <div class="input-row"><label for="recipient">To</label><input id="recipient" autocomplete="email" autocapitalize="none" spellcheck={false} enterkeyhint="next" type="text" inputmode="email" placeholder="someone@example.com, another@example.com" maxlength="4000" bind:value={recipient} /></div>
+    <header class="detail-toolbar">
+      <button class="icon-button back" type="button" aria-label="Back to list" disabled={saving} onclick={onback}><Icon name="back" size={18} /></button>
+      <h2>{id ? 'Your draft' : heading === 'REPLY' ? 'Reply' : heading === 'FORWARD' ? 'Forward' : 'New message'}</h2>
+    </header>
+    <fieldset class="compose-fields" disabled={saving || sent}>
+      <div class="input-row"><span class="row-label">From</span><strong class="sender">{sender}</strong></div>
+      <div class="input-row"><label for="recipient">To</label><input id="recipient" autocomplete="email" autocapitalize="none" spellcheck={false} enterkeyhint="next" type="text" inputmode="email" placeholder="name@example.com" maxlength="4000" bind:value={recipient} /></div>
       <div class="input-row"><label for="cc">Cc</label><input id="cc" autocomplete="email" autocapitalize="none" spellcheck={false} type="text" inputmode="email" maxlength="4000" bind:value={cc} /></div>
-      <div class="input-row"><label for="subject">Subject</label><input id="subject" placeholder="What’s on your mind?" maxlength="998" bind:value={subject} /></div>
-      <label class="sr-only" for="body">Message</label><textarea id="body" placeholder="Start a conversation…" maxlength="100000" bind:value={body}></textarea>
-      {#if connected}<div class="compose-attachments">
+      <div class="input-row"><label for="subject">Subject</label><input id="subject" maxlength="998" bind:value={subject} /></div>
+      <label class="sr-only" for="body">Message</label><textarea id="body" placeholder="Write your message" maxlength="100000" bind:value={body}></textarea>
+      {#if connected && (files.length || thread.forward_of)}<div class="compose-attachments">
         {#if thread.forward_of}<p class="content-note">The original message’s attachments are included when you send.</p>{/if}
-        {#if files.length}<ul class="attachments" aria-label="Files to send">{#each files as file, index (index)}<li><span class="attachment"><span class="attachment-name">{file.name}</span><button class="text-button" aria-label={`Remove ${file.name}`} onclick={() => files = files.filter((_, other) => other !== index)} type="button">Remove</button></span></li>{/each}</ul><p class="content-note">Attached files are sent but not saved with drafts.</p>{/if}
-        <label class="secondary attach-button">Attach files<input class="sr-only" type="file" multiple onchange={attach} /></label>
+        {#if files.length}<ul class="attachments" aria-label="Files to send">{#each files as file, index (index)}<li><span class="attachment"><Icon name="attach" /><span class="attachment-name">{file.name}</span><button class="icon-button" aria-label={`Remove ${file.name}`} onclick={() => files = files.filter((_, other) => other !== index)} type="button"><Icon name="close" size={13} /></button></span></li>{/each}</ul><p class="content-note">Attached files are sent but not saved with drafts.</p>{/if}
       </div>{/if}
     </fieldset>
     {#if error}<p class="error-box" role="alert">{error}</p>{/if}
-    <footer class="compose-footer"><div><span class="save-state" role="status">{sent ? 'Accepted by mail server' : sending ? 'Sending…' : saving ? 'Saving draft…' : dirty ? 'Unsaved changes' : saved ? 'Draft saved' : id ? 'Saved by your mail service' : 'Not saved yet'}</span><p>{connected ? 'Connected mail · POP3 will not be supported' : 'Sending is unavailable for this account'}</p></div><button class="primary" data-command="save" type="submit" disabled={saving || sent || (!!id && !dirty)}>{saving ? 'Saving…' : 'Save draft'}</button>{#if connected}<button class="primary" type="button" disabled={saving || sent} data-command="send" onclick={send}>{sent ? 'Sent' : sending ? 'Sending…' : 'Send'}</button>{/if}</footer>
+    <footer class="compose-footer">
+      {#if connected}<label class="tool attach-button" class:disabled={saving || sent}><Icon name="attach" /><span>Attach files</span><input class="sr-only" type="file" multiple disabled={saving || sent} onchange={attach} /></label>{/if}
+      <span class="save-state" class:pending={dirty && !saving && !sent} role="status">{sent ? 'Accepted by mail server' : sending ? 'Sending…' : saving ? 'Saving draft…' : dirty ? 'Unsaved changes' : saved ? 'Draft saved' : id ? 'Saved by your mail service' : connected ? 'Not saved yet' : 'Sending is unavailable for this account'}</span>
+      <button class="secondary" data-command="save" type="submit" disabled={saving || sent || (!!id && !dirty)}>{saving && !sending ? 'Saving…' : 'Save draft'}</button>
+      {#if connected}<button class="primary" type="button" disabled={saving || sent} data-command="send" onclick={send}>{sent ? 'Sent' : sending ? 'Sending…' : 'Send'}<Icon name="sent" size={14} /></button>{/if}
+    </footer>
   </form>
 </section>

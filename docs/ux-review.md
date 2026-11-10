@@ -2,6 +2,9 @@
 
 Reviewed with the installed `emil-design-eng` and `mobile-native` skills.
 
+The November 2026 redesign replaced this layout and removed light and System
+themes. `DESIGN.md` is now the reference; the table below is kept as history.
+
 | Before | After | Why |
 | --- | --- | --- |
 | Account selector, account management and extension buttons all competed in the sidebar. | One profile row contains initial avatar, account name/account switcher, and a 44 px Settings control. | Keeps routine navigation focused while retaining keyboard-accessible account switching. |

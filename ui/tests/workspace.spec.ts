@@ -1,21 +1,4 @@
-import { test, expect, ownerToken } from './fixtures';
-
-test('defaults dark and remembers explicit and system appearance', async ({ page }) => {
-  await page.emulateMedia({ colorScheme: 'light' });
-  await page.goto('/');
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Appearance', exact: true }).click();
-  await page.getByLabel('Color theme').selectOption('light');
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Appearance', exact: true }).click();
-  await page.getByLabel('Color theme').selectOption('system');
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-});
+import { test, expect, ownerToken, chooseAccount } from './fixtures';
 
 test('keeps separate closable message tabs and has a sent folder on mobile', async ({ page }) => {
   const messages = [{ id: 'maya', sender: 'Maya Chen', address: 'maya@example.test', subject: 'A small plan for the weekend', body: 'Coffee?', date: 'Today' }, { id: 'alex', sender: 'Alex Rivera', address: 'alex@example.test', subject: 'Plain text, with a little character', body: 'Hello', date: 'Today' }];
@@ -86,14 +69,14 @@ test('profile names fall back to email and message tabs stay with their account'
     return route.fulfill({ json: { id: 'same-id', sender: account, address: `${account}@example.test`, subject: `Mail for ${account}`, body: 'Body', date: 'Today' } });
   });
   await page.goto('/');
-  await page.getByLabel('Current account').selectOption('a');
+  await chooseAccount(page, 'a@example.test');
   await page.getByRole('button', { name: /Mail for a/ }).click();
   await expect(page.getByRole('navigation', { name: 'Open messages' }).getByRole('button', { name: 'Mail for a', exact: true })).toBeVisible();
-  await page.getByLabel('Current account').selectOption('b');
+  await chooseAccount(page, 'b@example.test');
   await expect(page.getByRole('navigation', { name: 'Open messages' })).toHaveCount(0);
-  await expect(page.getByRole('combobox', { name: 'Current account' }).locator('option:checked')).toHaveText('b@example.test');
+  await expect(page.getByRole('button', { name: 'Current account' })).toContainText('b@example.test');
   await page.getByRole('button', { name: /Mail for b/ }).click();
-  await page.getByLabel('Current account').selectOption('a');
+  await chooseAccount(page, 'a@example.test');
   await expect(page.getByRole('navigation', { name: 'Open messages' }).getByRole('button', { name: 'Mail for a', exact: true })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Open messages' }).getByRole('button', { name: 'Mail for b', exact: true })).toHaveCount(0);
 });
@@ -143,6 +126,8 @@ test('command runner opens by keyboard, filters actions and searches drafts', as
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
   await page.getByLabel('Subject', { exact: true }).fill('Find this local note');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  // Commands are disabled while the save is in flight.
+  await expect(page.getByRole('status')).toHaveText('Draft saved');
   await page.keyboard.press('Control+k');
   await page.getByRole('combobox', { name: 'Search commands' }).fill('drafts');
   await page.keyboard.press('Enter');

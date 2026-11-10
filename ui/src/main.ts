@@ -1,7 +1,7 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
+import '@fontsource-variable/mona-sans/wdth.css';
 import './style.css';
-import './lib/theme.svelte';
 if (import.meta.env.DEV && location.pathname === '/__stress') {
   void import('./StressPreview.svelte').then(({ default: Preview }) => mount(Preview, { target: document.getElementById('app')! }));
 } else {

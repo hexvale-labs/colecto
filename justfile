@@ -43,7 +43,7 @@ ui-check:
 
 # Check browser service error handling without starting a browser or mail service.
 ui-unit:
-    bun test ./ui/tests/api.test.mjs ./ui/tests/reply.test.mjs
+    bun test ./ui/tests/api.test.mjs ./ui/tests/reply.test.mjs ./ui/tests/when.test.mjs
 
 # Build the bundled UI for the local Host.
 ui-build:

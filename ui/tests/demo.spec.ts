@@ -3,7 +3,7 @@ async function openExtensions(page: import('@playwright/test').Page) {
   if (await settings.count()) await settings.click();
   await page.getByRole('button', { name: 'Extensions', exact: true }).click();
 }
-import { test, expect, ownerToken } from './fixtures';
+import { test, expect, ownerToken, chooseAccount } from './fixtures';
 
 test('reads sample messages as text and returns to the inbox on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -133,18 +133,22 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
   await page.getByRole('button', { name: 'Save account', exact: true }).click();
   await expect(page.getByText('Account saved. Open Inbox to check the connection.')).toBeVisible();
   await page.getByRole('button', { name: 'Back to mail' }).click();
-  await page.getByLabel('Current account').selectOption({ label: 'Work' });
+  await chooseAccount(page, 'Work');
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await expect(page.getByText('No drafts yet')).toBeVisible();
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Draft editor' }).getByText('work@example.test', { exact: true })).toBeVisible();
   await page.getByLabel('Subject', { exact: true }).fill('Work only');
   page.once('dialog', dialog => dialog.dismiss());
-  await page.getByLabel('Current account').selectOption('demo');
+  // On a phone the sidebar is hidden while composing, so switch through the command runner.
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox', { name: 'Search commands' }).fill('Switch account: Demo account');
+  await page.keyboard.press('Enter');
   await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Work only');
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
-  await page.getByLabel('Current account').selectOption('demo');
+  await page.getByRole('button', { name: 'Back to list' }).click();
+  await chooseAccount(page, 'Demo account');
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await expect(page.getByRole('button', { name: /Work only/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -174,9 +178,9 @@ test('late account responses cannot replace the selected inbox', async ({ page }
     await route.fulfill({ json: id === 'demo' ? [] : [{ id: 'same-id', sender: id, address: `${id}@example.test`, subject: `Inbox ${id}`, body: 'Preview', date: 'Today' }] });
   });
   await page.goto('/');
-  await page.getByLabel('Current account').selectOption('a');
+  await chooseAccount(page, 'a');
   await pending;
-  await page.getByLabel('Current account').selectOption('b');
+  await chooseAccount(page, 'b');
   await expect(page.getByRole('button', { name: /Inbox b/ })).toBeVisible();
   const late = page.waitForResponse(response => response.url().includes('/api/v1/messages/refresh') && response.request().headers()['x-colecto-account'] === 'a');
   release();
