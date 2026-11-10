@@ -309,7 +309,14 @@ impl MailCacheStore {
                     transaction.execute("INSERT INTO snapshots(account,provider,folder,fetched_at,messages) VALUES (?1,?2,?3,?4,?5)",turso::params![self.account.as_str(),provider,folder,time,text]).await.map_err(storage)?;
                 }
             }
-            transaction.execute("INSERT OR IGNORE INTO records(namespace,name,version,value) VALUES (?1,'cache-import',1,?2)",turso::params![namespace,vec![1u8]]).await.map_err(storage)?;
+            transaction.execute("INSERT OR IGNORE INTO records(namespace,name,version,value) VALUES (?1,'cache-import',1,?2)",turso::params![namespace.as_str(),vec![1u8]]).await.map_err(storage)?;
+            transaction
+                .execute(
+                    "INSERT OR IGNORE INTO initialized(namespace,name) VALUES (?1,'cache-import')",
+                    [namespace.as_str()],
+                )
+                .await
+                .map_err(storage)?;
             transaction.commit().await.map_err(storage)
         })
     }
@@ -386,6 +393,38 @@ mod tests {
         cache.import_legacy(source.path()).unwrap();
         assert!(cache.load("provider", "inbox").unwrap().messages.is_empty());
         assert_eq!(cache.load("provider", "sent").unwrap().messages.len(), 4);
+    }
+    #[test]
+    fn missing_import_marker_cannot_restore_invalidated_legacy_snapshots() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = serde_json::to_vec(&MailCache {
+            version: 1,
+            account: "p".into(),
+            messages: crate::sample_messages(),
+        })
+        .unwrap();
+        fs::write(directory.path().join("mail-cache.json"), &source).unwrap();
+        let mut cache = MailCacheStore::open(directory.path()).unwrap();
+        cache.import_legacy(directory.path()).unwrap();
+        assert_eq!(cache.load("p", "inbox").unwrap().messages.len(), 4);
+        cache.observe_identity("p", "inbox", "imap-7-").unwrap();
+        assert!(cache.observe_identity("p", "inbox", "imap-8-").unwrap());
+        {
+            let connection = cache.database.connection().unwrap();
+            futures_executor::block_on(connection.execute(
+                "DELETE FROM records WHERE namespace='account:demo' AND name='cache-import'",
+                (),
+            ))
+            .unwrap();
+        }
+        drop(cache);
+        let mut cache = MailCacheStore::open(directory.path()).unwrap();
+        assert!(cache.import_legacy(directory.path()).is_err());
+        assert!(cache.load("p", "inbox").unwrap().messages.is_empty());
+        assert_eq!(
+            fs::read(directory.path().join("mail-cache.json")).unwrap(),
+            source
+        );
     }
     #[test]
     fn shared_cache_isolates_accounts_and_invalidates_only_changed_mailbox() {
