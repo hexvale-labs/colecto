@@ -19,18 +19,73 @@ pub struct Message {
 #[serde(deny_unknown_fields)]
 pub struct Draft {
     pub id: String,
+    /// Comma-separated addresses, as typed in the composer.
     pub recipient: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cc: String,
     pub subject: String,
     pub body: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub in_reply_to: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub references: String,
+    /// Re-attach this message's attachments when sending a forward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_of: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DraftInput {
     pub id: Option<String>,
     pub recipient: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cc: String,
     pub subject: String,
     pub body: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub in_reply_to: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub references: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_of: Option<String>,
+    /// Sent with the message only; drafts do not store uploaded files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<OutgoingAttachment>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutgoingAttachment {
+    pub name: String,
+    pub content_type: String,
+    /// Standard base64 without a data-URL prefix.
+    pub data: String,
+}
+
+/// Provider-fetched details that are not kept in mailbox snapshots.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MessageContent {
+    /// Full decoded text, including messages too large for list snapshots.
+    pub text: String,
+    /// Untrusted HTML. Clients must render it only inside a script-free sandbox.
+    pub html: Option<String>,
+    pub attachments: Vec<AttachmentInfo>,
+    pub message_id: String,
+    pub references: String,
+    pub reply_to: String,
+    pub to: String,
+    pub cc: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AttachmentInfo {
+    pub index: usize,
+    pub name: String,
+    pub content_type: String,
+    pub size: usize,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

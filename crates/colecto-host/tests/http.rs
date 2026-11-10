@@ -223,6 +223,42 @@ async fn send_is_scoped_and_demo_never_reports_delivery() {
 }
 
 #[tokio::test]
+async fn message_content_needs_read_grant_and_send_accepts_attachment_sized_bodies() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    );
+    let router = authenticated(router).await;
+    let origin = "http://127.0.0.1:4173";
+    for (extension, expected) in [("inbox", StatusCode::FORBIDDEN), ("reader", StatusCode::OK)] {
+        let response = router
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/api/v1/messages/welcome/content",
+                extension,
+                origin,
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+    let attachment = "A".repeat(2_000_000);
+    let body = format!(
+        r#"{{"recipient":"a@example.test","subject":"Hi","body":"x","attachments":[{{"name":"a.bin","content_type":"application/octet-stream","data":"{attachment}"}}]}}"#
+    );
+    let response = router
+        .oneshot(request("POST", "/api/v1/send", "composer", origin, &body))
+        .await
+        .unwrap();
+    // Reaches the demo store (no account) instead of the global 512 KB body limit.
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn management_is_host_only_and_password_mode_needs_no_keychain() {
     let dir = tempfile::tempdir().unwrap();
     let router = app(
@@ -836,6 +872,7 @@ async fn scoped_list_responses_require_read_grants_for_message_and_draft_bodies(
             recipient: "a@example.test".into(),
             subject: "Metadata".into(),
             body: "Private draft body".into(),
+            ..Default::default()
         })
         .unwrap();
     let router = app(store, "127.0.0.1:4173".into(), dir.path().into());

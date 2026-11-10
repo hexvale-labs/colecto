@@ -9,11 +9,12 @@ pub use accounts::Accounts;
 pub use credentials::SecretStore;
 mod jmap;
 mod labels;
+pub mod mime;
 mod remote;
 pub use jmap::JmapAccount;
 pub use remote::MailAccount;
 
-use colecto_extension_api::{Draft, DraftInput, Message};
+use colecto_extension_api::{AttachmentInfo, Draft, DraftInput, Message, MessageContent};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -310,14 +311,54 @@ impl MailStore {
         Ok(messages)
     }
     pub fn send(&self, input: DraftInput) -> Result<(), Error> {
-        match self
+        let account = self
             .account
             .as_ref()
-            .ok_or_else(|| Error::Invalid("Connect a mail account before sending".into()))?
-        {
-            Account::Imap(account) => account.send(&input),
-            Account::Jmap(account) => account.send(&input),
+            .ok_or_else(|| Error::Invalid("Connect a mail account before sending".into()))?;
+        validate_draft(&input)?;
+        let mut files = mime::uploads(&input.attachments)?;
+        if let Some(original) = &input.forward_of {
+            files.extend(mime::attachments(&self.raw(original)?)?);
         }
+        if files.iter().map(|file| file.data.len()).sum::<usize>() > mime::MAX_ATTACHMENTS {
+            return Err(Error::Invalid(
+                "Attachments must total at most 25 MB".into(),
+            ));
+        }
+        match account {
+            Account::Imap(account) => account.send(&input, &files),
+            Account::Jmap(account) => account.send(&input, &files),
+        }
+    }
+    fn raw(&self, id: &str) -> Result<Vec<u8>, Error> {
+        match &self.account {
+            Some(Account::Imap(account)) => account.fetch_raw(id),
+            Some(Account::Jmap(account)) => account.fetch_raw(id),
+            None => Err(Error::Missing),
+        }
+    }
+    /// Provider-fetched HTML, attachments, and reply headers for one message.
+    pub fn content(&self, id: &str) -> Result<MessageContent, Error> {
+        if self.account.is_none() {
+            let message = self.message(id).ok_or(Error::Missing)?;
+            return Ok(MessageContent {
+                text: message.body.clone(),
+                ..MessageContent::default()
+            });
+        }
+        mime::content(&self.raw(id)?)
+    }
+    pub fn attachment(&self, id: &str, index: usize) -> Result<(AttachmentInfo, Vec<u8>), Error> {
+        let file = mime::attachment(&self.raw(id)?, index)?;
+        Ok((
+            AttachmentInfo {
+                index,
+                name: file.name,
+                content_type: file.content_type,
+                size: file.data.len(),
+            },
+            file.data,
+        ))
     }
     pub fn messages(&self) -> &[Message] {
         &self.messages
@@ -336,7 +377,17 @@ impl MailStore {
     }
 
     pub fn save_draft(&mut self, input: DraftInput) -> Result<Draft, Error> {
-        validate(&input.recipient, &input.subject, &input.body)?;
+        let draft = Draft {
+            id: String::new(),
+            recipient: input.recipient,
+            cc: input.cc,
+            subject: input.subject,
+            body: input.body,
+            in_reply_to: input.in_reply_to,
+            references: input.references,
+            forward_of: input.forward_of,
+        };
+        validate(&draft)?;
         let mut drafts = self.drafts.clone();
         let index = match input.id.as_ref() {
             Some(id) => Some(
@@ -360,12 +411,7 @@ impl MailStore {
                 format!("draft-{next}")
             }
         };
-        let draft = Draft {
-            id,
-            recipient: input.recipient,
-            subject: input.subject,
-            body: input.body,
-        };
+        let draft = Draft { id, ..draft };
         match index {
             Some(index) => drafts[index] = draft.clone(),
             None => drafts.push(draft.clone()),
@@ -403,7 +449,7 @@ fn validate_drafts(bytes: &[u8]) -> Result<Vec<Draft>, Error> {
         {
             return Err(storage("Invalid or duplicate draft ID"));
         }
-        validate(&draft.recipient, &draft.subject, &draft.body)?;
+        validate(draft)?;
     }
     Ok(saved.drafts)
 }
@@ -441,32 +487,63 @@ fn validate_query(folder: &str, search: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Parse a comma-separated address list; an empty list is allowed.
+pub(crate) fn mailboxes(list: &str) -> Result<Vec<lettre::message::Mailbox>, Error> {
+    if list.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    list.parse::<lettre::message::Mailboxes>()
+        .map(|mailboxes| mailboxes.into_iter().collect())
+        .map_err(|_| Error::Invalid("Enter valid email addresses, separated by commas".into()))
+}
+
 /// Validate a full outgoing snapshot without persisting a draft or contacting a provider.
 pub fn validate_draft(input: &DraftInput) -> Result<(), Error> {
-    validate(&input.recipient, &input.subject, &input.body)?;
-    input
-        .recipient
-        .parse::<lettre::Address>()
-        .map_err(|_| Error::Invalid("Enter one valid recipient email address".into()))?;
+    validate(&Draft {
+        id: String::new(),
+        recipient: input.recipient.clone(),
+        cc: input.cc.clone(),
+        subject: input.subject.clone(),
+        body: input.body.clone(),
+        in_reply_to: input.in_reply_to.clone(),
+        references: input.references.clone(),
+        forward_of: input.forward_of.clone(),
+    })?;
+    if mailboxes(&input.recipient)?.is_empty() {
+        return Err(Error::Invalid("Enter at least one recipient".into()));
+    }
+    mailboxes(&input.cc)?;
     if input.id.as_ref().is_some_and(|id| id.len() > 256) {
         return Err(Error::Invalid("Invalid draft identifier".into()));
+    }
+    if input.attachments.len() > 20 {
+        return Err(Error::Invalid("Attach at most 20 files".into()));
     }
     Ok(())
 }
 
-fn validate(recipient: &str, subject: &str, body: &str) -> Result<(), Error> {
-    if recipient.len() > 320 || recipient.contains(['\r', '\n']) {
-        return Err(Error::Invalid(
-            "Recipient must be a single line of at most 320 bytes".into(),
-        ));
+fn validate(draft: &Draft) -> Result<(), Error> {
+    for (name, value) in [("Recipients", &draft.recipient), ("Cc", &draft.cc)] {
+        if value.len() > 4000 || value.contains(['\r', '\n']) {
+            return Err(Error::Invalid(format!(
+                "{name} must be a single line of at most 4000 bytes"
+            )));
+        }
     }
-    if subject.len() > 998 || subject.contains(['\r', '\n']) {
+    if draft.subject.len() > 998 || draft.subject.contains(['\r', '\n']) {
         return Err(Error::Invalid(
             "Subject must be a single line of at most 998 bytes".into(),
         ));
     }
-    if body.len() > 100_000 {
+    if draft.body.len() > 100_000 {
         return Err(Error::Invalid("Body must be at most 100000 bytes".into()));
+    }
+    if [&draft.in_reply_to, &draft.references]
+        .iter()
+        .any(|value| value.len() > 4000 || value.chars().any(char::is_control))
+        || draft.forward_of.as_ref().is_some_and(|id| id.len() > 256)
+    {
+        return Err(Error::Invalid("Invalid reply or forward reference".into()));
     }
     Ok(())
 }
@@ -527,6 +604,7 @@ mod cache_tests {
             recipient: String::new(),
             subject: "Saved".into(),
             body: String::new(),
+            ..Default::default()
         };
         let draft = store.save_draft(input.clone()).unwrap();
         let before = store

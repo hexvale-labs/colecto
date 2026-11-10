@@ -50,7 +50,10 @@ or directly send mail.
 Use **Compose** to write a note, then **Save draft**. Open **Drafts** to resume it.
 Leaving an edited draft asks before discarding unsaved changes. Saving failures
 keep the editor text, and never report success. Without account configuration, sending is disabled. With an account configured,
-**Send** submits plain-text mail through SMTP or JMAP.
+**Send** submits plain-text mail through SMTP or JMAP, with Cc and attachments
+(attachments are SMTP only). Open a message to **Reply**, **Reply all** or
+**Forward**. HTML mail renders in a script-free sandbox with remote images blocked
+until you load them. See [the alpha roadmap](docs/alpha.md) for limits.
 
 The Host stores accounts, drafts, labels, and Inbox/Sent snapshots in one
 embedded Turso database, `.colecto-demo/colecto.db`. This directory is ignored by
@@ -88,7 +91,7 @@ Run `just` for all recipes. After editing UI source, `just demo` rebuilds it.
 ## Prototype boundaries
 
 - `colecto-extension-api`: version 1 wire types for the operations used today.
-- `colecto-core`: TLS IMAP/SMTP, prototype JMAP, MIME plain-text decoding, sample messages, draft
+- `colecto-core`: TLS IMAP/SMTP, prototype JMAP, MIME decoding (text, HTML, attachments), sample messages, draft
   validation, IDs, and embedded Turso storage.
 - `colecto-host`: authenticated loopback HTTP/static adapter; validates explicit owner bearers,
   scoped API keys, Host/origin, and built-in
@@ -101,7 +104,7 @@ Built-in module identities are routing labels for trusted application code.
 Third-party Wasm panels run without WASI under resource limits, start disabled
 with no grants, and emit only declarative text/actions. Third-party JavaScript
 and HTML are not loaded. An optional Tauri desktop runner uses the same loopback
-Host and exposes no guest native IPC. Attachment support, sync and tested mobile
+Host and exposes no guest native IPC. Sync and tested mobile
 builds are not implemented. See [the extension contract](docs/extensions.md) for
 the exact security boundary and `just native` prerequisites.
 
@@ -161,6 +164,7 @@ changes without enforcing noisy hardware-dependent budgets.
 | [Storage](docs/storage.md) | `colecto.db` records, bounds, and legacy import |
 | [Daemon](docs/daemon.md) | Remote HTTPS, Unix sockets, notifications, MCP |
 | [Extensions](docs/extensions.md) | Manifests, capabilities, and the Wasm sandbox |
+| [Alpha roadmap](docs/alpha.md) | What alpha means, task status, reading/sending contracts |
 | [Performance](docs/performance.md) | Resource measurement and baselines |
 | [Prototype design](docs/prototype-design.md) | The original local demo design |
 | [Client review](docs/client-review.md), [UX review](docs/ux-review.md) | UI audits and adversarial fixtures |

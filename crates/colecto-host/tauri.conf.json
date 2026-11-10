@@ -4,6 +4,6 @@
   "version": "0.1.0",
   "identifier": "app.colecto.mail",
   "build": { "frontendDist": "../../ui/dist" },
-  "app": { "windows": [], "security": { "capabilities": [], "csp": "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" } },
+  "app": { "windows": [], "security": { "capabilities": [], "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" } },
   "bundle": { "active": false }
 }

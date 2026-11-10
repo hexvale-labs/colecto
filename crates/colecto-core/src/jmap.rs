@@ -1,5 +1,5 @@
 //! Prototype JMAP transport. Tokens remain in the trusted core.
-use crate::{Error, validate};
+use crate::{Error, mime::Attachment};
 use colecto_extension_api::{DraftInput, Message};
 use reqwest::{Url, blocking::Client};
 use serde_json::{Value, json};
@@ -74,6 +74,7 @@ struct Session<'a> {
     account: &'a JmapAccount,
     client: Client,
     api: Url,
+    download: String,
     id: String,
     submission: bool,
 }
@@ -110,6 +111,7 @@ impl JmapAccount {
             account: self,
             client,
             api: secure_url(field(&data, "apiUrl")?)?,
+            download: data["downloadUrl"].as_str().unwrap_or_default().to_owned(),
             submission: data["accounts"][&id]["accountCapabilities"][SUBMISSION].is_object(),
             id,
         })
@@ -118,7 +120,61 @@ impl JmapAccount {
         crate::validate_query(folder, search)?;
         self.session()?.query(folder, search)
     }
-    pub fn send(&self, input: &DraftInput) -> Result<(), Error> {
+    /// Download one complete message as RFC 5322 bytes.
+    pub(crate) fn fetch_raw(&self, id: &str) -> Result<Vec<u8>, Error> {
+        let id = id.strip_prefix("jmap-").ok_or(Error::Missing)?;
+        let session = self.session()?;
+        let data = session.call(
+            "Email/get",
+            json!({"ids":[id],"properties":["blobId","size"]}),
+        )?;
+        let email = list(&data)?.first().ok_or(Error::Missing)?;
+        if email["size"].as_u64().unwrap_or(u64::MAX) > crate::mime::MAX_RAW as u64 {
+            return Err(Error::Invalid(
+                "This message is larger than 30 MB and cannot be opened here".into(),
+            ));
+        }
+        // JMAP Ids are URL-safe; refuse anything else rather than escaping it into a URL.
+        let blob = field(email, "blobId")?;
+        if [blob, session.id.as_str()].iter().any(|value| {
+            value.is_empty()
+                || !value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        }) {
+            return Err(failed());
+        }
+        let url = session
+            .download
+            .replace("{accountId}", &session.id)
+            .replace("{blobId}", blob)
+            .replace("{type}", "message%2Frfc822")
+            .replace("{name}", "message.eml");
+        let response = session
+            .client
+            .get(secure_url(&url)?)
+            .bearer_auth(&self.token)
+            .send()
+            .map_err(http_error)?;
+        if !response.status().is_success() {
+            return Err(failed());
+        }
+        let mut bytes = Vec::new();
+        response
+            .take(crate::mime::MAX_RAW as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| failed())?;
+        if bytes.len() > crate::mime::MAX_RAW {
+            return Err(failed());
+        }
+        Ok(bytes)
+    }
+    pub(crate) fn send(&self, input: &DraftInput, attachments: &[Attachment]) -> Result<(), Error> {
+        if !attachments.is_empty() {
+            return Err(Error::Invalid(
+                "Attachments are not supported for JMAP accounts yet".into(),
+            ));
+        }
         self.send_inner(input).map_err(|error| match error {
             Error::Transport(message) => Error::Transport(format!("{message} Sending may have an uncertain outcome; check Sent and delivery status before sending again.")),
             error => error,
@@ -126,11 +182,33 @@ impl JmapAccount {
     }
     fn send_inner(&self, input: &DraftInput) -> Result<(), Error> {
         self.validate()?;
-        validate(&input.recipient, &input.subject, &input.body)?;
-        input
-            .recipient
-            .parse::<lettre::Address>()
-            .map_err(|_| Error::Invalid("Enter one valid recipient email address".into()))?;
+        crate::validate_draft(input)?;
+        let addresses = |list: &str| -> Result<Vec<Value>, Error> {
+            Ok(crate::mailboxes(list)?
+                .into_iter()
+                .map(|mailbox| json!({"name": mailbox.name, "email": mailbox.email.to_string()}))
+                .collect())
+        };
+        let message_ids = |value: &str| -> Value {
+            value
+                .split_whitespace()
+                .map(|id| id.trim_matches(['<', '>']))
+                .collect::<Vec<_>>()
+                .into()
+        };
+        let mut email = json!({
+            "from":[{"email":self.address}],"to":addresses(&input.recipient)?,"subject":input.subject,
+            "textBody":[{"partId":"text","type":"text/plain"}],"bodyValues":{"text":{"value":input.body}}
+        });
+        if !input.cc.trim().is_empty() {
+            email["cc"] = json!(addresses(&input.cc)?);
+        }
+        if !input.in_reply_to.is_empty() {
+            email["inReplyTo"] = message_ids(&input.in_reply_to);
+        }
+        if !input.references.is_empty() {
+            email["references"] = message_ids(&input.references);
+        }
         let session = self.session()?;
         if !session.submission {
             return Err(Error::Invalid(
@@ -148,11 +226,9 @@ impl JmapAccount {
             .ok_or_else(failed)?;
         let drafts = session.mailbox("drafts")?;
         let sent = session.mailbox("sent")?;
-        let created = session.call("Email/set", json!({"create":{"message":{
-            "mailboxIds":{(drafts.clone()):true}, "keywords":{"$draft":true},
-            "from":[{"email":self.address}],"to":[{"email":input.recipient}],"subject":input.subject,
-            "textBody":[{"partId":"text","type":"text/plain"}],"bodyValues":{"text":{"value":input.body}}
-        }}}))?;
+        email["mailboxIds"] = json!({(drafts.clone()): true});
+        email["keywords"] = json!({"$draft": true});
+        let created = session.call("Email/set", json!({"create":{"message":email}}))?;
         let email = field(&created["created"]["message"], "id")?;
         let result = session.call("EmailSubmission/set", json!({"create":{"submission":{
             "identityId":field(identity,"id")?,"emailId":email}},
@@ -274,7 +350,7 @@ fn parse_message(value: &Value) -> Result<Message, Error> {
         subject: value["subject"].as_str().unwrap_or_default().to_owned(),
         date: value["receivedAt"].as_str().unwrap_or_default().to_owned(),
         body: if body.is_empty() {
-            "No plain-text body available. HTML and attachments are not displayed.".into()
+            "This message has no plain-text part. Open it to read the HTML version.".into()
         } else {
             crate::bounded_body(body.join("\n"))
         },
@@ -360,6 +436,7 @@ mod tests {
             account: &account,
             client: Client::new(),
             api,
+            download: String::new(),
             id: "account".into(),
             submission: false,
         };
@@ -439,6 +516,7 @@ mod tests {
             account: &account,
             client: Client::new(),
             api,
+            download: String::new(),
             id: "account".into(),
             submission: true,
         };
@@ -482,7 +560,7 @@ mod tests {
             parse_message(&json!({"id":"html","textBody":[{"partId":"html","type":"text/html"}],"bodyValues":{"html":{"value":"<b>HTML</b>"}}}))
                 .unwrap()
                 .body
-                .contains("No plain-text")
+                .contains("no plain-text part")
         );
     }
     #[test]

@@ -44,7 +44,8 @@ A package can only receive capabilities declared in its manifest. Grants are
 scoped to the selected account; enabled state applies globally. Third-party
 packages have no grants for new accounts. Enabling a package does not grant
 permissions. Granting `messages.send` allows the package to send mail, so grant
-it only to packages you trust with delivery.
+it only to packages you trust with delivery. Forwarding with `forward_of` also
+needs `messages.read`; the bundled composer declares it.
 
 The Host binds extension identity and account to each invocation. Guest input
 cannot override them. Every service call rechecks current grants and the invocation generation.

@@ -8,6 +8,7 @@ fn input(id: Option<String>, subject: &str) -> DraftInput {
         recipient: "friend@example.test".into(),
         subject: subject.into(),
         body: "Hello 世界".into(),
+        ..Default::default()
     }
 }
 
@@ -60,7 +61,8 @@ fn unknown_ids_and_oversized_inputs_do_not_mutate_storage() {
                 id: None,
                 recipient: String::new(),
                 subject: String::new(),
-                body: String::new()
+                body: String::new(),
+                ..Default::default()
             })
             .is_ok()
     );

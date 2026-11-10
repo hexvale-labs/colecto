@@ -3,5 +3,5 @@ name = "Message reader"
 api_version = 1
 slot = "reader"
 capabilities = ["messages.read", "messages.label"]
-description = "Read plain-text messages from the selected account."
+description = "Read messages, including sandboxed HTML and attachments."
 author = "Colecto"
