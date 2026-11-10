@@ -1,11 +1,9 @@
 //! Installation-local automation policy. Only verifiers are persisted.
+use colecto_core::Database;
 use colecto_extension_api::Capability;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 use subtle::ConstantTimeEq;
 
 #[derive(Clone, Debug)]
@@ -46,7 +44,8 @@ pub struct KeyInput {
     pub expires_at: Option<u64>,
 }
 pub struct ApiKeys {
-    path: PathBuf,
+    database: Database,
+    directory: PathBuf,
     policy: Policy,
 }
 pub fn now() -> u64 {
@@ -74,24 +73,22 @@ fn valid_metadata(key: &KeyMetadata) -> bool {
         && key.expires_at.is_none_or(|t| t > key.created_at)
 }
 impl ApiKeys {
-    pub fn open(directory: &Path) -> Result<Self, String> {
-        let path = directory.join("api-keys.json");
-        let policy = match std::fs::symlink_metadata(&path) {
-            Ok(meta) => {
-                if !meta.is_file() || meta.len() > 2_000_000 {
-                    return Err("Invalid API key policy".into());
-                }
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if meta.permissions().mode() & 0o077 != 0 {
-                        return Err("API key policy must be private".into());
-                    }
-                }
-                let policy: Policy = serde_json::from_slice(
-                    &std::fs::read(&path).map_err(|_| "Cannot read API key policy")?,
-                )
-                .map_err(|_| "Invalid API key policy")?;
+    pub fn open(database: Database, directory: &Path) -> Result<Self, String> {
+        let policy = crate::store::open(
+            &database,
+            directory,
+            "api-keys",
+            Some(crate::store::Legacy {
+                max_bytes: 2_000_000,
+                private: true,
+            }),
+            || Policy {
+                version: 1,
+                keys: vec![],
+            },
+            |bytes| {
+                let policy: Policy =
+                    serde_json::from_slice(bytes).map_err(|_| "Invalid API key policy")?;
                 if policy.version != 1
                     || policy.keys.len() > 128
                     || policy.keys.iter().any(|k| !valid_metadata(&k.metadata))
@@ -103,50 +100,27 @@ impl ApiKeys {
                 {
                     return Err("Invalid API key policy".into());
                 }
-                policy
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Policy {
-                version: 1,
-                keys: vec![],
+                Ok(policy)
             },
-            Err(_) => return Err("Cannot read API key policy".into()),
-        };
-        Ok(Self { path, policy })
-    }
-    fn persist(&self, policy: &Policy) -> Result<(), String> {
-        let temporary = self.path.with_extension(format!("{}.tmp", random()?));
-        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(&temporary)?;
-            file.write_all(&serde_json::to_vec(policy)?)?;
-            file.sync_all()?;
-            std::fs::rename(&temporary, &self.path)?;
-            #[cfg(unix)]
-            std::fs::File::open(self.path.parent().unwrap())?.sync_all()?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&temporary);
-        }
-        result.map_err(|_| "Could not persist API key policy".into())
+        )?;
+        Ok(Self {
+            database,
+            directory: directory.into(),
+            policy,
+        })
     }
     fn reload(&mut self) -> Result<(), String> {
         self.policy = Policy {
             version: 1,
             keys: vec![],
         };
-        self.policy = Self::open(self.path.parent().ok_or("Invalid API key policy path")?)?.policy;
+        self.policy = Self::open(self.database.clone(), &self.directory)?.policy;
         Ok(())
     }
     fn commit(&mut self, policy: Policy) -> Result<(), String> {
-        let result = self.persist(&policy);
-        // A failed directory fsync can follow a successful rename. Disk remains authoritative.
+        let result = crate::store::save(&self.database, "api-keys", &policy)
+            .map_err(|_| "Could not persist API key policy".to_string());
+        // The database stays authoritative, whether or not the write landed.
         self.reload()?;
         result
     }

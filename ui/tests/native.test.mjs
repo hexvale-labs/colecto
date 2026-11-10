@@ -33,7 +33,7 @@ test('native window starts with its loopback service and bundled registry', asyn
     const response = await fetch(`${url}/api/v1/extensions`, { headers: { authorization: `Bearer ${ownerToken}`, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' } });
     assert.equal(response.status, 200);
     const extensions = await response.json();
-    assert.equal(extensions.length, 4);
+    assert.equal(extensions.length, 5);
     assert.ok(extensions.every(extension => extension.bundled));
   } finally {
     child.kill('SIGTERM');

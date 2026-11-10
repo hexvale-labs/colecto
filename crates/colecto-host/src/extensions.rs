@@ -1,11 +1,8 @@
 //! Only immutable bundled packages may execute in the trusted application origin.
+use colecto_core::Database;
 use colecto_extension_api::{API_VERSION, Capability, ExtensionManifest, ExtensionState};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashSet,
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashSet, path::Path};
 
 fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
     let manifest: ExtensionManifest = toml::from_str(source).map_err(|e| e.to_string())?;
@@ -26,7 +23,11 @@ fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
     {
         return Err("Extension metadata cannot be empty".into());
     }
-    if !["shell", "mailbox", "reader", "composer", "panel"].contains(&manifest.slot.as_str()) {
+    if ![
+        "shell", "mailbox", "reader", "composer", "accounts", "panel",
+    ]
+    .contains(&manifest.slot.as_str())
+    {
         return Err("Unknown extension slot".into());
     }
     for (index, capability) in manifest.capabilities.iter().enumerate() {
@@ -62,7 +63,7 @@ struct Policy {
 pub struct Extensions {
     manifests: Vec<ExtensionManifest>,
     policy: Policy,
-    path: Option<PathBuf>,
+    database: Option<Database>,
     epoch: u64,
 }
 const MAX_FILE: u64 = 4 * 1024 * 1024;
@@ -73,6 +74,7 @@ impl Extensions {
             include_str!("../../../extensions/inbox/extension.toml"),
             include_str!("../../../extensions/reader/extension.toml"),
             include_str!("../../../extensions/composer/extension.toml"),
+            include_str!("../../../extensions/accounts/extension.toml"),
         ]
         .into_iter()
         .map(|source| parse_manifest(source).expect("valid bundled manifest"))
@@ -85,55 +87,58 @@ impl Extensions {
                 grants: vec![],
                 packages: vec![],
             },
-            path: None,
+            database: None,
             epoch: 0,
         }
     }
-    pub fn open(directory: &Path) -> Result<Self, String> {
+    pub fn open(database: Database, directory: &Path) -> Result<Self, String> {
         let mut extensions = Self::bundled();
-        let path = directory.join("extensions.json");
-        match std::fs::metadata(&path) {
-            Ok(metadata) => {
-                if metadata.len() > MAX_FILE {
-                    return Err("Extension policy too large".into());
-                }
-                let policy: Policy =
-                    serde_json::from_slice(&std::fs::read(&path).map_err(|e| e.to_string())?)
-                        .map_err(|e| e.to_string())?;
-                if policy.version != 1 || policy.packages.len() > 16 {
-                    return Err("Unsupported extension policy".into());
-                }
-                let mut ids: HashSet<String> =
-                    extensions.manifests.iter().map(|m| m.id.clone()).collect();
-                for package in &policy.packages {
-                    validate_package(&package.manifest, &package.module)?;
-                    if !ids.insert(package.manifest.id.clone()) {
-                        return Err("Duplicate extension ID".into());
-                    }
-                }
-                extensions.policy = policy;
-                let mut keys = HashSet::new();
-                for grant in &extensions.policy.grants {
-                    if !keys.insert((&grant.id, &grant.account))
-                        || !extensions.valid_grants(&grant.id, &grant.capabilities)
-                    {
-                        return Err("Invalid extension grants".into());
-                    }
-                }
-                if extensions
-                    .policy
-                    .disabled
-                    .iter()
-                    .any(|id| !ids.contains(id))
-                {
-                    return Err("Unknown disabled extension".into());
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-            Err(e) => return Err(e.to_string()),
-        }
-        extensions.path = Some(path);
+        let empty = extensions.policy.clone();
+        extensions.policy = crate::store::open(
+            &database,
+            directory,
+            "extensions",
+            Some(crate::store::Legacy {
+                max_bytes: MAX_FILE,
+                private: false,
+            }),
+            || empty,
+            |bytes| {
+                let policy: Policy = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+                extensions.check(&policy)?;
+                Ok(policy)
+            },
+        )?;
+        extensions.database = Some(database);
         Ok(extensions)
+    }
+    fn check(&self, policy: &Policy) -> Result<(), String> {
+        if policy.version != 1 || policy.packages.len() > 16 {
+            return Err("Unsupported extension policy".into());
+        }
+        let mut ids: HashSet<String> = self.manifests.iter().map(|m| m.id.clone()).collect();
+        for package in &policy.packages {
+            validate_package(&package.manifest, &package.module)?;
+            if !ids.insert(package.manifest.id.clone()) {
+                return Err("Duplicate extension ID".into());
+            }
+        }
+        let candidate = Self {
+            policy: policy.clone(),
+            ..self.clone()
+        };
+        let mut keys = HashSet::new();
+        for grant in &policy.grants {
+            if !keys.insert((&grant.id, &grant.account))
+                || !candidate.valid_grants(&grant.id, &grant.capabilities)
+            {
+                return Err("Invalid extension grants".into());
+            }
+        }
+        if policy.disabled.iter().any(|id| !ids.contains(id)) {
+            return Err("Unknown disabled extension".into());
+        }
+        Ok(())
     }
     fn manifest(&self, id: &str) -> Option<&ExtensionManifest> {
         self.manifests
@@ -150,43 +155,15 @@ impl Extensions {
         })
     }
     fn commit(&mut self, next: Self) -> Result<(), String> {
-        if let Some(path) = self.path.clone() {
-            let bytes = serde_json::to_vec(&next.policy).map_err(|e| e.to_string())?;
-            if bytes.len() as u64 > MAX_FILE {
+        if let Some(database) = &self.database {
+            if serde_json::to_vec(&next.policy)
+                .map_err(|e| e.to_string())?
+                .len() as u64
+                > MAX_FILE
+            {
                 return Err("Extension policy too large".into());
             }
-            let temporary = path.with_extension("json.tmp");
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            // A stale temporary file from a crash is never treated as committed state.
-            if temporary.exists() {
-                std::fs::remove_file(&temporary).map_err(|e| e.to_string())?;
-            }
-            let result = (|| -> std::io::Result<()> {
-                let mut file = options.open(&temporary)?;
-                file.write_all(&bytes)?;
-                file.sync_all()?;
-                std::fs::rename(&temporary, &path)
-            })();
-            if let Err(error) = result {
-                let _ = std::fs::remove_file(&temporary);
-                return Err(error.to_string());
-            }
-            // Rename is the commit point. Preserve the new state even when the
-            // subsequent durability check reports an error to the caller.
-            *self = next;
-            #[cfg(unix)]
-            std::fs::File::open(path.parent().ok_or("Policy directory missing")?)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|e| {
-                    format!("Policy committed but directory synchronization failed: {e}")
-                })?;
-            return Ok(());
+            crate::store::save(database, "extensions", &next.policy)?;
         }
         *self = next;
         Ok(())
@@ -369,7 +346,9 @@ mod tests {
     fn packages_and_revoked_grants_survive_restart_without_implicit_access() {
         let dir = tempfile::tempdir().unwrap();
         let module = wat::parse_str("(module (func (export \"run\")))").unwrap();
-        let mut extensions = Extensions::open(dir.path()).unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        let open = || Extensions::open(database.clone(), dir.path()).unwrap();
+        let mut extensions = open();
         extensions.install(&panel(), module.clone()).unwrap();
         assert!(extensions.module("example").is_none());
         assert!(!extensions.allows("example", "a", Capability::MessagesRead));
@@ -378,7 +357,7 @@ mod tests {
             .unwrap();
         extensions.update("composer", "a", true, vec![]).unwrap();
         drop(extensions);
-        let mut extensions = Extensions::open(dir.path()).unwrap();
+        let mut extensions = open();
         assert!(extensions.module("example").is_some());
         assert!(extensions.allows("example", "a", Capability::MessagesRead));
         assert!(!extensions.allows("example", "b", Capability::MessagesRead));
@@ -403,27 +382,24 @@ mod tests {
             extensions.module("example").unwrap().0
         ));
         extensions.remove("example").unwrap();
-        assert!(
-            !Extensions::open(dir.path())
-                .unwrap()
-                .list("a")
-                .iter()
-                .any(|s| s.manifest.id == "example")
-        );
+        assert!(!open().list("a").iter().any(|s| s.manifest.id == "example"));
     }
     #[test]
-    fn corrupt_policy_and_failed_writes_do_not_reset_or_escalate_permissions() {
+    fn corrupt_legacy_policy_fails_closed_and_stays_untouched() {
         let dir = tempfile::tempdir().unwrap();
-        let mut extensions = Extensions::open(dir.path()).unwrap();
-        std::fs::create_dir(dir.path().join("extensions.json.tmp")).unwrap();
-        assert!(extensions.update("reader", "a", false, vec![]).is_err());
-        assert!(extensions.allows("reader", "a", Capability::MessagesRead));
-        std::fs::remove_dir(dir.path().join("extensions.json.tmp")).unwrap();
+        let database = Database::open(dir.path()).unwrap();
         std::fs::write(dir.path().join("extensions.json"), "corrupt").unwrap();
-        assert!(Extensions::open(dir.path()).is_err());
+        assert!(Extensions::open(database.clone(), dir.path()).is_err());
         assert_eq!(
             std::fs::read_to_string(dir.path().join("extensions.json")).unwrap(),
             "corrupt"
         );
+        std::fs::write(
+            dir.path().join("extensions.json"),
+            r#"{"version":1,"disabled":["reader"],"grants":[],"packages":[]}"#,
+        )
+        .unwrap();
+        let extensions = Extensions::open(database, dir.path()).unwrap();
+        assert!(!extensions.allows("reader", "a", Capability::MessagesRead));
     }
 }

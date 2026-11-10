@@ -3,5 +3,5 @@ name = "Mail workspace"
 api_version = 1
 slot = "shell"
 capabilities = []
-description = "Mail navigation, account selection, and workspace layout."
+description = "Mail navigation, the command runner and the dockable workspace."
 author = "Colecto"
