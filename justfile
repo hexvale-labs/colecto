@@ -33,9 +33,9 @@ verify: fmt-check check lint test ui-check ui-unit ui-build
 setup-ui:
     cd ui && bun install --frozen-lockfile
 
-# Install Chromium for the browser tests (once per machine).
+# Install Chromium and WebKit for the browser tests (once per machine; WebKit also needs system libraries).
 setup-browser:
-    cd ui && bunx playwright install chromium
+    cd ui && bunx playwright install --with-deps chromium webkit
 
 # Check Svelte components and TypeScript.
 ui-check:
@@ -73,6 +73,30 @@ native-check:
 # Build the Tauri desktop executable without starting it.
 native-build: ui-build
     cargo build -p colecto-host --features native --locked
+
+# Tauri's generator also emits Android, iOS and macOS sets; copy those in when those targets exist.
+# Regenerate the desktop app icons from the single source, crates/colecto-host/icons/icon.svg.
+icons:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
+    bunx --bun @tauri-apps/cli@2.9.4 icon crates/colecto-host/icons/icon.svg -o "$out" > /dev/null
+    cp "$out"/{32x32.png,128x128.png,128x128@2x.png,icon.png,icon.ico} crates/colecto-host/icons/
+
+# Install the Linux desktop entry and icons for the native build. Wayland shells take the window icon from here.
+desktop-install: native-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')
+    data="${XDG_DATA_HOME:-$HOME/.local/share}"
+    for size in 32x32 128x128 256x256; do
+      file=crates/colecto-host/icons/$size.png; [ "$size" = 256x256 ] && file=crates/colecto-host/icons/128x128@2x.png
+      install -Dm644 "$file" "$data/icons/hicolor/$size/apps/app.colecto.mail.png"
+    done
+    install -Dm644 crates/colecto-host/icons/icon.svg "$data/icons/hicolor/scalable/apps/app.colecto.mail.svg"
+    mkdir -p "$data/applications"
+    sed "s|^Exec=.*|Exec=$target/debug/colecto-host|" packaging/linux/app.colecto.mail.desktop > "$data/applications/app.colecto.mail.desktop"
+    echo "Installed Colecto desktop entry in $data/applications"
 
 # Linux/X11 native launch smoke check (requires xvfb and xwininfo).
 native-test: native-build

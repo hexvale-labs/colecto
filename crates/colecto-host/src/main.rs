@@ -57,12 +57,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .title("Colecto")
                         .inner_size(1200.0, 800.0)
                         .on_navigation(move |destination| {
-                            destination
-                                .as_str()
-                                .starts_with(&format!("http://{authority}/"))
-                                || (destination.scheme() == "https"
-                                    && destination.username().is_empty()
-                                    && destination.password().is_none())
+                            colecto_host::runtime::native_navigation_allowed(
+                                &authority,
+                                destination,
+                            )
                         })
                         .build()?;
                     Ok(())

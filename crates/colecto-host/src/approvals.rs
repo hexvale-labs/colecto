@@ -1,11 +1,9 @@
 //! Durable, immutable automation delivery requests.
 use crate::api_keys::random;
+use colecto_core::Database;
 use colecto_extension_api::DraftInput;
 use serde::{Deserialize, Serialize};
-use std::{
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::path::Path;
 
 const RETENTION: u64 = 24 * 60 * 60;
 const MAX_REQUESTS: usize = 128;
@@ -38,74 +36,49 @@ struct Journal {
     requests: Vec<PendingSend>,
 }
 pub struct Approvals {
-    path: PathBuf,
+    database: Database,
     journal: Journal,
 }
 impl Approvals {
-    pub fn open(directory: &Path, now: u64) -> Result<Self, String> {
-        let path = directory.join("send-approvals.json");
-        let mut journal: Journal = match std::fs::symlink_metadata(&path) {
-            Ok(meta) => {
-                if !meta.is_file() || meta.len() > 16_000_000 {
-                    return Err("Invalid approval journal".into());
-                }
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if meta.permissions().mode() & 0o077 != 0 {
-                        return Err("Approval journal must be private".into());
-                    }
-                }
-                serde_json::from_slice(
-                    &std::fs::read(&path).map_err(|_| "Cannot read approval journal")?,
-                )
-                .map_err(|_| "Invalid approval journal")?
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Journal {
+    pub fn open(database: Database, directory: &Path, now: u64) -> Result<Self, String> {
+        let mut journal = crate::store::open(
+            &database,
+            directory,
+            "send-approvals",
+            Some(crate::store::Legacy {
+                max_bytes: 16_000_000,
+                private: true,
+            }),
+            || Journal {
                 version: 1,
                 requests: vec![],
             },
-            Err(_) => return Err("Cannot read approval journal".into()),
-        };
-        if journal.version != 1 || journal.requests.len() > MAX_REQUESTS {
-            return Err("Invalid approval journal".into());
-        }
+            |bytes| {
+                let journal: Journal =
+                    serde_json::from_slice(bytes).map_err(|_| "Invalid approval journal")?;
+                if journal.version != 1 || journal.requests.len() > MAX_REQUESTS {
+                    return Err("Invalid approval journal".into());
+                }
+                Ok(journal)
+            },
+        )?;
         for request in &mut journal.requests {
             if request.status == Status::Submitting {
                 request.status = Status::Uncertain;
             }
         }
-        let mut result = Self { path, journal };
+        let mut result = Self { database, journal };
         result.maintain(now)?;
         // Persist crash recovery before accepting new decisions.
         result.persist(&result.journal)?;
         Ok(result)
     }
     fn persist(&self, journal: &Journal) -> Result<(), String> {
-        let temporary = self.path.with_extension(format!("{}.tmp", random()?));
-        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(&temporary)?;
-            file.write_all(&serde_json::to_vec(journal)?)?;
-            file.sync_all()?;
-            std::fs::rename(&temporary, &self.path)?;
-            #[cfg(unix)]
-            std::fs::File::open(self.path.parent().unwrap())?.sync_all()?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(temporary);
-        }
-        result.map_err(|_| "Could not persist delivery request; do not retry delivery".into())
+        crate::store::save(&self.database, "send-approvals", journal)
+            .map_err(|_| "Could not persist delivery request; do not retry delivery".into())
     }
     fn commit(&mut self, journal: Journal) -> Result<(), String> {
-        // Keep the advanced state even if a directory sync fails after rename.
+        // Keep the advanced state even if the write fails, so a submitting request is never retried.
         self.journal = journal;
         self.persist(&self.journal)
     }
@@ -255,7 +228,8 @@ mod tests {
     #[test]
     fn snapshot_replay_expiry_and_crash() {
         let dir = tempfile::tempdir().unwrap();
-        let mut approvals = Approvals::open(dir.path(), 10).unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        let mut approvals = Approvals::open(database.clone(), dir.path(), 10).unwrap();
         let mut draft = input();
         let request = approvals
             .create("key", "account", "from@example.test", draft.clone(), 10)
@@ -274,7 +248,7 @@ mod tests {
         assert_eq!(snapshot.body, "original");
         assert!(approvals.begin(&request.id, 11).is_err());
         drop(approvals);
-        let mut approvals = Approvals::open(dir.path(), 12).unwrap();
+        let mut approvals = Approvals::open(database.clone(), dir.path(), 12).unwrap();
         assert_eq!(
             approvals.get(&request.id, 12).unwrap().status,
             Status::Uncertain
@@ -293,7 +267,8 @@ mod tests {
     #[test]
     fn bounds_and_validation_prevent_unreviewable_requests() {
         let dir = tempfile::tempdir().unwrap();
-        let mut approvals = Approvals::open(dir.path(), 10).unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        let mut approvals = Approvals::open(database.clone(), dir.path(), 10).unwrap();
         let mut invalid = input();
         invalid.recipient = "not-an-address".into();
         let mut forward = input();
@@ -329,7 +304,8 @@ mod tests {
     #[test]
     fn rejected_and_failed_submission_never_replay() {
         let dir = tempfile::tempdir().unwrap();
-        let mut approvals = Approvals::open(dir.path(), 10).unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        let mut approvals = Approvals::open(database.clone(), dir.path(), 10).unwrap();
         let a = approvals
             .create("key", "account", "from", input(), 10)
             .unwrap();
@@ -348,7 +324,7 @@ mod tests {
         approvals.begin(&c.id, 11).unwrap();
         approvals.finish(&c.id, true).unwrap();
         drop(approvals);
-        let mut approvals = Approvals::open(dir.path(), 12).unwrap();
+        let mut approvals = Approvals::open(database.clone(), dir.path(), 12).unwrap();
         assert_eq!(approvals.get(&c.id, 12).unwrap().status, Status::Sent);
         assert!(approvals.begin(&c.id, 12).is_err());
     }

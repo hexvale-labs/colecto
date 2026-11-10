@@ -35,6 +35,23 @@ impl SecretStore for Secrets {
         Ok(())
     }
 }
+/// Change the fixture key's stored policy, as another owner session would.
+fn edit_keys(database: &colecto_core::Database, id: &str, change: impl FnOnce(&mut Value)) {
+    let mut policy: Value =
+        serde_json::from_slice(&database.get_record("host", "api-keys", 1).unwrap().unwrap())
+            .unwrap();
+    change(
+        policy["keys"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|key| key["metadata"]["id"] == id)
+            .unwrap(),
+    );
+    database
+        .set_record("host", "api-keys", 1, &serde_json::to_vec(&policy).unwrap())
+        .unwrap();
+}
 struct Fixture {
     dir: tempfile::TempDir,
     backend: Arc<Secrets>,
@@ -50,7 +67,12 @@ impl Fixture {
         let mut accounts =
             Accounts::open(MailStore::open(dir.path()).unwrap(), backend.clone()).unwrap();
         let account = accounts.upsert(serde_json::from_value(json!({"address":"from@example.test","protocol":"jmap","imap_host":"localhost","smtp_host":"localhost","smtp_port":587,"session_url":format!("https://127.0.0.1:{port}/session"),"username":"from","secret":"fixture-secret"})).unwrap()).unwrap().id;
-        let mut keys = ApiKeys::open(dir.path()).unwrap();
+        let database = accounts.database();
+        let mut keys = ApiKeys::open(database.clone(), dir.path()).unwrap();
+        // MCP is off by default; these tests exercise it, so the owner has turned it on.
+        database
+            .set_record("host", "preferences", 1, br#"{"mcp":true}"#)
+            .unwrap();
         let input = || KeyInput {
             name: "Fixture".into(),
             accounts: vec![account.clone(), "demo".into()],
@@ -266,7 +288,7 @@ async fn revocation_disconnect_and_expiry_prevent_submission() {
             response(router.clone(), f.req(&f.secret, "POST", "/send", message())).await;
         let mut id = pending["id"].as_str().unwrap().to_owned();
         match reason {
-            "revoked" => ApiKeys::open(f.dir.path())
+            "revoked" => ApiKeys::open(service.database(), f.dir.path())
                 .unwrap()
                 .revoke(&f.key, now())
                 .unwrap(),
@@ -282,16 +304,9 @@ async fn revocation_disconnect_and_expiry_prevent_submission() {
                 );
             }
             "missing-grant" => {
-                let path = f.dir.path().join("api-keys.json");
-                let mut policy: Value =
-                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-                policy["keys"]
-                    .as_array_mut()
-                    .unwrap()
-                    .iter_mut()
-                    .find(|key| key["metadata"]["id"] == f.key)
-                    .unwrap()["metadata"]["capabilities"] = json!(["messages.list"]);
-                std::fs::write(path, serde_json::to_vec(&policy).unwrap()).unwrap();
+                edit_keys(&service.database(), &f.key, |key| {
+                    key["metadata"]["capabilities"] = json!(["messages.list"])
+                });
             }
             "disconnected" => {
                 assert_eq!(
@@ -312,8 +327,10 @@ async fn revocation_disconnect_and_expiry_prevent_submission() {
             _ => {
                 drop(router);
                 drop(service);
+                let database = colecto_core::Database::open(f.dir.path()).unwrap();
                 let mut approvals =
-                    colecto_host::approvals::Approvals::open(f.dir.path(), now()).unwrap();
+                    colecto_host::approvals::Approvals::open(database, f.dir.path(), now())
+                        .unwrap();
                 id = approvals
                     .create(
                         &f.key,
@@ -324,6 +341,7 @@ async fn revocation_disconnect_and_expiry_prevent_submission() {
                     )
                     .unwrap()
                     .id;
+                drop(approvals);
                 let router = f.service("127.0.0.1:4173").router();
                 assert_eq!(
                     response(
@@ -512,21 +530,15 @@ async fn sdk_interop(expire: bool) {
         .unwrap();
     assert!(!result.is_error.unwrap_or(false));
     if expire {
-        let path = f.dir.path().join("api-keys.json");
-        let mut policy: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         let expires_at = now() + 1;
-        policy["keys"]
-            .as_array_mut()
-            .unwrap()
-            .iter_mut()
-            .find(|key| key["metadata"]["id"] == f.key)
-            .unwrap()["metadata"]["expires_at"] = json!(expires_at);
-        std::fs::write(path, serde_json::to_vec(&policy).unwrap()).unwrap();
+        edit_keys(&service.database(), &f.key, |key| {
+            key["metadata"]["expires_at"] = json!(expires_at)
+        });
         while now() < expires_at {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
     } else {
-        ApiKeys::open(f.dir.path())
+        ApiKeys::open(service.database(), f.dir.path())
             .unwrap()
             .revoke(&f.key, now())
             .unwrap();

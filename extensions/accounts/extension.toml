@@ -1,0 +1,7 @@
+id = "accounts"
+name = "Account switcher"
+api_version = 1
+slot = "accounts"
+capabilities = []
+description = "Switch between connected accounts and see their connection status."
+author = "Colecto"

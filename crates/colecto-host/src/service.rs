@@ -77,6 +77,18 @@ struct Authentication {
     policy: AccessPolicy,
     keys: Arc<Mutex<ApiKeys>>,
 }
+/// MCP stays off until the owner turns it on, and answers as if it did not exist meanwhile.
+async fn mcp_enabled(State(host): State<Host>, request: Request, next: Next) -> Response {
+    if host.preferences.lock().is_ok_and(|p| p.get().mcp) {
+        next.run(request).await
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({"error":"MCP is turned off. Turn it on in Settings → API keys."})),
+        )
+            .into_response()
+    }
+}
 async fn authenticate(
     State(auth): State<Authentication>,
     mut request: Request,
@@ -171,19 +183,26 @@ impl MailService {
                     .map_err(|error| error.to_string())?,
             )));
         }
-        let extensions = crate::extensions::Extensions::open(accounts.data_directory())
-            .map_err(|e| e.to_string())?;
-        let keys = Arc::new(Mutex::new(ApiKeys::open(accounts.data_directory())?));
+        let database = accounts.database();
+        let directory = accounts.data_directory();
+        let extensions = crate::extensions::Extensions::open(database.clone(), directory)?;
+        let keys = Arc::new(Mutex::new(ApiKeys::open(database.clone(), directory)?));
+        let preferences = Arc::new(Mutex::new(crate::preferences::PreferenceStore::open(
+            database.clone(),
+            directory,
+        )?));
         let auth = Authentication {
             policy: policy.clone(),
             keys: keys.clone(),
         };
         let approvals = Arc::new(Mutex::new(crate::approvals::Approvals::open(
-            accounts.data_directory(),
+            database,
+            directory,
             api_keys::now(),
         )?));
         let host = Host {
             approvals,
+            preferences,
             status_polls: Arc::default(),
             keys,
             accounts: Arc::new(Mutex::new(accounts)),
@@ -196,7 +215,11 @@ impl MailService {
         let stream_events = events.clone();
         let (closing, stopped) = tokio::sync::watch::channel(false);
         let router = build_app(host.clone(), assets)
-            .nest_service("/api/v1/mcp", crate::mcp::http(host.clone()))
+            .merge(
+                Router::new()
+                    .nest_service("/api/v1/mcp", crate::mcp::http(host.clone()))
+                    .layer(middleware::from_fn_with_state(host.clone(), mcp_enabled)),
+            )
             .route(
                 "/api/v1/events",
                 get(move |headers: axum::http::HeaderMap| {
@@ -257,6 +280,13 @@ impl MailService {
     }
     pub fn router(&self) -> Router {
         self.router.clone()
+    }
+    /// The shared application database, for callers that own this service's lifecycle.
+    pub fn database(&self) -> colecto_core::Database {
+        self.host
+            .accounts
+            .lock()
+            .map_or_else(|e| e.into_inner().database(), |a| a.database())
     }
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String> {
         self.events.subscribe()

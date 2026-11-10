@@ -1,3 +1,8 @@
+<script lang="ts" module>
+  /** Lets Settings show or hide an extension's pane in the dockable workspace. */
+  export interface Workspace { shown: (pane: string) => boolean; toggle: (pane: string, on: boolean) => void }
+  const bundledPanes: Record<string, string> = { inbox: 'mailbox', reader: 'reader', accounts: 'accounts' };
+</script>
 <script lang="ts">
   import { onMount } from 'svelte';
   import MailShell from './extensions/MailShell.svelte';
@@ -66,7 +71,7 @@
   });
 </script>
 
-{#snippet extensionSettings()}
+{#snippet extensionSettings(workspace?: Workspace)}
   <section class="extension-settings" aria-labelledby="extensions-title">
     <header class="section-head"><h2 id="extensions-title">Extensions</h2><p>Turn extensions on or off and decide which account data each one may use. Changes apply to new requests and are kept across restarts.</p></header>
     <form class="settings-card" onsubmit={install}>
@@ -85,6 +90,7 @@
       <div class="field-row"><span class="row-label" id="permission-account-label">Permissions for</span><Select label="Permissions for account" value={account} disabled={busy || loading} options={accounts.map(item => ({ value: item.id, label: item.settings?.name || item.settings?.address || 'Demo account' }))} onchange={(next) => { account = next; void reload(); }} /></div>
     </div>
     {#each extensions as extension (extension.manifest.id)}
+      {@const pane = extension.bundled ? bundledPanes[extension.manifest.id] : extension.manifest.slot === 'panel' ? `ext:${extension.manifest.id}` : undefined}
       <fieldset class="settings-card extension-card" class:off={!extension.enabled} disabled={busy || loading}>
         <legend class="sr-only">{extension.manifest.name}</legend>
         <div class="extension-top">
@@ -93,6 +99,7 @@
           <label class="switch"><input type="checkbox" checked={extension.enabled} onchange={(event) => void update(extension, event.currentTarget.checked, extension.grants)} /><span class="sr-only">Enabled for all accounts</span></label>
         </div>
         <p class="extension-description">{extension.manifest.description}</p>
+        {#if workspace && pane && extension.enabled}<label class="choice show-pane"><input type="checkbox" checked={workspace.shown(pane)} onchange={(event) => workspace.toggle(pane, event.currentTarget.checked)} />Show in the workspace</label>{/if}
         {#if extension.manifest.capabilities.length}<div class="grants"><span class="grants-title">Account access</span>{#each extension.manifest.capabilities as capability}
           <label class="choice"><input type="checkbox" checked={extension.grants.includes(capability)} onchange={(event) => void update(extension, extension.enabled, event.currentTarget.checked ? [...extension.grants, capability] : extension.grants.filter(c => c !== capability))} /> <code>{capability}</code></label>
         {/each}</div>{/if}
@@ -111,7 +118,7 @@
 {:else if loading}
   <p class="boot" role="status">Loading extensions…</p>
 {:else if extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}
-  <svelte:boundary>
+  <svelte:boundary onerror={(failure) => console.error('Mail workspace failed', failure)}>
     <MailShell extensionStates={extensions} {extensionSettings} onsettings={() => void reload()} />
     {#snippet failed(failure, reset)}<div class="error-box" role="alert">Mail workspace failed. Your saved mail remains in Core services.<button class="secondary" onclick={reset}>Retry workspace</button><button class="secondary" onclick={manage}>Extensions</button></div>{/snippet}
   </svelte:boundary>

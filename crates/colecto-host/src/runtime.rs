@@ -296,3 +296,41 @@ pub fn owner_initialization_script(origin: &str, token: &str) -> String {
         serde_json::to_string(token).expect("serialize owner credential")
     )
 }
+
+/// Whether the native window may load `destination`. WebKitGTK also asks for
+/// subframe loads, so the reader's sandboxed `about:srcdoc` mail frame must pass.
+pub fn native_navigation_allowed(authority: &str, destination: &reqwest::Url) -> bool {
+    destination
+        .as_str()
+        .starts_with(&format!("http://{authority}/"))
+        || destination.as_str() == "about:srcdoc"
+        || (destination.scheme() == "https"
+            && destination.username().is_empty()
+            && destination.password().is_none())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::native_navigation_allowed;
+
+    #[test]
+    fn native_navigation_allows_the_service_mail_frames_and_plain_https_only() {
+        let allowed =
+            |url: &str| native_navigation_allowed("127.0.0.1:4173", &url.parse().unwrap());
+        assert!(allowed("http://127.0.0.1:4173/"));
+        assert!(allowed("about:srcdoc"));
+        assert!(allowed("https://purelymail.com/docs/"));
+        for denied in [
+            "http://127.0.0.1:4174/",
+            "http://127.0.0.1:41730/",
+            "http://example.com/",
+            "https://user:pass@example.com/",
+            "about:blank",
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "file:///etc/passwd",
+        ] {
+            assert!(!allowed(denied), "{denied} must stay blocked");
+        }
+    }
+}

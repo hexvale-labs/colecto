@@ -30,7 +30,7 @@ Wasm runtime.
 - Desktop (Tauri), browser and mobile targets share one service boundary.
 - Accounts, labels, drafts, search, open-message tabs, a command palette, API keys
   and human send approvals exist today.
-- Panes can be docked left, center, right or bottom, tabbed together and resized,
+- Panes split and tab together like a game engine's editor panels, and resize freely,
   so each pane must work in tall, wide and in-between slots.
 
 ## Brand Commitments

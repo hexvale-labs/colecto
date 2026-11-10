@@ -1,6 +1,6 @@
 <script lang="ts">
   import CommandRunner from '../CommandRunner.svelte';
-  import type { Command } from '../CommandRunner.svelte';
+  import type { Command, MessageHit } from '../CommandRunner.svelte';
   import type { Labels } from '../lib/api';
   import { initial, hue } from '../lib/initial';
   import Icon from '../Icon.svelte';
@@ -11,17 +11,19 @@
   import { onMount, tick } from 'svelte';
   import ExtensionPanel from '../ExtensionPanel.svelte';
   import DockArea, { type PaneInfo } from '../DockArea.svelte';
-  import { defaultLayout, docks, dockOf, loadLayout, move, reconcile, saveLayout, type Dock, type Layout } from '../lib/layout';
+  import { activate as showPane, defaultLayout, dock, dockEdge, groupOf, parseLayout, reconcile, setVisible, type Edge, type Layout } from '../lib/layout';
   import { mailExtensions } from './registry';
   import ApiKeys from '../ApiKeys.svelte';
   import SendApprovals from '../SendApprovals.svelte';
   import AccountSettings from '../AccountSettings.svelte';
   import { createServices, hostService } from '../lib/api';
   import type { Draft, MailItem, AccountInfo, SecurityInfo } from '../lib/api';
-  let { extensionStates, extensionSettings, onsettings }: { extensionSettings: import('svelte').Snippet; onsettings: () => void; extensionStates: import('../lib/api').ExtensionState[] } = $props();
+  import type { Workspace } from '../App.svelte';
+  let { extensionStates, extensionSettings, onsettings }: { extensionSettings: import('svelte').Snippet<[Workspace?]>; onsettings: () => void; extensionStates: import('../lib/api').ExtensionState[] } = $props();
   let Mailbox = $derived(extensionStates.find(e => e.manifest.id === 'inbox')?.enabled ? mailExtensions.inbox : null);
   let Reader = $derived(extensionStates.find(e => e.manifest.id === 'reader')?.enabled ? mailExtensions.reader : null);
   let Composer = $derived(extensionStates.find(e => e.manifest.id === 'composer')?.enabled ? mailExtensions.composer : null);
+  let switcher = $derived(!!extensionStates.find(e => e.manifest.id === 'accounts')?.enabled);
   type View = { kind: 'message'; id: string; folder: 'Inbox' | 'Sent' } | { kind: 'draft'; draft: Draft | null } | null;
   let connected = $state(false);
   let initialized = $state(false);
@@ -62,6 +64,9 @@
       if (document.querySelector('dialog[open]:not(.command-runner)')) return;
       event.preventDefault(); runner.open();
     }
+    // A bare "c" composes, unless the user is typing or a dialog is open.
+    const target = event.target as HTMLElement | null;
+    if (event.key === 'c' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat && !target?.closest('input, textarea, select, [contenteditable], dialog, [role="listbox"]')) { event.preventDefault(); compose(); }
   }
   let serverUrl = $state('');
   let serverError = $state('');
@@ -88,24 +93,42 @@
 
   // Panes are extension surfaces placed in docks. Hidden panes stay mounted, so moving or switching never loses a draft.
   let thirdParty = $derived(extensionStates.filter(extension => !extension.bundled && extension.enabled));
-  let panes: PaneInfo[] = $derived([{ id: 'mailbox', title: 'Mail', icon: 'inbox' }, { id: 'reader', title: 'Reader', icon: 'mail' }, ...thirdParty.map(extension => ({ id: `ext:${extension.manifest.id}`, title: extension.manifest.name, icon: 'extension' as const }))]);
-  let savedLayout = $state<Layout>(loadLayout());
+  let panes: PaneInfo[] = $derived([
+    { id: 'mailbox', title: 'Mail', icon: 'inbox' }, { id: 'reader', title: 'Reader', icon: 'mail' },
+    ...(switcher ? [{ id: 'accounts', title: 'Accounts', icon: 'account' as const }] : []),
+    ...thirdParty.map(extension => ({ id: `ext:${extension.manifest.id}`, title: extension.manifest.name, icon: 'extension' as const })),
+  ]);
+  // The layout lives in the Host's Turso preferences, so it follows the owner to every device.
+  let savedLayout = $state<Layout>(defaultLayout());
+  let layoutReady = $state(false);
   let layout = $derived(reconcile(savedLayout, panes.map(pane => pane.id)));
   let focus = $state('mailbox');
   let compact = $state(false);
   let panelRuns = $state<Record<string, number>>({});
-  function commitLayout(next: Layout) { savedLayout = next; saveLayout(next); }
-  function activate(pane: string) {
-    focus = pane;
-    const dock = dockOf(layout, pane);
-    if (dock && layout.active[dock] !== pane) commitLayout({ ...layout, active: { ...layout.active, [dock]: pane } });
+  let unsaved: Layout | null = null;
+  let saving = false;
+  function commitLayout(next: Layout) {
+    if (next === layout) return;
+    savedLayout = next; unsaved = next;
+    // Resizing commits many times a second: keep one save in flight and always finish on the latest layout.
+    if (saving) return;
+    saving = true;
+    void (async () => {
+      while (unsaved) {
+        const workspace = unsaved; unsaved = null;
+        await hostService.savePreferences({ workspace }).catch(() => { /* The layout still applies for this session. */ });
+      }
+      saving = false;
+    })();
   }
+  function activate(pane: string) { focus = pane; commitLayout(showPane(layout, pane)); }
   function openPanel(id: string) {
     if (settingsOpen) { if (!canLeave()) return; settingsOpen = false; void loadList(); }
     // Each explicit open runs the panel again, so it reflects permission changes.
     panelRuns[id] = (panelRuns[id] ?? 0) + 1; activate(`ext:${id}`);
   }
-  const dockNames: Record<Dock, string> = { left: 'left', center: 'center', right: 'right', bottom: 'bottom' };
+  const shownPane = (pane: string) => !!groupOf(layout, pane);
+  const workspace: Workspace = { shown: shownPane, toggle: (pane, on) => commitLayout(setVisible(layout, pane, on)) };
   let accountError = $state('');
   let services = $derived(createServices(accountId));
   let activeAccount = $derived(accounts.find(a => a.id === accountId));
@@ -121,7 +144,8 @@
   function selectAccount(next: string) {
     if (!accounts.some(account => account.id === next) || !canLeave()) return;
     clearView(); invalidateList(); items = []; fetchedAt = null; labels = {}; labelFilter = ''; labelError = '';
-    accountId = next; try { localStorage.setItem('colecto.account', next); } catch { /* Selection persistence is optional. */ } connected = accounts.find(a => a.id === next)?.connected ?? false;
+    accountId = next; void hostService.savePreferences({ account: next }).catch(() => { /* Selection still applies for this session. */ });
+    connected = accounts.find(a => a.id === next)?.connected ?? false;
     settingsOpen = false; query = ''; folder = 'Inbox'; void loadList();
   }
   function manageAccounts() {
@@ -148,17 +172,35 @@
   let listGeneration = 0;
   let openGeneration = 0;
   let selected = $derived(view?.kind === 'message' ? view.id : view?.kind === 'draft' ? view.draft?.id ?? null : null);
-  let visibleItems = $derived(labelFilter ? items.filter(item => labels[labelFilter]?.includes(item.id)) : items);
+  const sorts = { newest: 'Newest first', oldest: 'Oldest first', sender: 'Sender A–Z', subject: 'Subject A–Z' } as const;
+  type Sort = keyof typeof sorts;
+  let sort = $state<Sort>('newest');
+  // Providers list newest first, so date order is the list order; parsing dates would misplace short ones.
+  let visibleItems = $derived.by(() => {
+    const filtered = labelFilter ? items.filter(item => labels[labelFilter]?.includes(item.id)) : items;
+    if (sort === 'newest') return filtered;
+    if (sort === 'oldest') return filtered.slice().reverse();
+    const key = (item: MailItem) => (sort === 'sender' ? item.name : item.subject).toLocaleLowerCase();
+    return filtered.slice().sort((a, b) => key(a).localeCompare(key(b)));
+  });
+  let hits: MessageHit[] = $derived(items.map(item => ({ id: item.id, name: item.name, subject: item.subject, preview: item.preview })));
+  function searchFor(text: string) { query = text; void searchMail().then(() => { if (!busy && !labeling) void loadList(); }); }
   let commands: Command[] = $derived([
     { id: 'compose', name: 'Compose a new message', run: () => compose(), disabled: !Composer },
     ...(['Inbox', 'Drafts', 'Sent'] as const).map(next => ({ id: next, name: `Go to ${next}`, run: () => navigate(next) })),
     { id: 'search', name: 'Search emails', run: () => void searchMail(), disabled: !Mailbox },
+    ...(Object.keys(sorts) as Sort[]).filter(next => next !== sort).map(next => ({ id: `sort-${next}`, name: `Sort: ${sorts[next]}`, run: () => { sort = next; activate('mailbox'); }, disabled: !Mailbox })),
+    ...(labelFilter || sort !== 'newest' || appliedQuery ? [{ id: 'clear-filters', name: 'Clear search, sorting and filters', run: () => { sort = 'newest'; labelFilter = ''; if (appliedQuery) { query = ''; void loadList(); } } }] : []),
     { id: 'new-label', name: 'Create a local label', run: () => void searchMail('new-label'), disabled: !Reader },
     ...Object.keys(labels).filter(() => view?.kind === 'message').map(name => ({ id: `assign-${name}`, name: `${labels[name].includes(view?.kind === 'message' ? view.id : '') ? 'Remove' : 'Add'} label: ${name}`, run: () => { if (view?.kind === 'message') void label(name, view.id, labels[name].includes(view.id)); }, disabled: loading })),
     { id: 'refresh', name: 'Refresh current mailbox', run: () => void loadList(), disabled: settingsOpen },
     { id: 'back', name: 'Back to message list', run: back },
     ...settingsPages.map(({ name: page }) => ({ id: `settings-${page}`, name: `Settings: ${page}`, run: () => { manageAccounts(); if (settingsOpen && !dirty) settingsTab(page); } })),
-    ...panes.flatMap(pane => docks.filter(dock => dockOf(layout, pane.id) !== dock).map(dock => ({ id: `move-${pane.id}-${dock}`, name: `Layout: Move ${pane.title} to the ${dockNames[dock]} dock`, run: () => { commitLayout(move(layout, pane.id, dock)); focus = pane.id; }, disabled: settingsOpen || compact }))),
+    ...panes.flatMap(pane => [
+      ...(['left', 'right', 'top', 'bottom'] as Edge[]).map(edge => ({ id: `edge-${pane.id}-${edge}`, name: `Layout: Dock ${pane.title} along the ${edge} edge`, run: () => { commitLayout(dockEdge(layout, pane.id, edge)); focus = pane.id; }, disabled: settingsOpen || compact })),
+      ...panes.filter(other => other.id !== pane.id && shownPane(other.id) && groupOf(layout, other.id) !== groupOf(layout, pane.id)).map(other => ({ id: `tab-${pane.id}-${other.id}`, name: `Layout: Put ${pane.title} in a tab beside ${other.title}`, run: () => { const group = groupOf(layout, other.id); if (group) commitLayout(dock(layout, pane.id, group.id, 'center')); }, disabled: settingsOpen || compact })),
+      { id: `show-${pane.id}`, name: `Layout: ${shownPane(pane.id) ? 'Hide' : 'Show'} ${pane.title}`, run: () => commitLayout(setVisible(layout, pane.id, !shownPane(pane.id))), disabled: settingsOpen },
+    ]),
     { id: 'layout-reset', name: 'Layout: Reset to default', run: () => commitLayout(defaultLayout()), disabled: settingsOpen || compact },
     ...accounts.map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
     ...currentTabs.map(tab => ({ id: `tab-${tab.id}`, name: `Open message: ${tab.subject}`, run: () => activateTab(tab) })),
@@ -234,9 +276,10 @@
   onMount(() => {
     const narrow = window.matchMedia('(max-width: 800px)');
     const sync = () => compact = narrow.matches; sync(); narrow.addEventListener('change', sync);
-    void refreshAccounts().then(() => {
-      let remembered = ''; try { remembered = localStorage.getItem('colecto.account') ?? ''; } catch { /* Storage can be disabled. */ }
-      if (accounts.some(a => a.id === remembered)) accountId = remembered;
+    const preferences = hostService.preferences().catch(() => null);
+    void preferences.then(saved => { savedLayout = parseLayout(saved?.workspace); layoutReady = true; });
+    void Promise.all([refreshAccounts(), preferences]).then(([, saved]) => {
+      if (accounts.some(a => a.id === saved?.account)) accountId = saved!.account!;
       connected = accounts.find(a => a.id === accountId)?.connected ?? false;
     }).catch(e => accountError = (e as Error).message).finally(() => { initialized = true; void loadList(); });
     return () => narrow.removeEventListener('change', sync);
@@ -244,19 +287,25 @@
 </script>
 
 <svelte:window onbeforeunload={beforeUnload} onkeydown={keyboard} />
-<CommandRunner bind:this={runner} {commands} />
+<CommandRunner bind:this={runner} {commands} messages={Mailbox ? hits : []} scope={folder} onopen={(id) => void open(id)} onsearch={Mailbox ? searchFor : undefined} />
+{#snippet accountSwitcher(placement: 'above' | 'below')}
+  <Select label="Current account" value={accountId} options={accountOptions} disabled={busy || !initialized} {placement} onchange={selectAccount}>
+    {#snippet trigger(current)}
+      <span class="avatar" style:--hue={hue(current?.label ?? accountLabel)} aria-hidden="true">{initial(current?.label ?? accountLabel)}</span>
+      <span class="account-name"><span class="account-title">{current?.label ?? accountLabel}</span><small><span class="status-dot" class:on={connected && !security.locked} aria-hidden="true"></span><span class="status-text">{security.locked ? 'Credentials locked' : activeAccount?.configured ? connected ? 'Connected' : 'Not connected' : 'Local sample mail'}</span></small></span>
+    {/snippet}
+  </Select>
+{/snippet}
+{#snippet composeButton(labelled: boolean)}
+  <button class={labelled ? 'compose-button' : 'compose-icon'} aria-label="Compose" title="Compose  C" disabled={busy || !initialized || !Composer} onclick={() => compose()}><Icon name="compose" />{#if labelled}<span>Compose</span>{/if}</button>
+{/snippet}
 <div class="app-shell" class:settings-open={settingsOpen} class:compact>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="Colecto, go to Inbox" onclick={(event) => { event.preventDefault(); navigate('Inbox'); }}><img class="brand-mark" src={mark} alt="" width="26" height="26" /><img class="brand-word" src={wordmark} alt="" width="69" height="16" /></a>
-    <button class="command-trigger" aria-label="Commands" title="Commands  Ctrl K" onclick={() => runner.open()}><Icon name="command" size={15} /><span class="command-hint">Jump to anything</span><span class="command-keys" aria-hidden="true"><kbd>Ctrl</kbd><kbd>K</kbd></span></button>
+    <a class="brand" href="/" aria-label="Colecto, go to Inbox" onclick={(event) => { event.preventDefault(); navigate('Inbox'); }}><img class="brand-mark" src={mark} alt="" width="24" height="24" /><img class="brand-word" src={wordmark} alt="" width="69" height="16" /></a>
+    <button class="command-trigger" aria-label="Commands" title="Commands  Ctrl K" onclick={() => runner.open()}><Icon name="search" size={15} /><span class="command-hint">Search mail or run a command</span><span class="command-keys" aria-hidden="true"><kbd>Ctrl</kbd><kbd>K</kbd></span></button>
     <div class="topbar-end">
-      <button class="compose-button" aria-label="Compose" disabled={busy || !initialized} onclick={() => compose()}><Icon name="compose" /><span>Compose</span></button>
-      <Select label="Current account" value={accountId} options={accountOptions} disabled={busy || !initialized} onchange={selectAccount}>
-        {#snippet trigger(current)}
-          <span class="avatar" style:--hue={hue(current?.label ?? accountLabel)} aria-hidden="true">{initial(current?.label ?? accountLabel)}</span>
-          <span class="account-name">{current?.label ?? accountLabel}<small><span class="status-dot" class:on={connected && !security.locked} aria-hidden="true"></span>{security.locked ? 'Credentials locked' : activeAccount?.configured ? connected ? 'Connected' : 'Not connected' : 'Local sample mail'}</small></span>
-        {/snippet}
-      </Select>
+      {#if !settingsOpen && (!Mailbox || !shownPane('mailbox'))}{@render composeButton(true)}{/if}
+      {#if compact && switcher}{@render accountSwitcher('below')}{/if}
       <button class="icon-button" class:active={settingsOpen} aria-label="Settings" title="Settings" disabled={busy || !initialized} onclick={() => settingsOpen ? closeSettings() : manageAccounts()}><Icon name="settings" size={18} /></button>
     </div>
   </header>
@@ -273,20 +322,21 @@
         {:else if settingsPage === 'Servers'}<section class="settings-section"><header class="section-head"><h2>Mail service</h2><p>You are connected to <strong>{window.location.origin}</strong>. Accounts and saved drafts belong to this service.</p></header><div class="settings-card"><h3>Use another server</h3><p>Open a remote daemon’s HTTPS address. Your credentials stay on that server. Local services can also use HTTP on loopback.</p><form class="inline-form" onsubmit={visitServer}><label class="field">Server address<input type="url" bind:value={serverUrl} placeholder="https://mail.example.com" required autocomplete="url" /></label>{#if serverError}<p class="error-box" role="alert">{serverError}</p>{/if}<div class="button-row"><button class="secondary">Open server</button><button type="button" class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></div></form></div></section>
         {:else if settingsPage === 'Send approvals'}<SendApprovals />
         {:else if settingsPage === 'API keys'}<ApiKeys {accounts} />
-        {:else}{@render extensionSettings()}{/if}
+        {:else}{@render extensionSettings(workspace)}{/if}
       </section>
     </div>
   {:else}
-    <DockArea {layout} {panes} focus={panes.some(pane => pane.id === focus) ? focus : 'mailbox'} {compact} onchange={commitLayout} onactivate={activate}>
+    {#if layoutReady}<DockArea {layout} {panes} focus={panes.some(pane => pane.id === focus) ? focus : 'mailbox'} {compact} onchange={commitLayout} onactivate={activate}>
       {#snippet content(pane)}
         {#if pane === 'mailbox'}{@render mailboxPane()}
         {:else if pane === 'reader'}{@render readerPane()}
+        {:else if pane === 'accounts'}<div class="account-pane">{@render accountSwitcher('above')}</div>
         {:else}
           {@const id = pane.slice(4)}
-          {#if panelRuns[id] || layout.active[dockOf(layout, pane) ?? 'center'] === pane}{#key `${accountId}:${id}:${panelRuns[id] ?? 0}`}<ExtensionPanel {id} account={accountId} onback={() => activate('mailbox')} />{/key}{/if}
+          {#if panelRuns[id] || groupOf(layout, pane)?.active === pane}{#key `${accountId}:${id}:${panelRuns[id] ?? 0}`}<ExtensionPanel {id} account={accountId} onback={() => activate('mailbox')} />{/key}{/if}
         {/if}
       {/snippet}
-    </DockArea>
+    </DockArea>{/if}
     {#if compact}{@render folderNav()}{/if}
   {/if}
 </div>
@@ -302,14 +352,15 @@
 
 {#snippet mailboxPane()}
   <div class="mail-pane">
-    {#if Mailbox}<form class="mail-search" role="search" onsubmit={(event) => { event.preventDefault(); if (!busy && !labeling) void loadList(); }}>
+    {#if Mailbox}<div class="mail-head"><form class="mail-search" role="search" onsubmit={(event) => { event.preventDefault(); if (!busy && !labeling) void loadList(); }}>
       <Icon name="search" />
       <label class="sr-only" for="mail-search">Search {folder}</label>
       <input id="mail-search" type="search" enterkeyhint="search" autocapitalize="none" maxlength="1024" bind:value={query} placeholder={`Search ${folder.toLowerCase()}`} />
       <button class="search-submit" type="submit" aria-label="Search" disabled={busy}><kbd>↵</kbd></button>
-    </form>{/if}
+    </form>{@render composeButton(false)}</div>{/if}
     {#if !compact}{@render folderNav()}{/if}
     {#if Mailbox}
+      {#if sort !== 'newest'}<div class="sort-note"><Icon name="sort" size={14} />Sorted {sorts[sort].toLocaleLowerCase()}<button class="chip-remove plain" aria-label="Clear sorting" onclick={() => sort = 'newest'}><Icon name="close" size={12} /></button></div>{/if}
       {#if folder !== 'Drafts'}<div class="label-bar" role="group" aria-label="Filter by label">
         {#if Object.keys(labels).length}<button class="chip" aria-pressed={!labelFilter} onclick={() => labelFilter = ''}>All</button>{/if}
         {#each Object.keys(labels) as name (name)}<span class="chip-group">
@@ -322,7 +373,7 @@
         </form>
       </div>{/if}
       {#if labelError}<p class="error-box" role="alert">{labelError}</p>{/if}
-      <Mailbox items={visibleItems} searching={!!appliedQuery || !!labelFilter} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} />
+      <Mailbox grouped={sort === 'newest' || sort === 'oldest'} items={visibleItems} searching={!!appliedQuery || !!labelFilter} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={loadList} />
     {:else}<p class="pane-note">The mailbox extension is turned off. Turn it on in Settings → Extensions.</p>{/if}
   </div>
 {/snippet}

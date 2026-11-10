@@ -2,8 +2,8 @@
   import type { MailItem } from '../lib/api';
   import { when } from '../lib/when';
   import Icon from '../Icon.svelte';
-  let { items, fetching = false, fetchedAt = null, searching = false, selected, folder, loading, error, disabled, onopen, onretry }: {
-    searching?: boolean; items: MailItem[]; selected: string | null; folder: 'Inbox' | 'Drafts' | 'Sent';
+  let { items, grouped = true, fetching = false, fetchedAt = null, searching = false, selected, folder, loading, error, disabled, onopen, onretry }: {
+    searching?: boolean; grouped?: boolean; items: MailItem[]; selected: string | null; folder: 'Inbox' | 'Drafts' | 'Sent';
     fetching?: boolean; fetchedAt?: number | null; loading: boolean; error: string; disabled: boolean;
     onopen: (id: string) => void; onretry: () => void;
   } = $props();
@@ -11,7 +11,7 @@
     const now = new Date();
     return items.map((item, index) => {
       const date = folder === 'Drafts' ? { label: '', group: '', full: '' } : when(item.date, now);
-      return { item, date, heading: date.group && date.group !== (index ? when(items[index - 1].date, now).group : '') ? date.group : '' };
+      return { item, date, heading: grouped && date.group && date.group !== (index ? when(items[index - 1].date, now).group : '') ? date.group : '' };
     });
   });
   let fetched = $derived(fetchedAt ? new Date(fetchedAt * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '');

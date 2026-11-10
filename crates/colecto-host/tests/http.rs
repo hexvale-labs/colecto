@@ -685,12 +685,19 @@ async fn owner_bootstrap_rejects_forged_host_missing_origin_and_invalid_bearer()
     }
 }
 
+fn key_store() -> (tempfile::TempDir, colecto_core::Database) {
+    let dir = tempfile::tempdir().unwrap();
+    let database = colecto_core::Database::open(dir.path()).unwrap();
+    (dir, database)
+}
+
 #[test]
 fn key_secrets_are_not_persisted_and_expiry_revocation_survive_restart() {
     use colecto_extension_api::Capability;
     use colecto_host::api_keys::{ApiKeys, KeyInput};
-    let dir = tempfile::tempdir().unwrap();
-    let mut keys = ApiKeys::open(dir.path()).unwrap();
+    let (dir, database) = key_store();
+    let open = || ApiKeys::open(database.clone(), dir.path());
+    let mut keys = open().unwrap();
     let (metadata, secret) = keys
         .mint(
             KeyInput {
@@ -702,49 +709,69 @@ fn key_secrets_are_not_persisted_and_expiry_revocation_survive_restart() {
             100,
         )
         .unwrap();
-    let persisted = std::fs::read_to_string(dir.path().join("api-keys.json")).unwrap();
+    let persisted =
+        String::from_utf8(database.get_record("host", "api-keys", 1).unwrap().unwrap()).unwrap();
     assert!(!persisted.contains(&secret));
     assert!(!persisted.contains(secret.split_once('.').unwrap().1));
+    assert!(
+        !dir.path().join("api-keys.json").exists(),
+        "policy lives in Turso only"
+    );
     let public = serde_json::to_string(&keys.list()).unwrap();
     assert!(!public.contains("verifier"));
     assert!(!public.contains("secret"));
     drop(keys);
-    let mut keys = ApiKeys::open(dir.path()).unwrap();
+    let mut keys = open().unwrap();
     assert!(keys.authenticate(&secret, 199).is_ok());
     assert!(keys.allows(&metadata.id, "demo", Capability::MessagesList, 199));
     assert!(!keys.allows(&metadata.id, "new-account", Capability::MessagesList, 199));
     assert!(keys.authenticate(&secret, 200).is_err());
     keys.revoke(&metadata.id, 199).unwrap();
     drop(keys);
-    let mut keys = ApiKeys::open(dir.path()).unwrap();
+    let mut keys = open().unwrap();
     assert!(keys.authenticate(&secret, 199).is_err());
     assert_eq!(keys.list()[0].last_used_at, Some(199));
+}
+
+#[test]
+fn legacy_key_file_imports_once_only_when_valid_and_private() {
+    use colecto_host::api_keys::ApiKeys;
+    let (dir, database) = key_store();
+    let legacy = dir.path().join("api-keys.json");
+    std::fs::write(&legacy, "{\"version\":99,\"keys\":[]}").unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            std::fs::metadata(dir.path().join("api-keys.json"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o077,
-            0
-        );
+        std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
-    std::fs::write(
-        dir.path().join("api-keys.json"),
-        "{\"version\":99,\"keys\":[]}",
-    )
-    .unwrap();
-    assert!(ApiKeys::open(dir.path()).is_err());
+    assert!(ApiKeys::open(database.clone(), dir.path()).is_err());
+    std::fs::write(&legacy, "{\"version\":1,\"keys\":[]}").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(ApiKeys::open(database.clone(), dir.path()).is_err());
+        std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    assert!(
+        ApiKeys::open(database.clone(), dir.path())
+            .unwrap()
+            .list()
+            .is_empty()
+    );
+    std::fs::write(&legacy, "corrupt").unwrap();
+    assert!(
+        ApiKeys::open(database, dir.path()).is_ok(),
+        "imported state wins over the old file"
+    );
 }
 
 #[test]
 fn missing_and_corrupt_policy_reject_existing_key_and_recent_use_does_not_rewrite_policy() {
     use colecto_extension_api::Capability;
     use colecto_host::api_keys::{ApiKeys, KeyInput};
-    let dir = tempfile::tempdir().unwrap();
-    let mut keys = ApiKeys::open(dir.path()).unwrap();
+    let (dir, database) = key_store();
+    let mut keys = ApiKeys::open(database.clone(), dir.path()).unwrap();
     let (_, secret) = keys
         .mint(
             KeyInput {
@@ -757,16 +784,18 @@ fn missing_and_corrupt_policy_reject_existing_key_and_recent_use_does_not_rewrit
         )
         .unwrap();
     keys.authenticate(&secret, 100).unwrap();
-    let path = dir.path().join("api-keys.json");
-    let policy = std::fs::read(&path).unwrap();
+    let record = || database.get_record("host", "api-keys", 1).unwrap();
+    let policy = record().unwrap();
     keys.authenticate(&secret, 101).unwrap();
-    assert_eq!(std::fs::read(&path).unwrap(), policy);
+    assert_eq!(record().unwrap(), policy);
     assert_eq!(keys.list()[0].last_used_at, Some(100));
-    std::fs::write(&path, "corrupt").unwrap();
+    database
+        .set_record("host", "api-keys", 1, b"corrupt")
+        .unwrap();
     assert!(keys.authenticate(&secret, 102).is_err());
-    std::fs::write(&path, &policy).unwrap();
+    database.set_record("host", "api-keys", 1, &policy).unwrap();
     assert!(keys.authenticate(&secret, 102).is_ok());
-    std::fs::remove_file(path).unwrap();
+    database.remove_record("host", "api-keys", 1).unwrap();
     assert!(keys.authenticate(&secret, 103).is_err());
 }
 
@@ -774,25 +803,21 @@ fn missing_and_corrupt_policy_reject_existing_key_and_recent_use_does_not_rewrit
 fn stale_policy_instances_cannot_resurrect_a_revoked_key() {
     use colecto_extension_api::Capability;
     use colecto_host::api_keys::{ApiKeys, KeyInput};
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, database) = key_store();
     let input = || KeyInput {
         name: "Assistant".into(),
         accounts: vec!["demo".into()],
         capabilities: vec![Capability::MessagesList],
         expires_at: None,
     };
-    let mut first = ApiKeys::open(dir.path()).unwrap();
+    let open = || ApiKeys::open(database.clone(), dir.path()).unwrap();
+    let mut first = open();
     let (key, secret) = first.mint(input(), 100).unwrap();
-    let mut second = ApiKeys::open(dir.path()).unwrap();
+    let mut second = open();
     second.revoke(&key.id, 101).unwrap();
     first.mint(input(), 102).unwrap();
     assert!(first.authenticate(&secret, 103).is_err());
-    assert!(
-        ApiKeys::open(dir.path())
-            .unwrap()
-            .authenticate(&secret, 103)
-            .is_err()
-    );
+    assert!(open().authenticate(&secret, 103).is_err());
 }
 
 #[tokio::test]
@@ -993,4 +1018,67 @@ async fn owner_vault_lock_clears_cached_folder_and_reader_access() {
         router.oneshot(read).await.unwrap().status(),
         StatusCode::NOT_FOUND
     );
+}
+
+#[tokio::test]
+async fn mcp_answers_only_after_the_owner_turns_it_on_and_preferences_are_owner_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    );
+    let router = authenticated(router).await;
+    let mcp = || {
+        let mut request = request("POST", "/api/v1/mcp", "host", "http://127.0.0.1:4173", "{}");
+        request.headers_mut().insert(
+            "accept",
+            "application/json, text/event-stream".parse().unwrap(),
+        );
+        request
+    };
+    assert_eq!(
+        router.clone().oneshot(mcp()).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    let set = |extension: &str| {
+        request(
+            "POST",
+            "/api/v1/preferences",
+            extension,
+            "http://127.0.0.1:4173",
+            r#"{"mcp":true}"#,
+        )
+    };
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(set("reader"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        router.clone().oneshot(set("host")).await.unwrap().status(),
+        StatusCode::OK
+    );
+    assert_ne!(
+        router.clone().oneshot(mcp()).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    let read = router
+        .oneshot(request(
+            "GET",
+            "/api/v1/preferences",
+            "host",
+            "http://127.0.0.1:4173",
+            "",
+        ))
+        .await
+        .unwrap();
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(read.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(body["mcp"], true);
+    assert!(!dir.path().join("preferences.json").exists());
 }

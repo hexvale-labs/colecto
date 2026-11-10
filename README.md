@@ -45,9 +45,15 @@ receives no local credential. Ordinary browsers retain the entered owner token
 only for that browser session. In Settings → API keys, create separately scoped
 keys for automation, selecting explicit accounts and operations. Copy each key
 when created; it cannot be recovered later. Scoped keys cannot manage settings
-or directly send mail.
+or directly send mail. The MCP server is off until you turn it on on the same page.
 
-Use **Compose** to write a note, then **Save draft**. Open **Drafts** to resume it.
+The app icon comes from one source, `crates/colecto-host/icons/icon.svg` (the brand
+logo); `just icons` regenerates the desktop set from it. Wayland desktops take a
+window's icon from its desktop entry, so on Linux run `just desktop-install` once to
+install `app.colecto.mail.desktop` and the icons for the native build.
+
+Use **Compose** (the mint pencil beside the mail search, or press <kbd>C</kbd>) to write
+a note, then **Save draft**. Open **Drafts** to resume it.
 Leaving an edited draft asks before discarding unsaved changes. Saving failures
 keep the editor text, and never report success. Without account configuration, sending is disabled. With an account configured,
 **Send** submits plain-text mail through SMTP or JMAP, with Cc and attachments

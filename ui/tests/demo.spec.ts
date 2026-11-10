@@ -191,7 +191,7 @@ test('late account responses cannot replace the selected inbox', async ({ page }
 });
 
 test('waits for restored account before allowing compose', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('colecto.account', 'remembered'));
+  await page.route('**/api/v1/preferences', route => route.fulfill({ json: { mcp: false, account: 'remembered', workspace: null } }));
   let release!: () => void;
   const gate = new Promise<void>(resolve => release = resolve);
   await page.route('**/api/v1/labels', route => route.fulfill({ json: {} }));

@@ -2,6 +2,8 @@
 pub mod api_keys;
 pub mod approvals;
 pub mod mcp;
+pub mod preferences;
+mod store;
 use api_keys::{ApiKeys, Principal};
 mod extensions;
 pub mod notifications;
@@ -33,6 +35,7 @@ use tower_http::services::ServeDir;
 #[derive(Clone)]
 struct Host {
     keys: Arc<Mutex<ApiKeys>>,
+    preferences: Arc<Mutex<preferences::PreferenceStore>>,
     approvals: Arc<Mutex<approvals::Approvals>>,
     status_polls: Arc<Mutex<std::collections::HashMap<String, std::time::Instant>>>,
     accounts: Arc<Mutex<Accounts>>,
@@ -122,6 +125,10 @@ pub fn app_with_accounts(accounts: Accounts, authority: String, assets: PathBuf)
 
 fn build_app(host: Host, assets: PathBuf) -> Router {
     let api = Router::new()
+        .route(
+            "/preferences",
+            get(get_preferences).post(update_preferences),
+        )
         .route("/api-keys", get(list_api_keys).post(mint_api_key))
         .route("/api-keys/{id}", axum::routing::delete(revoke_api_key))
         .route("/extensions", get(list_extensions).post(install_extension))
@@ -842,6 +849,38 @@ async fn security_action(
     .map(Json)
 }
 
+async fn get_preferences(
+    State(host): State<Host>,
+    headers: HeaderMap,
+) -> Result<Json<preferences::Preferences>, Failure> {
+    host_grant(&headers)?;
+    Ok(Json(
+        host.preferences
+            .lock()
+            .map_err(|_| forbidden())?
+            .get()
+            .clone(),
+    ))
+}
+async fn update_preferences(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    input: Result<Json<preferences::PreferencesInput>, JsonRejection>,
+) -> Result<Json<preferences::Preferences>, Failure> {
+    host_grant(&headers)?;
+    let Json(input) =
+        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid preferences".into()))?;
+    tokio::task::spawn_blocking(move || {
+        host.preferences
+            .lock()
+            .map_err(|_| forbidden())?
+            .update(input)
+            .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))
+    })
+    .await
+    .map_err(|_| forbidden())?
+    .map(Json)
+}
 async fn list_api_keys(
     State(host): State<Host>,
     headers: HeaderMap,
@@ -1080,7 +1119,8 @@ mod extension_service_tests {
             Arc::new(UnavailableSecrets),
         )
         .unwrap();
-        let mut extensions = extensions::Extensions::open(dir.path()).unwrap();
+        let database = accounts.database();
+        let mut extensions = extensions::Extensions::open(database.clone(), dir.path()).unwrap();
         extensions
             .install(
                 include_str!("../../../extensions/examples/connection-panel/extension.toml"),
@@ -1096,9 +1136,14 @@ mod extension_service_tests {
             )
             .unwrap();
         let host = Host {
-            keys: Arc::new(Mutex::new(ApiKeys::open(dir.path()).unwrap())),
+            keys: Arc::new(Mutex::new(
+                ApiKeys::open(database.clone(), dir.path()).unwrap(),
+            )),
+            preferences: Arc::new(Mutex::new(
+                preferences::PreferenceStore::open(database.clone(), dir.path()).unwrap(),
+            )),
             approvals: Arc::new(Mutex::new(
-                approvals::Approvals::open(dir.path(), api_keys::now()).unwrap(),
+                approvals::Approvals::open(database, dir.path(), api_keys::now()).unwrap(),
             )),
             status_polls: Arc::default(),
             accounts: Arc::new(Mutex::new(accounts)),
