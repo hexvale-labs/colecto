@@ -44,3 +44,8 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# Line tables keep backtrace line numbers while making debug test binaries much
+# smaller and faster to link than full debug info.
+[profile.dev]
+debug = "line-tables-only"
