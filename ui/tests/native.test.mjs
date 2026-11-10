@@ -5,12 +5,11 @@ import { once } from 'node:events';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { hostBinary as binary } from './host-binary.mjs';
 
 test('native window starts with its loopback service and bundled registry', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'colecto-native-'));
   const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('COLECTO_')));
-  const binary = fileURLToPath(new URL('../../target/debug/colecto-host', import.meta.url));
   const child = spawn(binary, { env: { ...environment, COLECTO_PORT: '0', COLECTO_DATA_DIR: directory }, stdio: ['ignore', 'pipe', 'pipe'] });
   const exited = once(child, 'exit');
   let output = ''; let errors = '';
