@@ -66,7 +66,7 @@
     }
     // A bare "c" composes, unless the user is typing or a dialog is open.
     const target = event.target as HTMLElement | null;
-    if (event.key === 'c' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat && !target?.closest('input, textarea, select, [contenteditable], dialog')) { event.preventDefault(); compose(); }
+    if (event.key === 'c' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat && !target?.closest('input, textarea, select, [contenteditable], dialog, [role="listbox"]')) { event.preventDefault(); compose(); }
   }
   let serverUrl = $state('');
   let serverError = $state('');
