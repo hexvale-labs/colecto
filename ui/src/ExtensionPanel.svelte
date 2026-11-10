@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { extensionHost } from './lib/api';
+  import Icon from './Icon.svelte';
   import type { ExtensionView } from './lib/api';
   let { id, account, onback }: { id: string; account: string; onback: () => void } = $props();
   let view = $state<ExtensionView | null>(null);
@@ -17,10 +18,12 @@
   }
   onMount(() => { void run('open'); return () => { ++generation; }; });
 </script>
-<section class="settings-page" aria-label="Extension panel" aria-busy={busy}>
-  <header class="settings-header"><div><div class="eyebrow">EXTENSION · {id}</div><h1>{view?.title ?? 'Loading extension…'}</h1></div><button class="secondary" onclick={onback}>Back to mail</button></header>
+<section class="detail extension-panel" aria-label="Extension panel" aria-busy={busy}>
+  <header class="detail-toolbar"><button class="icon-button back" aria-label="Back to mail" onclick={onback}><Icon name="back" size={18} /></button><span class="toolbar-crumb">Extension</span></header>
+  <div class="settings-body"><h1>{view?.title ?? 'Loading extension…'}</h1>
   {#if error}<p class="error-box" role="alert">{error}</p><button class="secondary" disabled={busy} onclick={() => void run('open')}>Retry extension</button>{/if}
   {#if view}<p class="extension-text">{view.text}</p><div class="extension-actions">{#each view.actions as action}<button class="secondary" disabled={busy} onclick={() => void run(action)}>{action}</button>{/each}</div>{/if}
-  {#if busy}<p role="status">Running extension…</p>{/if}
+  {#if busy}<p class="content-note" role="status">Running extension…</p>{/if}
+  </div>
 </section>
 <style>.extension-text { white-space: pre-wrap; overflow-wrap: anywhere; } .extension-actions { display: flex; flex-wrap: wrap; gap: 8px; }</style>

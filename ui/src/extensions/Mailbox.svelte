@@ -1,42 +1,46 @@
 <script lang="ts">
   import type { MailItem } from '../lib/api';
+  import { when } from '../lib/when';
+  import Icon from '../Icon.svelte';
   let { items, fetching = false, fetchedAt = null, searching = false, selected, folder, loading, error, disabled, onopen, onretry }: {
     searching?: boolean; items: MailItem[]; selected: string | null; folder: 'Inbox' | 'Drafts' | 'Sent';
     fetching?: boolean; fetchedAt?: number | null; loading: boolean; error: string; disabled: boolean;
     onopen: (id: string) => void; onretry: () => void;
   } = $props();
+  let rows = $derived.by(() => {
+    const now = new Date();
+    return items.map((item, index) => {
+      const date = folder === 'Drafts' ? { label: '', group: '', full: '' } : when(item.date, now);
+      return { item, date, heading: date.group && date.group !== (index ? when(items[index - 1].date, now).group : '') ? date.group : '' };
+    });
+  });
+  let fetched = $derived(fetchedAt ? new Date(fetchedAt * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '');
 </script>
 
 <section class="mailbox" aria-label={`${folder} messages`} aria-busy={loading}>
-  <header class="mailbox-header">
-    <div class="eyebrow">MAILBOX</div>
-    <div class="title-row"><h1>{folder}</h1><span class="count">{loading ? '…' : items.length}</span></div>
-    <p>{folder === 'Drafts' ? 'Saved locally in this account.' : folder === 'Sent' ? 'Messages in your provider’s Sent mailbox.' : 'Latest messages in this account.'}</p>
-  </header>
+  <h1 class="folder-title">{folder}</h1>
+  {#if (fetching || error) && items.length > 0}<p class="list-note">Showing cached mail; it may be out of date.</p>{/if}
+  {#if error}<div class="list-state error"><p role="alert">{error}</p><button class="secondary" onclick={onretry}>Try again</button></div>{/if}
+  {#if fetching}<p class="list-note live" role="status"><span class="pulse" aria-hidden="true"></span>Fetching latest messages…</p>{/if}
   <div class="message-list">
-    {#if (fetching || error) && items.length > 0}<p class="cache-status">Showing cached mail; it may be out of date.</p>{/if}
-    {#if error}<div class="list-state"><p role="alert">{error}</p><button class="secondary" onclick={onretry}>Try again</button></div>{/if}
-    {#if fetching}<p class="cache-status" role="status">Fetching latest messages…</p>{/if}
     {#if loading && items.length === 0}
       <div class="list-state">Loading your {folder.toLowerCase()}…</div>
-
     {:else if items.length === 0 && !error && !fetching}
-      <div class="list-state"><span class="empty-mark" aria-hidden="true">✎</span><h2>{searching ? 'No matching messages' : folder === 'Drafts' ? 'No drafts yet' : 'All quiet here'}</h2><p>{searching ? 'Try another search or clear the label filter.' : folder === 'Drafts' ? 'Start a note with Compose. Save it when you’re ready.' : 'There are no messages in this folder.'}</p></div>
+      <div class="list-state"><h2>{searching ? 'No matching messages' : folder === 'Drafts' ? 'No drafts yet' : 'Nothing here yet'}</h2><p>{searching ? 'Try another search or clear the label filter.' : folder === 'Drafts' ? 'Start one with Compose and save it when you’re ready.' : folder === 'Sent' ? 'Messages you send will appear here.' : 'New mail will appear here when it arrives.'}</p></div>
     {:else}
-      {#each items as item (item.id)}
+      {#each rows as { item, date, heading } (item.id)}
+        {#if heading}<h3 class="day">{heading}</h3>{/if}
         <button class="mail-item" class:selected={selected === item.id} aria-pressed={selected === item.id} {disabled} onclick={() => onopen(item.id)}>
-          <span class="item-top"><strong>{item.name || 'Unknown sender'}</strong><span class="item-date">{item.date}</span></span>
+          <span class="item-sender">{item.name || 'Unknown sender'}</span>
+          {#if date.label}<time class="item-date" title={date.full}>{date.label}</time>{/if}
           <span class="item-subject">{item.subject || '(No subject)'}</span>
           <span class="item-preview">{item.preview || 'No preview'}</span>
         </button>
       {/each}
     {/if}
   </div>
-  <footer class="list-footer" class:cache-footer={folder !== 'Drafts'}>{folder === 'Drafts' ? 'Drafts are saved by your mail service.' : `${fetchedAt ? `Cached · last fetched ${new Date(fetchedAt * 1000).toLocaleString()}.` : 'Cached mail may be out of date.'} ${fetching ? 'Updating…' : ''}`}{#if folder !== 'Drafts'}<button class="text-button" disabled={fetching} onclick={onretry}>Refresh</button>{/if}</footer>
+  <footer class="list-footer">
+    {#if folder === 'Drafts'}<span>Drafts are saved by your mail service.</span>
+    {:else}<span>{fetching ? 'Updating…' : fetched ? `Updated ${fetched}` : 'Cached mail may be out of date.'}</span><button class="icon-button" aria-label="Refresh" title="Refresh" disabled={fetching} onclick={onretry}><Icon name="refresh" size={15} /></button>{/if}
+  </footer>
 </section>
-
-<style>
-  .cache-status { padding: 8px 20px; margin: 0; color: var(--muted); font-size: 12px; }
-  .cache-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .cache-footer button { flex-shrink: 0; min-height: 44px; }
-</style>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import Icon from './Icon.svelte';
   export interface Command { id: string; name: string; run: () => void; disabled?: boolean }
   let { commands }: { commands: Command[] } = $props();
   let dialog: HTMLDialogElement;
@@ -27,12 +28,12 @@
   }
 </script>
 <dialog bind:this={dialog} class="command-runner" aria-label="Commands" onclose={() => previous?.isConnected && previous.focus()}>
-  <header><h2>Commands</h2><button class="text-button" onclick={() => dialog.close()}>Close</button></header>
-  <input bind:this={input} aria-label="Search commands" role="combobox" aria-expanded="true" aria-controls="command-results" aria-activedescendant={filtered.length ? `command-${active}` : undefined} autocomplete="off" placeholder="What would you like to do?" bind:value={query} oninput={() => active = 0} onkeydown={keydown} />
+  <h2 class="sr-only">Commands</h2>
+  <div class="command-input"><Icon name="search" size={18} /><input bind:this={input} aria-label="Search commands" role="combobox" aria-expanded="true" aria-controls="command-results" aria-activedescendant={filtered.length ? `command-${active}` : undefined} autocomplete="off" placeholder="What would you like to do?" bind:value={query} oninput={() => active = 0} onkeydown={keydown} /><button class="text-button" onclick={() => dialog.close()}>Close</button></div>
   <div id="command-results" role="listbox" aria-label="Available commands">
     {#each filtered as command, index (command.id)}
       <button id={`command-${index}`} role="option" aria-selected={active === index} disabled={command.disabled} onclick={() => run(command)}>{command.name}</button>
     {:else}<p role="status">No matching commands</p>{/each}
   </div>
-  <footer>↑ ↓ to navigate · Enter to run · Esc to close</footer>
+  <footer><span><kbd>↑</kbd><kbd>↓</kbd> Move</span><span><kbd>↵</kbd> Run</span><span><kbd>Esc</kbd> Close</span></footer>
 </dialog>

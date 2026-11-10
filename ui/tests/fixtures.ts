@@ -1,4 +1,4 @@
-import { test as base, expect } from '@playwright/test';
+import { test as base, expect, type Page } from '@playwright/test';
 export const ownerToken = 'b'.repeat(64);
 export const test = base.extend({
   page: async ({ page }, use) => {
@@ -13,3 +13,9 @@ export const test = base.extend({
   },
 });
 export { expect };
+
+/** Pick an account from the custom account switcher in the sidebar footer. */
+export async function chooseAccount(page: Page, name: string) {
+  await page.getByRole('button', { name: 'Current account' }).click();
+  await page.getByRole('option', { name, exact: true }).click();
+}

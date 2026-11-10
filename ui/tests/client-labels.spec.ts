@@ -18,7 +18,7 @@ test('local labels can be created, assigned, filtered and removed', async ({ pag
   await expect(page.getByLabel('Label Follow up', { exact: true })).not.toBeChecked();
   await page.getByLabel('Label Follow up', { exact: true }).check();
   await page.reload();
-  await page.getByLabel('Filter by label').selectOption('Follow up');
+  await page.getByRole('group', { name: 'Filter by label' }).getByRole('button', { name: 'Follow up', exact: true }).click();
   await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Alex Rivera/ })).toHaveCount(0);
   page.once('dialog', dialog => dialog.accept());
