@@ -22,7 +22,7 @@
   import NotificationSettings from '../../NotificationSettings.svelte';
   import PrivacySettings from '../../PrivacySettings.svelte';
   import AppearanceSettings from '../../AppearanceSettings.svelte';
-  import { notify, dismissKey, notificationPosition, type Toast } from '../notifications/toasts.svelte';
+  import { notify, dismissKey, notificationPosition, type Toast } from '../notifications/store.svelte';
   import { subscribeEvents, type NotificationPreferences } from '../../lib/api';
   import { destinations, isDestination, resolve, settingsPages, type Destination, type Folder, type SettingsPage } from '../../lib/navigation';
   let { extensionStates, extensionSettings, onsettings }: { extensionSettings: import('svelte').Snippet<[Workspace?]>; onsettings: () => void; extensionStates: import('../../lib/api').ExtensionState[] } = $props();
