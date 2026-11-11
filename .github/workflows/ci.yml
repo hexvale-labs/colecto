@@ -33,6 +33,8 @@ jobs:
         run: |
           install() { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev libdbus-1-dev pkg-config; }
           # The runners' Azure apt mirror sometimes stops resolving; fall back to Ubuntu's own archive.
+          # The runner image normally ships these already, so most runs need no network at all.
+          dpkg -s libssl-dev libdbus-1-dev pkg-config > /dev/null 2>&1 && exit 0
           install || { echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt; install; }
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -104,6 +106,8 @@ jobs:
         run: |
           install() { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev libdbus-1-dev pkg-config; }
           # The runners' Azure apt mirror sometimes stops resolving; fall back to Ubuntu's own archive.
+          # The runner image normally ships these already, so most runs need no network at all.
+          dpkg -s libssl-dev libdbus-1-dev pkg-config > /dev/null 2>&1 && exit 0
           install || { echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt; install; }
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
