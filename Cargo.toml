@@ -65,7 +65,7 @@ unsafe_code = "forbid"
 [profile.dev]
 debug = "line-tables-only"
 
-# `just build release`: smaller, faster binaries. Thin LTO keeps link memory modest on small machines.
+# `just build release`. No cross-crate LTO: thin LTO re-optimized every dependency at each
+# link (446 s of a 700 s rebuild of the app) and gave a larger binary (34.3 MB vs 33.2 MB).
 [profile.release]
-lto = "thin"
 strip = "symbols"
