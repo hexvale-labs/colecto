@@ -1084,3 +1084,38 @@ async fn mcp_answers_only_after_the_owner_turns_it_on_and_preferences_are_owner_
     assert_eq!(body["mcp"], true);
     assert!(!dir.path().join("preferences.json").exists());
 }
+
+#[tokio::test]
+async fn folders_require_message_list_permission() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = authenticated(app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    ))
+    .await;
+    for (extension, status) in [
+        ("inbox", StatusCode::OK),
+        ("composer", StatusCode::FORBIDDEN),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/api/v1/folders",
+                extension,
+                "http://127.0.0.1:4173",
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        if status == StatusCode::OK {
+            let folders: serde_json::Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), 200_000).await.unwrap())
+                    .unwrap();
+            assert_eq!(folders[0]["role"], "inbox");
+            assert_eq!(folders[0]["total"], 4);
+        }
+    }
+}

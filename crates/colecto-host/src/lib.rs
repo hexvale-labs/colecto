@@ -182,6 +182,7 @@ fn build_app(host: Host, assets: Assets) -> Router {
             axum::routing::post(reject_send),
         )
         .route("/labels", get(labels).post(update_label))
+        .route("/folders", get(folders))
         .route("/messages", get(messages))
         .route("/messages/cache", get(cached_messages))
         .route("/messages/refresh", axum::routing::post(messages))
@@ -558,6 +559,15 @@ struct MessageQuery {
 fn inbox_folder() -> String {
     "inbox".into()
 }
+async fn folders(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<colecto_extension_api::Folder>>, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
+    with_store(host, account, |s| s.folders()).await.map(Json)
+}
+
 async fn labels(
     State(host): State<Host>,
     axum::Extension(principal): axum::Extension<Principal>,

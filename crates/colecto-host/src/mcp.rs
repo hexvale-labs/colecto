@@ -45,6 +45,7 @@ struct Input {
 const TOOLS: &[&str] = &[
     "account.read",
     "messages.list",
+    "folders.list",
     "messages.cached",
     "messages.refresh",
     "messages.read",
@@ -141,6 +142,7 @@ impl MailMcp {
         }
         match name {
             "account.read" => value!(crate::account(state, identity, headers)),
+            "folders.list" => value!(crate::folders(state, identity, headers)),
             "messages.list" | "messages.refresh" => value!(crate::messages(
                 state,
                 identity,

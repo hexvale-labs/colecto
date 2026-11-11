@@ -52,3 +52,11 @@ An invalid legacy file fails startup and stays untouched. Owner preferences hold
 workspace layout (a bounded JSON object the UI validates), the selected account and
 whether MCP is on. The browser keeps only the session's access token in
 `sessionStorage`. No device replication is introduced.
+
+
+Folder discovery also stores the last successful folder list in the account's
+versioned `folders` record. The record includes the provider identity, so changing
+accounts or provider settings cannot expose a previous provider's folders.
+`MailStore::folders()` falls back to that list when discovery fails; a failed
+discovery never overwrites it. Counts describe the last successful discovery,
+not necessarily the current server state.
