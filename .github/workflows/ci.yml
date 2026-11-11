@@ -30,7 +30,10 @@ jobs:
           persist-credentials: false
 
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev libdbus-1-dev pkg-config
+        run: |
+          install() { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev libdbus-1-dev pkg-config; }
+          # The runners' Azure apt mirror sometimes stops resolving; fall back to Ubuntu's own archive.
+          install || { echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt; install; }
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -98,7 +101,10 @@ jobs:
           persist-credentials: false
 
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev libdbus-1-dev pkg-config
+        run: |
+          install() { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev libdbus-1-dev pkg-config; }
+          # The runners' Azure apt mirror sometimes stops resolving; fall back to Ubuntu's own archive.
+          install || { echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt; install; }
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
