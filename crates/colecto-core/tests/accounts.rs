@@ -384,40 +384,6 @@ fn optional_profile_name_is_preserved_and_can_be_set() {
 }
 
 #[test]
-fn corrupt_mail_cache_cannot_commit_new_credentials_or_account_settings() {
-    let dir = tempfile::tempdir().unwrap();
-    let secrets = Arc::new(MemorySecrets::default());
-    let mut accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), secrets).unwrap();
-    let saved = accounts.upsert(input(None, "before@example.test")).unwrap();
-    let before = vault(dir.path());
-    accounts
-        .database()
-        .set_record(
-            &format!("account:{}", saved.id),
-            "cache-import",
-            1,
-            b"invalid marker",
-        )
-        .unwrap();
-    let mut update = input(Some(saved.id.clone()), "after@example.test");
-    update.secret = "new-secret".into();
-    assert!(accounts.upsert(update).is_err());
-    assert_eq!(vault(dir.path()), before);
-    assert_eq!(
-        accounts
-            .list()
-            .iter()
-            .find(|a| a.id == saved.id)
-            .unwrap()
-            .settings
-            .as_ref()
-            .unwrap()
-            .address,
-        "before@example.test"
-    );
-}
-
-#[test]
 fn address_longer_than_profile_limit_can_be_edited_without_a_profile_name() {
     let dir = tempfile::tempdir().unwrap();
     let secrets = Arc::new(MemorySecrets::default());
@@ -453,98 +419,19 @@ fn cached_list_and_reader_remain_available_while_account_is_locked() {
 }
 
 #[test]
-fn legacy_vault_and_account_documents_import_once_and_survive_sources_moved_aside() {
-    let seed = tempfile::tempdir().unwrap();
-    let backend = Arc::new(MemorySecrets::default());
-    let mut original =
-        Accounts::open(MailStore::open(seed.path()).unwrap(), backend.clone()).unwrap();
-    let a = original.upsert(input(None, "a@example.test")).unwrap();
-    let b = original.upsert(input(None, "b@example.test")).unwrap();
-    original
-        .store(&a.id)
-        .unwrap()
-        .lock()
-        .unwrap()
-        .save_draft(DraftInput {
-            id: None,
-            recipient: String::new(),
-            subject: "Imported".into(),
-            body: "Keep".into(),
-            ..Default::default()
-        })
-        .unwrap();
-    original
-        .store(&a.id)
-        .unwrap()
-        .lock()
-        .unwrap()
-        .update_label("Work", None, false)
-        .unwrap();
-    let database = original.database();
+fn fresh_vault_ignores_legacy_account_registry() {
     let dir = tempfile::tempdir().unwrap();
-    let source = database.get_record("core", "vault", 1).unwrap().unwrap();
-    std::fs::write(dir.path().join("accounts.json"), &source).unwrap();
-    let account_dir = dir.path().join("accounts").join(&a.id);
-    std::fs::create_dir_all(&account_dir).unwrap();
-    for name in ["drafts", "labels"] {
-        let bytes = database
-            .get_record(&format!("account:{}", a.id), name, 1)
-            .unwrap()
-            .unwrap();
-        std::fs::write(account_dir.join(format!("{name}.json")), bytes).unwrap();
-    }
-    drop(original);
-    let accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), backend.clone()).unwrap();
-    assert!(accounts.store(&a.id).unwrap().lock().unwrap().connected());
-    assert_eq!(
-        accounts.store(&a.id).unwrap().lock().unwrap().drafts()[0].subject,
-        "Imported"
-    );
-    assert!(
-        accounts
-            .store(&a.id)
-            .unwrap()
-            .lock()
-            .unwrap()
-            .labels()
-            .unwrap()
-            .contains_key("Work")
-    );
-    assert!(
-        accounts
-            .store(&b.id)
-            .unwrap()
-            .lock()
-            .unwrap()
-            .drafts()
-            .is_empty()
-    );
-    assert_eq!(
-        std::fs::read(dir.path().join("accounts.json")).unwrap(),
-        source
-    );
-    drop(accounts);
-    std::fs::rename(
-        dir.path().join("accounts"),
-        dir.path().join("legacy-accounts"),
-    )
-    .unwrap();
-    std::fs::rename(
+    std::fs::write(
         dir.path().join("accounts.json"),
-        dir.path().join("legacy-accounts.json"),
+        b"unsupported legacy content",
     )
     .unwrap();
-    std::fs::write(dir.path().join("accounts.json"), b"stale invalid vault").unwrap();
-    let accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), backend).unwrap();
-    assert!(accounts.store(&a.id).unwrap().lock().unwrap().connected());
-    assert_eq!(
-        accounts.store(&a.id).unwrap().lock().unwrap().drafts()[0].subject,
-        "Imported"
-    );
-    assert!(!account_dir.join("colecto.db").exists());
-    assert!(!account_dir.join("mail-cache.db").exists());
-    assert!(
-        !String::from_utf8_lossy(&std::fs::read(dir.path().join("colecto.db")).unwrap())
-            .contains("test-secret")
-    );
+    let accounts = Accounts::open(
+        MailStore::open(dir.path()).unwrap(),
+        Arc::new(MemorySecrets::default()),
+    )
+    .unwrap();
+    assert!(accounts.store("unknown").is_err());
+    let state: serde_json::Value = serde_json::from_slice(&vault(dir.path())).unwrap();
+    assert!(state["accounts"].as_array().unwrap().is_empty());
 }

@@ -1,8 +1,7 @@
 //! Account-namespaced, bounded snapshots in the shared application database.
-use crate::{Database, Error, MailCache, Message, message_bytes, storage};
+use crate::{Database, Error, Message, message_bytes, storage};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
     path::Path,
     sync::{Arc, RwLock},
     time::{SystemTime, UNIX_EPOCH},
@@ -182,144 +181,6 @@ impl MailCacheStore {
         }
         Ok(snapshots)
     }
-    pub fn import_legacy(&mut self, directory: &Path) -> Result<(), Error> {
-        let namespace = format!("account:{}", self.account);
-        if self.database.contains_record(&namespace, "cache-import")? {
-            if self
-                .database
-                .get_record(&namespace, "cache-import", 1)?
-                .as_deref()
-                != Some(&[1])
-            {
-                return Err(storage("Invalid cache migration marker"));
-            }
-            return Ok(());
-        }
-        let mut imported = Vec::new();
-        let path = directory.join("mail-cache.db");
-        if path.exists() {
-            imported = futures_executor::block_on(async {
-                let legacy = turso::Builder::new_local(
-                    path.to_str()
-                        .ok_or_else(|| storage("Invalid legacy cache path"))?,
-                )
-                .build()
-                .await
-                .map_err(storage)?;
-                let connection = legacy.connect().map_err(storage)?;
-                let mut rows = connection
-                    .query("PRAGMA user_version", ())
-                    .await
-                    .map_err(storage)?;
-                let version = rows
-                    .next()
-                    .await
-                    .map_err(storage)?
-                    .ok_or_else(|| storage("Missing cache version"))?
-                    .get::<i64>(0)
-                    .map_err(storage)?;
-                if version != 1 {
-                    return Err(storage("Unsupported mail cache database version"));
-                }
-                drop(rows);
-                let mut rows = connection
-                    .query(
-                        "SELECT provider,folder,fetched_at,messages FROM snapshots",
-                        (),
-                    )
-                    .await
-                    .map_err(storage)?;
-                let mut imported = Vec::new();
-                while let Some(row) = rows.next().await.map_err(storage)? {
-                    let provider: String = row.get(0).map_err(storage)?;
-                    let folder: String = row.get(1).map_err(storage)?;
-                    crate::validate_query(&folder, "")?;
-                    let time: Option<i64> = row.get(2).map_err(storage)?;
-                    if time.is_some_and(|t| t < 0) || provider.is_empty() || provider.len() > 8192 {
-                        return Err(storage("Invalid legacy cache identity"));
-                    }
-                    let text: String = row.get(3).map_err(storage)?;
-                    if text.len() > MAX_BYTES {
-                        return Err(limit());
-                    }
-                    let messages: Vec<Message> = serde_json::from_str(&text).map_err(storage)?;
-                    bounded_json(&messages)?;
-                    imported.push((provider, folder, time, text));
-                    if imported.len() > 2 {
-                        return Err(limit());
-                    }
-                }
-                Ok(imported)
-            })?;
-        } else {
-            let path = directory.join("mail-cache.json");
-            match fs::metadata(&path) {
-                Ok(metadata) => {
-                    if metadata.len() > MAX_BYTES as u64 {
-                        return Err(limit());
-                    }
-                    let cache: MailCache =
-                        serde_json::from_slice(&fs::read(path).map_err(storage)?)
-                            .map_err(storage)?;
-                    if cache.version != 1 {
-                        return Err(storage("Unsupported legacy mail cache version"));
-                    }
-                    if cache.account.is_empty() || cache.account.len() > 8192 {
-                        return Err(storage("Invalid legacy cache identity"));
-                    }
-                    imported.push((
-                        cache.account,
-                        "inbox".into(),
-                        None,
-                        bounded_json(&cache.messages)?,
-                    ));
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-                Err(error) => return Err(storage(error)),
-            }
-        }
-        let mut count = 0;
-        let mut bytes = 0;
-        for (provider, _, _, text) in &imported {
-            if provider != &imported[0].0 {
-                return Err(storage("Conflicting legacy cache providers"));
-            }
-            count += serde_json::from_str::<Vec<Message>>(text)
-                .map_err(storage)?
-                .len();
-            bytes += text.len();
-        }
-        if count > 100 || bytes > MAX_BYTES {
-            return Err(limit());
-        }
-        let mut connection = self.database.connection()?;
-        futures_executor::block_on(async {
-            let transaction = connection.transaction().await.map_err(storage)?;
-            let mut rows = transaction
-                .query(
-                    "SELECT 1 FROM snapshots WHERE account=?1",
-                    [self.account.as_str()],
-                )
-                .await
-                .map_err(storage)?;
-            let populated = rows.next().await.map_err(storage)?.is_some();
-            drop(rows);
-            if !populated {
-                for (provider, folder, time, text) in imported {
-                    transaction.execute("INSERT INTO snapshots(account,provider,folder,fetched_at,messages) VALUES (?1,?2,?3,?4,?5)",turso::params![self.account.as_str(),provider,folder,time,text]).await.map_err(storage)?;
-                }
-            }
-            transaction.execute("INSERT OR IGNORE INTO records(namespace,name,version,value) VALUES (?1,'cache-import',1,?2)",turso::params![namespace.as_str(),vec![1u8]]).await.map_err(storage)?;
-            transaction
-                .execute(
-                    "INSERT OR IGNORE INTO initialized(namespace,name) VALUES (?1,'cache-import')",
-                    [namespace.as_str()],
-                )
-                .await
-                .map_err(storage)?;
-            transaction.commit().await.map_err(storage)
-        })
-    }
 }
 fn limit() -> Error {
     Error::Storage("Mail cache exceeds its size limit".into())
@@ -354,78 +215,6 @@ fn bounded_json(messages: &[Message]) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn legacy_turso_snapshots_preserve_timestamps_and_stop_reading_sources() {
-        let root = tempfile::tempdir().unwrap();
-        let source = tempfile::tempdir().unwrap();
-        let text = bounded_json(&crate::sample_messages()).unwrap();
-        futures_executor::block_on(async {
-            let legacy =
-                turso::Builder::new_local(source.path().join("mail-cache.db").to_str().unwrap())
-                    .build()
-                    .await
-                    .unwrap();
-            let connection = legacy.connect().unwrap();
-            connection.execute_batch("CREATE TABLE snapshots(provider TEXT NOT NULL, folder TEXT NOT NULL, fetched_at INTEGER, messages TEXT NOT NULL, PRIMARY KEY(provider,folder)); PRAGMA user_version=1;").await.unwrap();
-            for folder in ["inbox", "sent"] {
-                connection
-                    .execute(
-                        "INSERT INTO snapshots VALUES ('provider',?1,1234,?2)",
-                        [folder, text.as_str()],
-                    )
-                    .await
-                    .unwrap();
-            }
-        });
-        let mut cache =
-            MailCacheStore::with_database(Database::open(root.path()).unwrap(), "a").unwrap();
-        cache.import_legacy(source.path()).unwrap();
-        assert!(source.path().join("mail-cache.db").exists());
-        assert_eq!(cache.snapshots("provider").unwrap().len(), 2);
-        assert_eq!(
-            cache.load("provider", "inbox").unwrap().fetched_at,
-            Some(1234)
-        );
-        cache.store("provider", "inbox", &[]).unwrap();
-        drop(cache);
-        let mut cache =
-            MailCacheStore::with_database(Database::open(root.path()).unwrap(), "a").unwrap();
-        cache.import_legacy(source.path()).unwrap();
-        assert!(cache.load("provider", "inbox").unwrap().messages.is_empty());
-        assert_eq!(cache.load("provider", "sent").unwrap().messages.len(), 4);
-    }
-    #[test]
-    fn missing_import_marker_cannot_restore_invalidated_legacy_snapshots() {
-        let directory = tempfile::tempdir().unwrap();
-        let source = serde_json::to_vec(&MailCache {
-            version: 1,
-            account: "p".into(),
-            messages: crate::sample_messages(),
-        })
-        .unwrap();
-        fs::write(directory.path().join("mail-cache.json"), &source).unwrap();
-        let mut cache = MailCacheStore::open(directory.path()).unwrap();
-        cache.import_legacy(directory.path()).unwrap();
-        assert_eq!(cache.load("p", "inbox").unwrap().messages.len(), 4);
-        cache.observe_identity("p", "inbox", "imap-7-").unwrap();
-        assert!(cache.observe_identity("p", "inbox", "imap-8-").unwrap());
-        {
-            let connection = cache.database.connection().unwrap();
-            futures_executor::block_on(connection.execute(
-                "DELETE FROM records WHERE namespace='account:demo' AND name='cache-import'",
-                (),
-            ))
-            .unwrap();
-        }
-        drop(cache);
-        let mut cache = MailCacheStore::open(directory.path()).unwrap();
-        assert!(cache.import_legacy(directory.path()).is_err());
-        assert!(cache.load("p", "inbox").unwrap().messages.is_empty());
-        assert_eq!(
-            fs::read(directory.path().join("mail-cache.json")).unwrap(),
-            source
-        );
-    }
     #[test]
     fn shared_cache_isolates_accounts_and_invalidates_only_changed_mailbox() {
         let directory = tempfile::tempdir().unwrap();
@@ -541,16 +330,9 @@ mod tests {
         assert_eq!(cache.load("a", "sent").unwrap().messages.len(), 100);
     }
     #[test]
-    fn future_database_and_invalid_import_are_preserved() {
+    fn future_database_is_rejected() {
         let directory = tempfile::tempdir().unwrap();
-        let mut cache = MailCacheStore::open(directory.path()).unwrap();
-        let source = br#"{"version":2,"account":"a","messages":[]}"#;
-        fs::write(directory.path().join("mail-cache.json"), source).unwrap();
-        assert!(cache.import_legacy(directory.path()).is_err());
-        assert_eq!(
-            fs::read(directory.path().join("mail-cache.json")).unwrap(),
-            source
-        );
+        let cache = MailCacheStore::open(directory.path()).unwrap();
         futures_executor::block_on(
             cache
                 .database
@@ -561,35 +343,5 @@ mod tests {
         .unwrap();
         drop(cache);
         assert!(MailCacheStore::open(directory.path()).is_err());
-    }
-    #[test]
-    fn transaction_failure_preserves_source_and_retries() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut cache = MailCacheStore::open(directory.path()).unwrap();
-        let source = br#"{"version":1,"account":"a","messages":[]}"#;
-        fs::write(directory.path().join("mail-cache.json"), source).unwrap();
-        futures_executor::block_on(
-            cache
-                .database
-                .connection()
-                .unwrap()
-                .execute("PRAGMA query_only=1", ()),
-        )
-        .unwrap();
-        assert!(cache.import_legacy(directory.path()).is_err());
-        assert_eq!(
-            fs::read(directory.path().join("mail-cache.json")).unwrap(),
-            source
-        );
-        futures_executor::block_on(
-            cache
-                .database
-                .connection()
-                .unwrap()
-                .execute("PRAGMA query_only=0", ()),
-        )
-        .unwrap();
-        cache.import_legacy(directory.path()).unwrap();
-        assert_eq!(cache.load("a", "inbox").unwrap().folder, "inbox");
     }
 }
