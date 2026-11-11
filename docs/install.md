@@ -19,7 +19,7 @@ Architectures: `x64` (Intel/AMD 64-bit), `arm64` (Apple Silicon, Snapdragon, mos
 phones), `armv7` and `x86` (older Android devices).
 
 Mobile builds are new and lightly tested. To keep mail flowing while your devices are
-off, [host the daemon](docker.md) and connect the apps to it.
+off, [host the daemon](self-hosting.md) and connect the apps to it.
 
 ## Experimental Apple builds
 

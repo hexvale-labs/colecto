@@ -46,7 +46,7 @@ For Rust, copy the standalone `examples/oneko` crate. It uses `#![no_std]`, impo
 the ABI directly, and exports `run`. Build for `wasm32-unknown-unknown`, without
 WASI. Keep the module below 16 MiB. Every invocation starts fresh; overlays store
 state in the emitted string and receive it back in the next frame action.
-See [the contract](../extensions.md#overlay-extensions) for exact frame JSON and limits.
+See [the contract](README.md#overlay-extensions) for exact frame JSON and limits.
 
 ## 4. Pick an overlay layer
 

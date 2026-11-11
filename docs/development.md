@@ -1,7 +1,8 @@
 # Development
 
 How to build, run and check Colecto from a checkout. For what the pieces are and how
-they fit together, see [project direction](README.md).
+they fit together, see [architecture](architecture.md); for where files live, see the
+[documentation index](README.md#where-things-are).
 
 ## Prerequisites
 
@@ -80,27 +81,25 @@ from the same file.
 
 Pushing a semver tag such as `v1.2.3` runs `.github/workflows/release.yml`; other
 tags, pull requests and pushes to `main` do not. It builds the app
-for Linux, Windows, macOS, Android and iOS, names each file
+for Linux, Windows, Android, and unsigned macOS and iOS, names each file
 `colecto-v1.2.3-<platform>-<arch>.<ext>`, publishes a GitHub release with
 `SHA256SUMS.txt`, and pushes the daemon image to
-`ghcr.io/hexvale-labs/colecto-daemon`. To test the pipeline without releasing, start
+`ghcr.io/hexvale-labs/colectod` (tags `vX.Y.Z`, `vX.Y`, `vX`, `latest`). To test the pipeline without releasing, start
 it by hand from the Actions tab (**Release → Run workflow**): it builds everything and
 publishes nothing. Nothing is code-signed; see
-[installing](install.md).
+[installing](install.md). Release notes come from `.github/release-notes/<tag>.md`
+when that file exists. When the `AUR_SSH_PRIVATE_KEY` secret is set, the release also
+updates the `colecto`, `colecto-bin` and `colecto-git` AUR packages (see
+`packaging/aur/README.md`).
 
 `just build release` builds optimized binaries locally.
 
-## Crates
+## Stress fixtures
 
-- `colecto-extension-api`: version 1 wire types shared by the Host and extensions.
-- `colecto-core`: IMAP/SMTP and JMAP transports, MIME decoding, drafts, accounts,
-  credentials and Turso storage.
-- `colecto-host`: the mail service. Authenticated HTTP API, static UI, extension
-  policy and the Wasm sandbox; also the `colecto-daemon` and `colecto-mcp` binaries.
-- `colecto-app`: the Tauri desktop and mobile app. It runs the mail service in-process
-  and serves the UI compiled into the binary. It is not a default workspace member,
-  because it needs WebView system libraries; build it with `just build native`.
-- `ui/src/extensions`: the bundled mailbox, reader and composer views.
+`cd ui && bun run vite --host 127.0.0.1` serves a development-only `/__stress` route
+with adversarial sample data (long names, right-to-left and CJK text, emoji, empty
+fields, many rows). The picker state lives in the URL. Production builds drop the
+route and its fixtures.
 
 ## Bun troubleshooting
 

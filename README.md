@@ -12,20 +12,20 @@
 <p align="center">
   <a href="https://github.com/hexvale-labs/colecto/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/hexvale-labs/colecto?sort=semver&display_name=tag&label=release&color=a2d6b1"></a>
   <a href="https://github.com/hexvale-labs/colecto/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/hexvale-labs/colecto/ci.yml?branch=main&label=CI"></a>
-  <a href="https://github.com/hexvale-labs/colecto/pkgs/container/colecto-daemon"><img alt="Docker image" src="https://img.shields.io/badge/docker-ghcr.io-2496ed?logo=docker&logoColor=white"></a>
+  <a href="https://github.com/hexvale-labs/colecto/pkgs/container/colectod"><img alt="Docker image" src="https://img.shields.io/badge/docker-ghcr.io-2496ed?logo=docker&logoColor=white"></a>
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20Android%20%7C%20web-555">
   <img alt="Built with Rust and Tauri" src="https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri-b7410e?logo=rust">
 </p>
 
 <p align="center">
   <a href="https://github.com/hexvale-labs/colecto/releases/latest"><b>Download</b></a> ·
-  <a href="docs/docker.md"><b>Self-host with Docker</b></a> ·
+  <a href="docs/self-hosting.md"><b>Self-host with Docker</b></a> ·
   <a href="docs/development.md"><b>Build from source</b></a>
 </p>
 
 > [!NOTE]
-> Colecto is pre-alpha. It works with real mail accounts, but storage formats may still
-> change between versions. See the [roadmap](docs/alpha.md).
+> Colecto is in alpha. It works with real mail accounts, but storage formats may still
+> change between versions. See the [roadmap](docs/roadmap.md).
 
 ## Features
 
@@ -40,10 +40,12 @@
   you between devices
 - **Keyboard first:** command palette (<kbd>Ctrl</kbd>+<kbd>K</kbd>), <kbd>C</kbd> to
   compose, keyboard-resizable panes
-- **Extensions:** the whole UI is built from bundled extensions, and third-party
-  panels run in an isolated WebAssembly sandbox
+- **Extensions:** the whole UI is built from bundled extensions; third-party panels
+  and overlays run in an isolated WebAssembly sandbox
+  ([make your own](docs/extensions/guide.md), or try the
+  [Oneko cat](docs/extensions/examples/oneko.colectoext))
 - **Self-hostable daemon** that keeps receiving mail while every app is closed, with
-  [Docker](docs/docker.md), systemd or any other supervisor
+  [Docker](docs/self-hosting.md), systemd or any other supervisor
 - **Automation with guard rails:** scoped API keys and an MCP server, with your
   approval required before anything is sent
 - **Encrypted credentials**, protected by your system keychain or a master password
@@ -56,13 +58,15 @@ tell us about it.
 
 ### Planned
 
-- All server folders, with paging and incremental sync
-- Read/unread, star, archive, delete and move
-- Conversation threading
-- Inline (`cid:`) images in HTML mail
+- Read/unread, star, archive, delete and move (in progress)
+- Browsing every folder with paging and incremental sync
+- First-run onboarding, font choice and running the daemon as a background service
+- Android notifications through UnifiedPush from your own daemon
+- Conversation threading and inline (`cid:`) images
 - Encryption of stored mail
-- Native push notifications on Android
 - Hosting several users on one daemon
+
+See the [roadmap](docs/roadmap.md) for status.
 
 ### Not planned
 
@@ -73,7 +77,7 @@ tell us about it.
 1. [Download Colecto](https://github.com/hexvale-labs/colecto/releases/latest) for your
    system. The builds are not code-signed; [here is how to install them](docs/install.md).
 2. Open **Settings → Accounts** and add your IMAP/SMTP or JMAP account.
-3. Optional: [host the daemon](docs/docker.md) so mail keeps arriving while your
+3. Optional: [host the daemon](docs/self-hosting.md) so mail keeps arriving while your
    devices are off, then point every app at it in **Settings → Servers**.
 
 To build and run from a checkout instead, see [development](docs/development.md).
@@ -92,20 +96,10 @@ not in public issues. See the [security policy](.github/SECURITY.md).
 
 ## Documentation
 
-| Document | Covers |
-| --- | --- |
-| [Installing](docs/install.md) | Downloads for each platform and unsigned builds |
-| [Docker hosting](docs/docker.md) | Running the daemon with Docker Compose and connecting to it |
-| [Accounts and credentials](docs/accounts.md) | IMAP/SMTP/JMAP setup and credential protection |
-| [Daemon](docs/daemon.md) | Remote HTTPS, Unix sockets, supervisors, notifications |
-| [Extensions](docs/extensions.md) | Manifests, capabilities and the Wasm sandbox |
-| [Development](docs/development.md) | Building, running, logging, tests and releases |
-| [Project direction](docs/README.md) | Architecture, terminology and how agents work here |
-| [Storage](docs/storage.md) | `colecto.db` records, bounds and legacy import |
-| [Alpha roadmap](docs/alpha.md) | What alpha means and what is left |
-| [Performance](docs/performance/README.md) | Resource measurement and baselines |
-| [Design](docs/DESIGN.md) and [product](docs/PRODUCT.md) | Visual language and product principles |
-| [Prototype design](docs/prototype-design.md) | The original local demo design |
-| [Client review](docs/client-review.md), [UX review](docs/ux-review.md) | UI audits and adversarial fixtures |
-| [Specs](docs/superpowers/specs/) and [plans](docs/superpowers/plans/) | Approved designs and their implementation status |
-| [Agent instructions](AGENTS.md) | Rules for AI agents working in this repository |
+Everything is indexed in [docs/README.md](docs/README.md): installing, accounts,
+self-hosting, development, architecture, the roadmap, extensions and design.
+
+## License
+
+Colecto is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
+your option.

@@ -155,3 +155,32 @@ The implementation follows the official [keyring API](https://docs.rs/keyring/3.
 OS-keychain behavior on macOS/Windows, live provider connections, and real phone
 interaction require platform testing; automated tests use an injected credential
 store or a password vault with sample connection settings.
+
+## Reading and sending
+
+The list and offline snapshots still hold decoded text only. Opening a message
+calls `GET /messages/{id}/content` (`messages.read`), which fetches the raw
+message from the provider without marking it seen and returns full text, HTML,
+attachment metadata, and `Message-ID`/`References`/`Reply-To`/`To`/`Cc`.
+Messages above 30 MB are refused. Messages above 2 MB are listed from headers
+and only load when opened. If the provider is unreachable the reader falls back
+to the saved text, and replies are sent without threading headers.
+
+HTML is untrusted. The reader renders it in an `<iframe sandbox>` with
+`srcdoc`: no scripts, forms, plugins or same-origin access, and links open in a
+new tab. The frame's own policy blocks remote images until the owner chooses
+**Load remote images**; the Host policy allows inline styles and `https:` images
+only so that frame can render. `cid:` inline images are not shown yet.
+
+`GET /messages/{id}/attachments/{index}` returns one attachment as
+`application/octet-stream` with an attachment disposition, so it can never
+render in the app origin.
+
+Sending accepts comma-separated `recipient` and `cc`, `in_reply_to` and
+`references`, base64 `attachments` (at most 20 files and 25 MB total; the
+`/send` route accepts bodies up to 36 MB), and `forward_of`, which re-attaches
+the original message's attachments on the server and also requires
+`messages.read`. Drafts keep recipients, Cc, threading and `forward_of`, but not
+uploaded files. Delivery requests from API keys cannot include attachments or
+forwards, because owner approval shows text only. JMAP sends threading headers,
+multiple recipients and attachments.

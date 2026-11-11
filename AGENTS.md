@@ -1,14 +1,77 @@
 # Agent instructions
 
-- Temporarily disabled: do not use the `caveman` skill or `megacave` mode, even if a skill says to use it for coding tasks. Write all chat updates and replies in plain, natural language. Only use caveman if the user explicitly asks for it in the current session.
-- Add code comments only when needed; write them in plain, natural language.
-- Always seek helpful installed skills before work. Read relevant `SKILL.md`; follow workflows.
-- Coding: use `ponytail`. Make smallest complete change; reuse patterns. Avoid speculative abstractions, unused dependencies, junk code.
-- UI: use Emil Kowalski's installed `emil-design-eng` plus relevant animation/mobile skills. Other tasks: choose matching domain skills.
-- Read `docs/README.md` for product/architecture. Use justfiles for repeatable operations. Rust workspace changes: run `just verify`.
-- Tests: target changed behavior, important edge cases, regression risks. Avoid redundant/implementation-mirroring tests and excessive suites for trivial changes. Run relevant existing checks.
-- When a task is done and its checks pass, commit, push, and merge it automatically: branch off `main` if needed, push, open a PR, and merge it once required checks pass. Do not wait for approval unless something truly needs a human (failing checks you cannot fix, merge conflicts with unclear intent, missing access, or destructive history changes).
-- Decide routine reversible details autonomously; think through consequences. Ask direction only when missing intent materially changes work. Do not over-ask; maintainer may not know better.
-- Before scheduling heavy builds, linkers, tests, or benchmarks, always check available memory and effective limits (including ancestor cgroups), free storage, CPU quota/affinity, and current load/I/O pressure. Do not rely on host RAM totals. Choose concurrency that fits the available resources. On constrained machines, use `CARGO_BUILD_JOBS=1`; do not overlap heavy Cargo builds sharing a target directory. Wait for resource pressure to settle before collecting performance measurements.
+Colecto is run by AI agents with a human maintainer. These rules apply to every agent.
+Start with [docs/README.md](docs/README.md) (index, technologies, where files live) and
+[docs/architecture.md](docs/architecture.md).
 
-- Resource regressions: after feature changes, run `just perf-check` (verification plus three isolated resource samples). Preserve timestamped `docs/performance/results/` history locally and upload results as CI artifacts when CI is available. Refresh `docs/performance/baseline.json` from the final integrated run so git retains a reviewable feature baseline. Compare only matching workload/build/environment metadata; performance deltas are report-only until stable budgets are established. See `docs/performance/README.md`.
+## Skills
+
+- Before starting, list the skills installed for *you* (your global skills, for
+  example `~/.agents/skills/` or your client's equivalent) and read the `SKILL.md` of
+  every one that fits the task. Follow their workflows.
+- Interface and interaction work (Svelte components, layout, motion, mobile): use the
+  design-engineering skills, for example `emil-design-eng`, plus the relevant
+  animation, accessibility and mobile skills, and review with `break-ui` when you
+  finish a visible change.
+- Rust work: use any Rust, API-design, security or performance skills you have.
+- Svelte and TypeScript work: use Svelte or front-end skills you have, alongside the
+  design skills above.
+- Other tasks: pick the matching domain skills rather than forcing a UI workflow.
+- Do not use the `caveman`, `ultracave` or `megacave` styles unless the maintainer asks
+  in the current session. Write chat updates, comments and docs in plain, natural
+  language.
+
+## How to work
+
+- Make the smallest complete change. Reuse existing patterns. No speculative
+  abstractions, unused dependencies, empty frameworks or boilerplate nobody maintains.
+  Remove code you supersede.
+- Decide routine, reversible details yourself and state your assumptions. Ask only
+  when missing intent would materially change the work; the maintainer may not know
+  better.
+- Never describe a planned feature, platform or security property as working. Report
+  what you verified and what you did not.
+- Add code comments only where the reason is not obvious, in plain language.
+
+## Documentation
+
+Document as you go. Every relevant detail belongs in the docs, but nothing more.
+
+- Update the page that owns the topic (see the index in `docs/README.md`) in the same
+  change as the code. Add a new page only when no existing page fits, and link it from
+  the index.
+- Write for humans and agents alike: a one-line summary at the top, short sections
+  with descriptive headings, tables for limits, options and mappings, and exact names
+  of files, routes, fields and commands.
+- Record behaviour, limits, security boundaries and the reasons behind non-obvious
+  decisions. Do not record session logs, test counts or history; git keeps those.
+- Keep [docs/roadmap.md](docs/roadmap.md) current when you finish or start a roadmap
+  item.
+
+## Checks
+
+- Use the `just` recipes for repeatable operations (`just` lists them).
+- Rust changes: run `just verify`. UI changes: also `just test browser`.
+- Tests target changed behaviour, important edge cases and regression risks. Avoid
+  redundant, implementation-mirroring or oversized suites for small changes.
+- After feature changes, run `just perf-check` (verification plus three isolated
+  resource samples). Keep the timestamped history in `docs/performance/results/`
+  locally, and refresh `docs/performance/baseline.json` from the final integrated run.
+  Compare only runs with matching workload, build and environment metadata; deltas are
+  report-only for now. See `docs/performance/README.md`.
+
+## Machine resources
+
+Before heavy builds, linkers, tests or benchmarks, check available memory and the
+effective limits (including ancestor cgroups), free storage, CPU quota and affinity,
+and current load and I/O pressure; do not rely on host RAM totals. Choose concurrency
+that fits. On constrained machines use `CARGO_BUILD_JOBS=1` and never overlap heavy
+Cargo builds that share a target directory. Let resource pressure settle before
+taking performance measurements.
+
+## Shipping
+
+When a task is done and its checks pass, commit, push and merge it yourself: branch
+off `main` if needed, open a pull request, and merge it once the required checks pass.
+Wait for a human only when something truly needs one: failing checks you cannot fix,
+merge conflicts with unclear intent, missing access, or destructive history changes.
