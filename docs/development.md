@@ -88,7 +88,10 @@ for Linux, Windows, Android, and unsigned macOS and iOS, names each file
 `SHA256SUMS.txt`, and pushes the daemon image to
 `ghcr.io/hexvale-labs/colectod` (tags `vX.Y.Z`, `vX.Y`, `vX`, `latest`). To test the pipeline without releasing, start
 it by hand from the Actions tab (**Release → Run workflow**): it builds everything and
-publishes nothing. Nothing is code-signed; see
+publishes nothing. Tick **artifacts** to download the installers from the run; only tag
+runs and runs with that box ticked upload them, so the other runs cannot be failed
+by an outage of GitHub's artifact service. If a tag run fails on an upload, use
+**Re-run failed jobs**: the build caches make the rerun quick. Nothing is code-signed; see
 [installing](install.md). Release notes come from `.github/release-notes/<tag>.md`
 when that file exists. When the `AUR_SSH_PRIVATE_KEY` secret is set, the release also
 updates the `colecto`, `colecto-bin` and `colecto-git` AUR packages (see

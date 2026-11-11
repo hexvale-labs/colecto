@@ -21,6 +21,11 @@ on:
   schedule:
     - cron: "17 4 * * 1,4"
   workflow_dispatch:
+    inputs:
+      artifacts:
+        description: Upload the installers as workflow artifacts
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,6 +36,10 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Installers are uploaded only when something uses them: the publish job on tags, or a
+  # manual run with "artifacts" ticked. Other runs only build (and warm caches), so an
+  # artifact-service outage cannot fail them or cost them their cache save.
+  UPLOAD: ${{ startsWith(github.ref, 'refs/tags/') || inputs.artifacts }}
   CARGO_INCREMENTAL: 0
   TAURI_CLI: "@tauri-apps/cli@2.12.4"
 
@@ -97,6 +106,8 @@ jobs:
         with:
           shared-key: release-${{ matrix.target }}-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Dependencies built before a later failure (bundling, upload) are still valid.
+          cache-on-failure: true
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -136,6 +147,7 @@ jobs:
           [ -n "$(ls dist)" ]
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.UPLOAD == 'true'
         with:
           name: ${{ matrix.platform }}-${{ matrix.arch }}
           path: dist/*
@@ -173,6 +185,8 @@ jobs:
         with:
           shared-key: release-${{ matrix.triple }}-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Dependencies built before a later failure (bundling, upload) are still valid.
+          cache-on-failure: true
 
       # The Gradle version and Android plugins come from the Tauri CLI's project template.
       # Only downloads are cached; build outputs are not reused.
@@ -254,6 +268,7 @@ jobs:
           ls -l dist
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.UPLOAD == 'true'
         with:
           name: android-${{ matrix.arch }}
           path: dist/*
@@ -277,6 +292,8 @@ jobs:
         with:
           shared-key: release-aarch64-apple-ios-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Dependencies built before a later failure (bundling, upload) are still valid.
+          cache-on-failure: true
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -322,6 +339,7 @@ jobs:
           ls -l "$GITHUB_WORKSPACE/dist"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.UPLOAD == 'true'
         with:
           name: ios
           path: dist/*
