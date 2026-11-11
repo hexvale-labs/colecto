@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { initial, hue } from '../lib/initial';
-  import { when } from '../lib/when';
-  import Icon from '../Icon.svelte';
-  import type { Labels } from '../lib/api';
+  import { initial, hue } from '../../lib/initial';
+  import { when } from '../../lib/when';
+  import Icon from '../../Icon.svelte';
+  import type { Labels } from '../../lib/api';
   import { onMount } from 'svelte';
-  import type { Draft, Message, MessageContent, ReaderService, AttachmentInfo } from '../lib/api';
-  import { replyDraft, type ReplyMode } from '../lib/reply';
-  import { copyText } from '../lib/copy';
+  import type { Draft, Message, MessageContent, ReaderService, AttachmentInfo } from '../../lib/api';
+  import { replyDraft, type ReplyMode } from '../../lib/reply';
+  import { copyText } from '../../lib/copy';
   let { id, service, self = '', folder = 'Inbox', labels, labeling, labelError = '', remoteImages: alwaysRemote = false, onlabel, onback, onreply }: { remoteImages?: boolean; labelError?: string; labels: Labels; labeling: boolean; onlabel: (name: string, remove: boolean) => void; id: string; folder?: string; self?: string; service: ReaderService; onback: () => void; onreply?: (draft: Draft) => void } = $props();
   let message = $state<Message | null>(null);
   let content = $state<MessageContent | null>(null);

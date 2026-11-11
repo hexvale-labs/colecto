@@ -5,7 +5,7 @@
 </script>
 <script lang="ts">
   import { onMount } from 'svelte';
-  import MailShell from './extensions/MailShell.svelte';
+  import MailShell from './extensions/mail-shell/MailShell.svelte';
   import Select from './Select.svelte';
   import FilePick from './FilePick.svelte';
   import InstallWarning from './InstallWarning.svelte';

@@ -5,5 +5,5 @@ ui/test-results/
 ui/playwright-report/
 .colecto*/
 .git/
-performance-results/
+docs/performance/results/
 crates/colecto-app/gen/

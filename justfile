@@ -1,11 +1,11 @@
 # Recipes are grouped into modules: `just build ui` (or `just build::ui`), `just test rust`, `just install all`.
 # A module name on its own runs its `all` recipe, so `just build` builds everything.
 
-mod install 'just/install.just'
-mod build 'just/build.just'
-mod check 'just/check.just'
-mod test 'just/test.just'
-mod run 'just/run.just'
+mod install 'scripts/just/install.just'
+mod build 'scripts/just/build.just'
+mod check 'scripts/just/check.just'
+mod test 'scripts/just/test.just'
+mod run 'scripts/just/run.just'
 
 # List every recipe, including those inside modules.
 [default]
@@ -21,7 +21,7 @@ verify: check::fmt check::rust check::lint test::rust check::ui test::ui build::
 
 # Measure three isolated daemon/browser workloads and retain timestamped history.
 perf: build::rust build::ui test::perf
-    python3 scripts/resource_bench.py
+    python3 scripts/python/resource_bench.py
 
 # Run the normal verification suite and record resource usage for feature changes.
 perf-check: verify perf

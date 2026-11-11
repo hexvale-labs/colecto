@@ -1,4 +1,4 @@
-set working-directory := '..'
+set working-directory := '../..'
 
 # Install everything a fresh checkout needs, except browsers for UI tests.
 [default]

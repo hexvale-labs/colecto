@@ -15,7 +15,7 @@ RUN apt-get update \
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
-COPY extensions extensions
+COPY ui/src/extensions ui/src/extensions
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p colecto-host --bin colecto-daemon \

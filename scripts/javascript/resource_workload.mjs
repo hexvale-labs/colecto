@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { createInterface } from 'node:readline';
-const require = createRequire(new URL('../ui/package.json', import.meta.url));
+const require = createRequire(new URL('../../ui/package.json', import.meta.url));
 const { chromium } = require('playwright');
 const [base, cycles] = process.argv.slice(2);
 const input = createInterface({ input: process.stdin });

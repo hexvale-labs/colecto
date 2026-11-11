@@ -73,11 +73,11 @@ const MAX_FILE: u64 = 4 * 1024 * 1024;
 impl Extensions {
     pub fn bundled() -> Self {
         let manifests: Vec<ExtensionManifest> = [
-            include_str!("../../../extensions/mail-shell/extension.toml"),
-            include_str!("../../../extensions/inbox/extension.toml"),
-            include_str!("../../../extensions/reader/extension.toml"),
-            include_str!("../../../extensions/composer/extension.toml"),
-            include_str!("../../../extensions/accounts/extension.toml"),
+            include_str!("../../../ui/src/extensions/mail-shell/extension.toml"),
+            include_str!("../../../ui/src/extensions/inbox/extension.toml"),
+            include_str!("../../../ui/src/extensions/reader/extension.toml"),
+            include_str!("../../../ui/src/extensions/composer/extension.toml"),
+            include_str!("../../../ui/src/extensions/accounts/extension.toml"),
         ]
         .into_iter()
         .map(|source| parse_manifest(source).expect("valid bundled manifest"))
@@ -311,7 +311,7 @@ mod tests {
     use super::*;
     #[test]
     fn toml_manifest_requires_metadata_and_known_permissions() {
-        let source = include_str!("../../../extensions/reader/extension.toml");
+        let source = include_str!("../../../ui/src/extensions/reader/extension.toml");
         assert_eq!(parse_manifest(source).unwrap().author, "Colecto");
         for invalid in [
             source.replace("api_version = 1", "api_version = 999"),
@@ -346,7 +346,7 @@ mod tests {
         assert!(!extensions.allows("host", "a", Capability::MessagesRead));
     }
     fn panel() -> String {
-        include_str!("../../../extensions/reader/extension.toml")
+        include_str!("../../../ui/src/extensions/reader/extension.toml")
             .replace("reader", "example")
             .replace("slot = \"example\"", "slot = \"panel\"")
     }

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { MailItem } from '../lib/api';
-  import { when } from '../lib/when';
-  import Icon from '../Icon.svelte';
+  import type { MailItem } from '../../lib/api';
+  import { when } from '../../lib/when';
+  import Icon from '../../Icon.svelte';
   let { items, grouped = true, fetching = false, fetchedAt = null, filtered = false, searching = false, selected, folder, loading, error, disabled, onopen, onretry }: {
     /** A search or label narrows the list. */ filtered?: boolean;
     /** A search is on its way to the mail service. */ searching?: boolean; grouped?: boolean; items: MailItem[]; selected: string | null; folder: 'Inbox' | 'Drafts' | 'Sent';

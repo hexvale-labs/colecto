@@ -17,7 +17,7 @@ import time
 import urllib.error
 import urllib.request
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 WORKLOAD = 'sample-mail-read-compose-v1'
 
 
@@ -170,7 +170,7 @@ def run_once(binary, with_ui, cycles):
                     raise RuntimeError('Daemon did not become ready')
                 sampler.thread.start()
                 if with_ui:
-                    worker = subprocess.Popen(['node', str(ROOT / 'scripts/resource_workload.mjs'), base, str(cycles)],
+                    worker = subprocess.Popen(['node', str(ROOT / 'scripts/javascript/resource_workload.mjs'), base, str(cycles)],
                                               cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                               text=True, start_new_session=True, env=isolated_environment(os.environ, directory, port))
                     sampler.browser_pid = worker.pid
@@ -229,7 +229,7 @@ def main():
     parser.add_argument('--binary', type=Path)
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--cycles', type=int, default=12)
-    parser.add_argument('--history', type=Path, default=ROOT / 'performance-results')
+    parser.add_argument('--history', type=Path, default=ROOT / 'docs/performance/results')
     parser.add_argument('--skip-ui', action='store_true')
     args = parser.parse_args()
     if platform.system() != 'Linux' or not Path('/proc/self/status').exists():
@@ -253,7 +253,7 @@ def main():
               'compatibility': {'machine': machine, 'workload': WORKLOAD, 'cycles': args.cycles,
                                 'ui': not args.skip_ui, 'profile': binary.parent.name, 'binary': binary.name,
                                 'browser_driver': browser_version, 'cpu_count': os.cpu_count(),
-                                'worker_sha256': hashlib.sha256((ROOT / 'scripts/resource_workload.mjs').read_bytes()).hexdigest() if not args.skip_ui else None, 'node': command('node', '--version') if not args.skip_ui else None},
+                                'worker_sha256': hashlib.sha256((ROOT / 'scripts/javascript/resource_workload.mjs').read_bytes()).hexdigest() if not args.skip_ui else None, 'node': command('node', '--version') if not args.skip_ui else None},
               'samples': []}
     for run in range(args.runs):
         print(f'Measuring run {run + 1}/{args.runs} ({args.cycles} cycles)', flush=True)

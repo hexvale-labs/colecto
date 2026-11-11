@@ -1,4 +1,4 @@
-set working-directory := '..'
+set working-directory := '../..'
 
 # Build every workspace crate and the bundled UI.
 [default]
