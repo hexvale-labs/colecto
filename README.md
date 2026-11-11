@@ -13,7 +13,7 @@
   <a href="https://github.com/hexvale-labs/colecto/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/hexvale-labs/colecto?sort=semver&display_name=tag&label=release&color=a2d6b1"></a>
   <a href="https://github.com/hexvale-labs/colecto/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/hexvale-labs/colecto/ci.yml?branch=main&label=CI"></a>
   <a href="https://github.com/hexvale-labs/colecto/pkgs/container/colecto-daemon"><img alt="Docker image" src="https://img.shields.io/badge/docker-ghcr.io-2496ed?logo=docker&logoColor=white"></a>
-  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android%20%7C%20iOS%20%7C%20web-555">
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20Android%20%7C%20web-555">
   <img alt="Built with Rust and Tauri" src="https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri-b7410e?logo=rust">
 </p>
 
@@ -49,7 +49,7 @@
 - **Encrypted credentials**, protected by your system keychain or a master password
 - **Notifications** in the app and on the desktop, positioned where you want them
 - **Your accent colour**, on a calm dark interface
-- **Runs everywhere:** Linux, Windows, macOS, Android, iOS and the browser
+- **Platforms:** Linux, Windows, Android and the browser
 
 Have an idea? [Open an issue](https://github.com/hexvale-labs/colecto/issues/new) and
 tell us about it.
@@ -61,7 +61,7 @@ tell us about it.
 - Conversation threading
 - Inline (`cid:`) images in HTML mail
 - Encryption of stored mail
-- Native push notifications on Android and iOS
+- Native push notifications on Android
 - Hosting several users on one daemon
 
 ### Not planned
@@ -77,6 +77,12 @@ tell us about it.
    devices are off, then point every app at it in **Settings → Servers**.
 
 To build and run from a checkout instead, see [development](docs/development.md).
+
+Release CI also builds macOS DMGs and iOS IPAs, but these are experimental Apple
+artifacts, not supported platforms. The DMGs are not Developer ID signed or
+notarized; macOS may allow a manual Gatekeeper exception. Unsigned IPAs cannot run
+on a standard iPhone until signed and provisioned for the device. See
+[Apple build limitations](docs/install.md#experimental-apple-builds).
 
 ## Security
 

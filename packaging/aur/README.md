@@ -12,6 +12,25 @@ fills in checksums with `updpkgsums`, regenerates `.SRCINFO` and pushes each pac
 changed. `colecto-git` derives its version itself, so it is only pushed when its PKGBUILD
 changes. The job is skipped while the `AUR_SSH_PRIVATE_KEY` repository secret is missing.
 
+## GitHub setup
+
+Create an [AUR account](https://aur.archlinux.org/register) and generate a dedicated
+SSH key on your own machine:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/colecto-aur -N '' -C colecto-aur-ci
+```
+
+Paste `~/.ssh/colecto-aur.pub` into your AUR account's **SSH Public Key** field.
+In GitHub, open **Settings → Secrets and variables → Actions** and create
+`AUR_SSH_PRIVATE_KEY` containing the entire private `~/.ssh/colecto-aur` file,
+including its BEGIN and END lines. Keep that private key out of Git.
+Your AUR account must own or co-maintain any existing packages with these names.
+
+GHCR publishing uses the workflow's `GITHUB_TOKEN`; no additional token is needed.
+After the first image publishes, set the organization's `colectod` package visibility
+to public if anonymous downloads are wanted.
+
 To publish by hand from an Arch machine or container, run as root:
 
 ```sh

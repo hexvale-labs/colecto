@@ -81,6 +81,10 @@ def main():
         print(f'{name}: rendered in {repo}')
         if not args.push:
             continue
+        # Rendering runs as builder; restore ownership before root invokes Git.
+        shutil.chown(repo, os.getuid(), os.getgid())
+        for path in repo.rglob('*'):
+            shutil.chown(path, os.getuid(), os.getgid())
         git = ['git', '-C', str(repo), '-c', 'user.name=Colecto release bot', '-c', 'user.email=releases@colecto.invalid']
         subprocess.run([*git, 'add', 'PKGBUILD', '.SRCINFO'], check=True)
         if subprocess.run([*git, 'diff', '--cached', '--quiet']).returncode == 0:
