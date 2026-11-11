@@ -122,6 +122,10 @@ dependency tree is never rebuilt from scratch.
   stops resolving or slows to a crawl. It skips `apt-get update` unless the image's
   package lists are stale. CI installs Playwright's libraries through it instead of
   `playwright install --with-deps`.
+- The release profile has no LTO. Thin LTO re-optimized every cached dependency at
+  each link: rebuilding the app after a change took 700 s with it and 255 s without
+  (446 s of link time down to 4.5 s, measured locally with one job), and the binary
+  was larger.
 - The daemon image has no layer cache. Its job (about 5 minutes) is never the slowest
   in a release, and the Rust caches (750 to 850 MB per release target) already fill
   most of the budget.
