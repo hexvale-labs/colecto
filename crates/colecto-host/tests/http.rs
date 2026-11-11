@@ -346,36 +346,21 @@ async fn extension_controls_are_host_only_and_revocation_reaches_service_boundar
             "POST",
             "/api/v1/extensions/reader",
             "reader",
-            r#"{"enabled":true,"grants":["messages.read"]}"#,
+            r#"{"enabled":true}"#,
             403,
-        ),
-        (
-            "POST",
-            "/api/v1/extensions/reader",
-            "host",
-            r#"{"enabled":true,"grants":["messages.send"]}"#,
-            403,
-        ),
-        (
-            "POST",
-            "/api/v1/extensions/reader",
-            "host",
-            r#"{"enabled":true,"grants":["accounts.manage"]}"#,
-            400,
         ),
         (
             "POST",
             "/api/v1/extensions/reader",
             "host",
             r#"{"enabled":true,"grants":[]}"#,
-            200,
+            400,
         ),
-        ("GET", "/api/v1/messages/1", "reader", "", 403),
         (
             "POST",
             "/api/v1/extensions/inbox",
             "host",
-            r#"{"enabled":false,"grants":["messages.list"]}"#,
+            r#"{"enabled":false}"#,
             200,
         ),
         ("GET", "/api/v1/messages", "inbox", "", 403),
@@ -383,18 +368,10 @@ async fn extension_controls_are_host_only_and_revocation_reaches_service_boundar
             "POST",
             "/api/v1/extensions/inbox",
             "host",
-            r#"{"enabled":true,"grants":["messages.list"]}"#,
+            r#"{"enabled":true}"#,
             200,
         ),
         ("GET", "/api/v1/messages", "inbox", "", 200),
-        ("GET", "/api/v1/drafts", "inbox", "", 403),
-        (
-            "POST",
-            "/api/v1/extensions/external",
-            "host",
-            r#"{"enabled":true,"grants":[]}"#,
-            403,
-        ),
     ] {
         let response = router
             .clone()
@@ -448,15 +425,8 @@ async fn installed_wasm_uses_consented_account_grants_and_cannot_call_http_servi
         .oneshot(request("POST", run, "host", origin, r#"{"action":"open"}"#))
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    for (policy, text) in [
-        (r#"{"enabled":true,"grants":[]}"#, "Permission required"),
-        (
-            r#"{"enabled":true,"grants":["account.read"]}"#,
-            "Account disconnected",
-        ),
-        (r#"{"enabled":true,"grants":[]}"#, "Permission required"),
-    ] {
+    assert_eq!(response.status(), StatusCode::OK);
+    for (policy, text) in [(r#"{"enabled":true}"#, "Account disconnected")] {
         let response = router
             .clone()
             .oneshot(request(
@@ -510,7 +480,7 @@ async fn installed_wasm_uses_consented_account_grants_and_cannot_call_http_servi
         body["text"]
             .as_str()
             .unwrap()
-            .contains("Permission required")
+            .contains("Account disconnected")
     );
     let response = restarted
         .oneshot(request(
@@ -1083,6 +1053,137 @@ async fn mcp_answers_only_after_the_owner_turns_it_on_and_preferences_are_owner_
         serde_json::from_slice(&to_bytes(read.into_body(), 4096).await.unwrap()).unwrap();
     assert_eq!(body["mcp"], true);
     assert!(!dir.path().join("preferences.json").exists());
+}
+
+#[tokio::test]
+async fn assets_require_owner_host_identity_and_enabled_package() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = authenticated(app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    ))
+    .await;
+    let origin = "http://127.0.0.1:4173";
+    let package = include_bytes!("../../../docs/extensions/examples/oneko.colectoext");
+    let response = router
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/extensions",
+            "host",
+            origin,
+            &serde_json::json!({"package":package.as_slice()}).to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let path = "/api/v1/extensions/oneko/assets/oneko.png";
+    let response = router
+        .clone()
+        .oneshot(request("GET", path, "host", origin, ""))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "image/png");
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(
+        response.headers()["content-security-policy"],
+        "sandbox; default-src 'none'"
+    );
+    let response = router
+        .clone()
+        .oneshot(request("GET", path, "reader", origin, ""))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let response = router
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/extensions/oneko",
+            "host",
+            origin,
+            r#"{"enabled":false}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = router
+        .oneshot(request("GET", path, "host", origin, ""))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn binary_package_uploads_exceed_the_default_json_body_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = authenticated(app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    ))
+    .await;
+    let manifest =
+        include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");
+    // A large custom section is valid Wasm and exercises upload/storage without expensive guest work.
+    let mut module = wat::parse_str("(module (func (export \"run\")))").unwrap();
+    let size = 1024 * 1024 + 1;
+    module.push(0);
+    let mut remaining = size;
+    loop {
+        let byte = (remaining & 127) as u8;
+        remaining >>= 7;
+        module.push(byte | if remaining > 0 { 128 } else { 0 });
+        if remaining == 0 {
+            break;
+        }
+    }
+    module.push(0);
+    module.resize(module.len() + size - 1, 0);
+    // Store the ZIP rather than deflating this intentionally repetitive custom section.
+    let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    use std::io::Write;
+    for (name, data) in [
+        ("manifest.toml", manifest.as_bytes()),
+        ("module.wasm", module.as_slice()),
+    ] {
+        archive
+            .start_file(
+                name,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .unwrap();
+        archive.write_all(data).unwrap();
+    }
+    let package = archive.finish().unwrap().into_inner();
+    let mut upload = request(
+        "POST",
+        "/api/v1/extensions",
+        "host",
+        "http://127.0.0.1:4173",
+        "",
+    );
+    upload
+        .headers_mut()
+        .insert("content-type", "application/octet-stream".parse().unwrap());
+    *upload.body_mut() = Body::from(package);
+    let response = router.clone().oneshot(upload).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = router
+        .oneshot(request(
+            "GET",
+            "/api/v1/extensions",
+            "host",
+            "http://127.0.0.1:4173",
+            "",
+        ))
+        .await
+        .unwrap();
+    let list = to_bytes(response.into_body(), 65536).await.unwrap();
+    assert!(list.len() < 8192);
 }
 
 #[tokio::test]

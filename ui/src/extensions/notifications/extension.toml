@@ -1,0 +1,8 @@
+id = "notifications"
+name = "Notifications"
+author = "Colecto"
+description = "New mail and delivery approval notifications."
+api_version = 1
+slot = "overlay"
+capabilities = ["window.overlay"]
+z_index = 500

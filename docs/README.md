@@ -24,15 +24,15 @@ The client must preserve mail and account integrity even when an extension fails
 
 Expose small, typed, versioned APIs for those services. Extensions request access
 through the Host; they never access credential stores, databases, unrestricted
-networking, or Tauri commands directly. Grant explicit capabilities scoped to
-operations and accounts, with user consent for sensitive access. Validate every
+networking, or Tauri commands directly. Require declared capabilities for operations, with consent at installation. Enabled
+extensions receive all declared capabilities on every account. Validate every
 request at the trusted boundary, including bundled extensions' requests.
 
 The app UI should be composed of replaceable bundled extensions, using the same
 public contracts as third-party extensions. Keep only bootstrapping, permission
 prompts, recovery, and other essential host controls outside that composition.
 The Host owns extension discovery, manifest/API compatibility checks, capability
-grants, lifecycle, isolation, and failure recovery. Disabling an extension must
+capabilities, lifecycle, isolation, and failure recovery. Disabling an extension must
 not disable core services or prevent recovery.
 
 Third-party panels run in a fuel- and memory-limited Wasmi runtime without WASI.
@@ -111,7 +111,7 @@ The approved [multi-account design](superpowers/specs/2026-11-07-multi-account-d
 adds per-account stores and account-bound bundled service clients. The core owns
 registry/vault rules; the Host supplies the operating system SecretStore adapter.
 Only trusted host controls manage accounts or credential protection. Existing
-mail operations retain their module grants and explicit account identifier.
+mail operations check enabled state, declared capabilities and explicit account identifiers.
 Secrets never cross into read APIs or bundled extensions. This continues to be a
 local prototype, not a remote multi-user service. The Wasm panel sandbox is
 described separately below.
@@ -121,7 +121,7 @@ described separately below.
 See [extension manifests and capabilities](extensions.md) for the TOML package
 contract, runtime controls, and current trust boundary. Bundled mail UI now loads
 through an explicit registry; the trusted Host retains credential and recovery
-controls. Third-party Wasm panels start disabled with no grants. Permissions and packages
+controls. Third-party Wasm packages install enabled with all declared capabilities. Permissions and packages
 persist across restarts; an optional Tauri runner exposes no guest native IPC.
 
 

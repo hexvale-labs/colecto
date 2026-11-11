@@ -103,7 +103,7 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 .status-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--ink-3); }
 .status-dot.on { background: var(--mint); box-shadow: 0 0 5px color-mix(in oklch, var(--mint) 55%, transparent); }
 .avatar { display: inline-grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: oklch(0.33 0.055 var(--hue, 158)); color: oklch(0.93 0.045 var(--hue, 158)); font-size: 12.5px; font-weight: 640; }
-.account-error { position: absolute; z-index: 50; top: 52px; right: 12px; max-width: min(90%, 480px); }
+.account-error { position: absolute; z-index: var(--layer-menus); top: 52px; right: 12px; max-width: min(90%, 480px); }
 .account-pane { display: flex; align-items: center; gap: 2px; height: 100%; min-height: 0; padding: 0 6px 0 4px; }
 .account-pane .select { flex: 1; min-width: 0; }
 .account-pane .select-trigger, .topbar .select-trigger { width: 100%; min-width: 0; height: 40px; padding: 0 8px 0 6px; gap: 10px; border: 0; border-radius: 7px; background: none; }
@@ -127,12 +127,12 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 .dock-move .select-trigger:hover:not(:disabled), .dock-move .select.open .select-trigger { background: var(--raise); color: var(--ink); }
 .dock-move .select-trigger > .icon:last-child { display: none; }
 .dock-move .select-menu { left: auto; right: 0; min-width: 210px; transform-origin: top right; }
-.pane { position: absolute; z-index: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.pane { position: absolute; z-index: var(--layer-content); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .pane[hidden] { display: none; }
 /* An open listbox may extend past a short pane, like the account switcher's. */
-.pane:has(.select.open) { z-index: 6; overflow: visible; }
+.pane:has(.select.open) { z-index: var(--layer-expandedPane); overflow: visible; }
 /* A 1px line you can see, with a wider grip you can hit. */
-.dock-gutter { position: absolute; z-index: 4; background: var(--line-soft); touch-action: none; outline: none; transition: background-color 140ms ease; }
+.dock-gutter { position: absolute; z-index: var(--layer-gutter); background: var(--line-soft); touch-action: none; outline: none; transition: background-color 140ms ease; }
 .dock-gutter::before { content: ''; position: absolute; inset: 0 -3px; }
 .dock-gutter.column::before { inset: -3px 0; }
 .dock-gutter.row { cursor: col-resize; }
@@ -142,7 +142,7 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 .dock-area[data-resizing] .pane { pointer-events: none; }
 .dock-area[data-resizing='row'] { cursor: col-resize; }
 .dock-area[data-resizing='column'] { cursor: row-resize; }
-.drop-overlay { position: absolute; inset: 0; z-index: 20; cursor: grabbing; }
+.drop-overlay { position: absolute; inset: 0; z-index: var(--layer-drag); cursor: grabbing; }
 .drop-preview { position: absolute; border: 1.5px solid color-mix(in oklch, var(--mint) 65%, transparent); border-radius: 3px; background: color-mix(in oklch, var(--mint) 11%, transparent); transition: left 160ms var(--ease-out), top 160ms var(--ease-out), width 160ms var(--ease-out), height 160ms var(--ease-out); }
 .drag-ghost { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px; background: var(--float); border: 1px solid var(--line); color: var(--ink); font-size: 12.5px; font-weight: 600; box-shadow: 0 8px 20px -6px oklch(0 0 0 / 0.6); pointer-events: none; }
 .drag-ghost .icon { color: var(--mint); }
@@ -191,7 +191,7 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 .mailbox { display: flex; flex-direction: column; flex: 1; min-height: 0; container: mailbox / inline-size; border-top: 1px solid var(--line-soft); }
 .folder-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .message-list { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 6px 12px; }
-.day { position: sticky; top: 0; z-index: 1; padding: 14px 10px 6px; background: var(--bg); color: var(--ink-3); font-size: 12px; font-weight: 600; letter-spacing: 0; }
+.day { position: sticky; top: 0; z-index: var(--layer-content); padding: 14px 10px 6px; background: var(--bg); color: var(--ink-3); font-size: 12px; font-weight: 600; letter-spacing: 0; }
 .mail-item { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'sender date' 'subject subject' 'preview preview'; column-gap: 10px; width: 100%; padding: 9px 10px 10px 18px; border-radius: 9px; text-align: left; transition: background-color 120ms ease, transform 120ms var(--ease-out); }
 .mail-item:hover:not(:disabled) { background: var(--raise); }
 .mail-item.selected { background: var(--select); }
@@ -240,7 +240,7 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 
 /* Reader and composer widgets */
 .detail { container: detail / inline-size; display: flex; flex-direction: column; min-height: 100%; }
-.detail-toolbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 48px; padding: 0 12px 0 24px; background: color-mix(in oklch, var(--bg) 86%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.detail-toolbar { position: sticky; top: 0; z-index: var(--layer-toolbar); display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 48px; padding: 0 12px 0 24px; background: color-mix(in oklch, var(--bg) 86%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .detail-toolbar .back { display: none; margin-left: -8px; }
 .toolbar-crumb { margin-right: auto; color: var(--ink-3); font-size: 13px; font-weight: 540; }
 .toolbar-actions { display: flex; gap: 2px; }
@@ -313,7 +313,7 @@ button.attachment:hover:not(:disabled) { background: var(--control); }
 }
 
 /* Settings: a card floating over the workspace, which stays put (and inert) underneath. */
-.settings-overlay { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 28px; background: oklch(0.08 0.004 165 / 0.62); transition: opacity 180ms var(--ease-out); }
+.settings-overlay { position: fixed; inset: 0; z-index: var(--layer-settings); display: grid; place-items: center; padding: 28px; background: oklch(0.08 0.004 165 / 0.62); transition: opacity 180ms var(--ease-out); }
 @starting-style { .settings-overlay { opacity: 0; } }
 .settings-window { display: grid; grid-template-columns: 228px minmax(0, 1fr); width: min(1080px, 100%); height: min(780px, 100%); border: 1px solid var(--line); border-radius: 16px; background: var(--bg); box-shadow: 0 40px 100px -30px oklch(0 0 0 / 0.8), 0 2px 8px oklch(0 0 0 / 0.3); overflow: hidden; outline: none; transition: transform 220ms var(--ease-out), opacity 220ms var(--ease-out); }
 @starting-style { .settings-window { opacity: 0; transform: scale(0.97) translateY(6px); } }
@@ -436,8 +436,8 @@ p.error-box.boot { padding: 12px 14px; color: oklch(0.9 0.04 30); }
 .select-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 200px; height: 36px; padding: 0 10px 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunk); color: var(--ink); font-size: 13.5px; text-align: left; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; }
 .select-trigger > .icon { color: var(--ink-3); }
 .select-trigger:hover:not(:disabled) { border-color: oklch(0.36 0.01 165); }
-.select-scrim { position: fixed; inset: 0; z-index: 29; }
-.select-menu { position: absolute; z-index: 30; left: 0; min-width: 100%; max-height: min(320px, 60vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--float); box-shadow: 0 18px 40px -10px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.25); outline: none; transition: opacity 180ms var(--ease-out), transform 200ms var(--ease-out), filter 180ms var(--ease-out); }
+.select-scrim { position: fixed; inset: 0; z-index: var(--layer-scrim); }
+.select-menu { position: absolute; z-index: var(--layer-menus); left: 0; min-width: 100%; max-height: min(320px, 60vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--float); box-shadow: 0 18px 40px -10px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.25); outline: none; transition: opacity 180ms var(--ease-out), transform 200ms var(--ease-out), filter 180ms var(--ease-out); }
 .select-menu.below { top: calc(100% + 6px); transform-origin: top left; }
 .select-menu.above { bottom: calc(100% + 6px); transform-origin: bottom left; }
 /* Grow out of the trigger: a little scale, a little travel, a hint of blur to soften the first frames. */
@@ -484,7 +484,7 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .command-runner footer { display: flex; gap: 16px; padding: 9px 14px; border-top: 1px solid var(--line-soft); color: var(--ink-3); font-size: 12px; }
 .command-runner footer span { display: inline-flex; align-items: center; gap: 4px; }
 
-.stress-picker { position: fixed; right: 12px; bottom: 12px; z-index: 40; display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--float); border: 1px solid var(--line); }
+.stress-picker { position: fixed; right: 12px; bottom: 12px; z-index: var(--layer-settings); display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--float); border: 1px solid var(--line); }
 .stress-picker button { padding: 6px 10px; border-radius: 7px; font-size: 12.5px; color: var(--ink-2); }
 .stress-picker button[aria-pressed='true'] { background: var(--raise); color: var(--ink); }
 .stress-preview { display: grid; grid-template-columns: 344px minmax(0, 1fr); gap: 1px; background: var(--line-soft); }
@@ -500,7 +500,7 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
   .compose-icon { width: 44px; height: 44px; }
   .topbar .select-trigger { width: auto; padding: 0 6px; height: 44px; }
   .dock-area.compact .pane { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
-  .folder-nav { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; justify-content: space-around; gap: 0; padding: 4px 8px env(safe-area-inset-bottom); background: var(--bg); border-top: 1px solid var(--line-soft); }
+  .folder-nav { position: fixed; z-index: var(--layer-drag); left: 0; right: 0; bottom: 0; justify-content: space-around; gap: 0; padding: 4px 8px env(safe-area-inset-bottom); background: var(--bg); border-top: 1px solid var(--line-soft); }
   .folder-nav button { flex: 1; flex-direction: column; justify-content: center; gap: 3px; min-width: 44px; height: auto; min-height: 56px; padding: 4px; font-size: 11.5px; }
   .folder-nav button.active { background: none; color: var(--mint); }
   .folder-nav .count { display: none; }
@@ -535,7 +535,7 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 }
 
 /* Notifications */
-.toasts { position: fixed; z-index: 60; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 24px)); pointer-events: none; }
+.toasts { position: fixed; z-index: var(--layer-bundledOverlay); display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 24px)); pointer-events: none; }
 .toasts[data-position^='top'] { top: 64px; flex-direction: column-reverse; }
 .toasts[data-position^='bottom'] { bottom: 16px; }
 .toasts[data-position$='left'], .toasts[data-position='left'] { left: 16px; }
@@ -598,3 +598,8 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 
 .list-status { display: inline-flex; align-items: center; gap: 8px; }
 .copy-tool.push { margin-left: auto; }
+
+.app-shell { position: relative; isolation: isolate; z-index: var(--layer-workspace); }
+.install-warning { z-index: var(--layer-installDialog); }
+
+.command-runner { z-index: var(--layer-commandRunner); }

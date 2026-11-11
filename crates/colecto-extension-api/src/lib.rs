@@ -217,6 +217,8 @@ pub enum Capability {
     MessagesSend,
     #[serde(rename = "messages.label")]
     MessagesLabel,
+    #[serde(rename = "window.overlay")]
+    WindowOverlay,
     /// Lets an API key move the owner's open Colecto windows to a page. Never granted to extensions.
     #[serde(rename = "app.navigate")]
     AppNavigate,
@@ -247,6 +249,8 @@ pub struct ExtensionManifest {
     pub name: String,
     pub api_version: u32,
     pub slot: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_index: Option<u16>,
     pub capabilities: Vec<Capability>,
 }
 
@@ -256,14 +260,12 @@ pub struct ExtensionState {
     pub manifest: ExtensionManifest,
     pub bundled: bool,
     pub enabled: bool,
-    pub grants: Vec<Capability>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtensionPolicyInput {
     pub enabled: bool,
-    pub grants: Vec<Capability>,
 }
 
 #[derive(Deserialize)]

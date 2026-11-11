@@ -4,8 +4,8 @@
   let { value, disabled = false, onchange }: { value: Corner; disabled?: boolean; onchange: (corner: Corner) => void } = $props();
   // Clockwise from the top left, so arrow keys walk around the frame.
   const corners: { value: Corner; label: string }[] = [
-    { value: 'top-left', label: 'Top left' }, { value: 'top', label: 'Top' }, { value: 'top-right', label: 'Top right' },
-    { value: 'right', label: 'Right' }, { value: 'bottom-right', label: 'Bottom right' }, { value: 'bottom', label: 'Bottom' },
+    { value: 'top-left', label: 'Top left' }, { value: 'top', label: 'Top center' }, { value: 'top-right', label: 'Top right' },
+    { value: 'right', label: 'Right' }, { value: 'bottom-right', label: 'Bottom right' }, { value: 'bottom', label: 'Bottom center' },
     { value: 'bottom-left', label: 'Bottom left' }, { value: 'left', label: 'Left' },
   ];
 </script>

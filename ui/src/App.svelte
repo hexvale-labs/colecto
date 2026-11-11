@@ -6,7 +6,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import MailShell from './extensions/mail-shell/MailShell.svelte';
-  import Select from './Select.svelte';
+  import OverlayLayer from './OverlayLayer.svelte';
+  import { capabilityLabel } from './lib/capabilities';
   import FilePick from './FilePick.svelte';
   import InstallWarning from './InstallWarning.svelte';
   import mark from './assets/logo-square.svg';
@@ -35,32 +36,34 @@
     } catch (e) { error = (e as Error).message; }
     finally { loading = false; }
   }
-  async function update(extension: ExtensionState, enabled: boolean, grants: Capability[]) {
+  async function update(extension: ExtensionState, enabled: boolean) {
     busy = true; error = '';
-    try { await extensionHost.update(account, extension.manifest.id, enabled, grants); await reload(); if (extension.manifest.id === 'mail-shell' && !enabled) managing = true; }
+    try { await extensionHost.update(account, extension.manifest.id, enabled); await reload(); if (extension.manifest.id === 'mail-shell' && !enabled) managing = true; }
     catch (e) { const message = (e as Error).message; await reload(); error ||= message; }
     finally { busy = false; }
   }
-  function review(event: SubmitEvent) {
+  let requested = $state<Capability[]>([]);
+  async function review(event: SubmitEvent) {
     event.preventDefault();
     const file = packageFile?.[0];
     if (!file) return;
     if (!file.name.endsWith('.colectoext')) { error = 'Choose a .colectoext extension package.'; return; }
-    if (file.size > 96 * 1024) { error = 'Extension packages must be at most 96 KiB.'; return; }
-    error = ''; installNotice = ''; warning = file;
+    if (file.size > 16 * 1024 * 1024) { error = 'Extension packages must be at most 16 MiB.'; return; }
+    error = ''; installNotice = '';
+    try { requested = (await extensionHost.review(new Uint8Array(await file.arrayBuffer()))).capabilities; warning = file; } catch (e) { error = (e as Error).message; }
   }
   async function install(file: File) {
     warning = null;
     busy = true; error = ''; installNotice = '';
     try {
-      await extensionHost.install(Array.from(new Uint8Array(await file.arrayBuffer())));
-      installNotice = 'Installed disabled with no account access. Review the requested permissions before enabling.';
+      await extensionHost.install(new Uint8Array(await file.arrayBuffer()));
+      installNotice = 'Installed and enabled with all requested capabilities.';
       await reload();
     } catch (e) { const message = (e as Error).message; await reload(); error ||= message; }
     finally { busy = false; }
   }
   async function remove(extension: ExtensionState) {
-    if (!window.confirm(`Remove ${extension.manifest.name} and all its grants? Saved mail will be kept.`)) return;
+    if (!window.confirm(`Remove ${extension.manifest.name}? Saved mail will be kept.`)) return;
     busy = true; error = '';
     try { await extensionHost.remove(extension.manifest.id); await reload(); }
     catch (e) { const message = (e as Error).message; await reload(); error ||= message; }
@@ -79,12 +82,12 @@
 
 {#snippet extensionSettings(workspace?: Workspace)}
   <section class="extension-settings" aria-labelledby="extensions-title">
-    <header class="section-head"><h2 id="extensions-title">Extensions</h2><p>Turn extensions on or off and decide which account data each one may use. Changes apply to new requests and are kept across restarts.</p></header>
+    <header class="section-head"><h2 id="extensions-title">Extensions</h2><p>Enabled extensions have all declared capabilities on every account. Changes apply to new requests and are kept across restarts.</p></header>
     <form class="settings-card" onsubmit={review}>
       <fieldset disabled={busy || loading}><legend>Install extension</legend>
-        <p>Pick a <code>.colectoext</code> package. It installs turned off, with no account access. Author names are self-reported, not verified.</p>
+        <p>Pick a <code>.colectoext</code> package. Installing enables every requested capability on all accounts. Author names are self-reported, not verified.</p>
         <div class="file-grid single">
-          <FilePick id="extension-package" label="Extension package" hint=".colectoext, up to 96 KiB" accept=".colectoext" bind:files={packageFile} />
+          <FilePick id="extension-package" label="Extension package" hint=".colectoext, up to 16 MiB" accept=".colectoext" bind:files={packageFile} />
         </div>
         <button class="secondary" type="submit" disabled={!packageFile?.length}>Install</button>
       </fieldset>
@@ -92,22 +95,20 @@
     </form>
     <div class="extension-list-head">
       <h3>Installed</h3>
-      <div class="field-row"><span class="row-label" id="permission-account-label">Permissions for</span><Select label="Permissions for account" value={account} disabled={busy || loading} options={accounts.map(item => ({ value: item.id, label: item.settings?.name || item.settings?.address || 'Demo account' }))} onchange={(next) => { account = next; void reload(); }} /></div>
+
     </div>
     {#each extensions as extension (extension.manifest.id)}
-      {@const pane = extension.bundled ? bundledPanes[extension.manifest.id] : extension.manifest.slot === 'panel' ? `ext:${extension.manifest.id}` : undefined}
+      {@const pane = extension.bundled ? bundledPanes[extension.manifest.id] : extension.manifest.slot === 'panel' && !extension.manifest.capabilities.includes('window.overlay') ? `ext:${extension.manifest.id}` : undefined}
       <fieldset class="settings-card extension-card" class:off={!extension.enabled} disabled={busy || loading}>
         <legend class="sr-only">{extension.manifest.name}</legend>
         <div class="extension-top">
           <span class="extension-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1)}</span>
           <div class="extension-title"><strong class="extension-name" aria-hidden="true">{extension.manifest.name}</strong><p class="meta"><span class="tag" class:trusted={extension.bundled}>{extension.bundled ? 'Bundled' : 'Third-party · Wasm'}</span>By {extension.manifest.author} · API {extension.manifest.api_version}</p></div>
-          <label class="switch"><input type="checkbox" checked={extension.enabled} onchange={(event) => void update(extension, event.currentTarget.checked, extension.grants)} /><span class="sr-only">Enabled for all accounts</span></label>
+          <label class="switch"><input type="checkbox" checked={extension.enabled} onchange={(event) => void update(extension, event.currentTarget.checked)} /><span class="sr-only">Enabled for all accounts</span></label>
         </div>
         <p class="extension-description">{extension.manifest.description}</p>
         {#if workspace && pane && extension.enabled}<label class="choice show-pane"><input type="checkbox" checked={workspace.shown(pane)} onchange={(event) => workspace.toggle(pane, event.currentTarget.checked)} />Show in the workspace</label>{/if}
-        {#if extension.manifest.capabilities.length}<div class="grants"><span class="grants-title">Account access</span>{#each extension.manifest.capabilities as capability}
-          <label class="choice"><input type="checkbox" checked={extension.grants.includes(capability)} onchange={(event) => void update(extension, extension.enabled, event.currentTarget.checked ? [...extension.grants, capability] : extension.grants.filter(c => c !== capability))} /> <code>{capability}</code></label>
-        {/each}</div>{/if}
+        {#if extension.manifest.capabilities.length}<div class="grants"><span class="grants-title">Capabilities · all accounts</span><ul>{#each extension.manifest.capabilities as capability}<li>{capabilityLabel(capability)}</li>{/each}</ul></div>{/if}
         {#if !extension.bundled}<button class="text-button danger-text" onclick={() => void remove(extension)}>Remove extension</button>{/if}
       </fieldset>
     {/each}
@@ -132,4 +133,6 @@
 {/if}
 {#if error}<p class="error-box" role="alert">{error}<button class="secondary" disabled={busy} onclick={() => void reload()}>Retry</button></p>{/if}
 {#if !authRequired && !managing && !extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}<button class="secondary" onclick={manage}>Extensions</button>{/if}
-{#if warning}{@const file = warning}<InstallWarning name={file.name} oncancel={() => warning = null} onconfirm={() => void install(file)} />{/if}
+{#if warning}{@const file = warning}<InstallWarning capabilities={requested} name={file.name} oncancel={() => warning = null} onconfirm={() => void install(file)} />{/if}
+
+<OverlayLayer {extensions} {account} />

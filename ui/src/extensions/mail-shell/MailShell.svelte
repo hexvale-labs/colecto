@@ -19,11 +19,10 @@
   import { createServices, hostService } from '../../lib/api';
   import type { Draft, MailItem, AccountInfo, SecurityInfo } from '../../lib/api';
   import type { Workspace } from '../../App.svelte';
-  import Toasts from '../../Toasts.svelte';
   import NotificationSettings from '../../NotificationSettings.svelte';
   import PrivacySettings from '../../PrivacySettings.svelte';
   import AppearanceSettings from '../../AppearanceSettings.svelte';
-  import { notify, dismissKey, type Toast } from '../../lib/toasts.svelte';
+  import { notify, dismissKey, notificationPosition, type Toast } from '../notifications/toasts.svelte';
   import { subscribeEvents, type NotificationPreferences } from '../../lib/api';
   import { destinations, isDestination, resolve, settingsPages, type Destination, type Folder, type SettingsPage } from '../../lib/navigation';
   let { extensionStates, extensionSettings, onsettings }: { extensionSettings: import('svelte').Snippet<[Workspace?]>; onsettings: () => void; extensionStates: import('../../lib/api').ExtensionState[] } = $props();
@@ -41,7 +40,7 @@
   let settingsOpen = $state(false);
   let settingsPage = $state<SettingsPage>('accounts');
   let settingsDirty = $state(false);
-  let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'bottom-right' });
+  let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'top' });
   let accent = $state<string | null>(null);
   let remoteImages = $state(false);
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); });
@@ -141,7 +140,7 @@
   }
 
   // Panes are extension surfaces placed in docks. Hidden panes stay mounted, so moving or switching never loses a draft.
-  let thirdParty = $derived(extensionStates.filter(extension => !extension.bundled && extension.enabled));
+  let thirdParty = $derived(extensionStates.filter(extension => !extension.bundled && extension.enabled && !extension.manifest.capabilities.includes('window.overlay')));
   let panes: PaneInfo[] = $derived([
     { id: 'mailbox', title: 'Mail', icon: 'inbox' }, { id: 'reader', title: 'Reader', icon: 'mail' },
     ...(switcher ? [{ id: 'accounts', title: 'Accounts', icon: 'account' as const }] : []),
@@ -255,7 +254,7 @@
     { id: 'layout-reset', name: 'Layout: Reset to default', run: () => commitLayout(defaultLayout()), disabled: settingsOpen || compact },
     ...accounts.map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
     ...currentTabs.map(tab => ({ id: `tab-${tab.id}`, name: `Open message: ${tab.subject}`, run: () => activateTab(tab) })),
-    ...extensionStates.filter(extension => !extension.bundled && extension.enabled).map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => openPanel(extension.manifest.id) })),
+    ...extensionStates.filter(extension => !extension.bundled && extension.enabled && !extension.manifest.capabilities.includes('window.overlay')).map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => openPanel(extension.manifest.id) })),
     ...Object.keys(labels).map(name => ({ id: `label-${name}`, name: `Filter label: ${name}`, run: () => { navigate('Inbox'); if (!dirty && folder === 'Inbox' && !settingsOpen) labelFilter = name; } })),
     ...(view?.kind === 'draft' ? ['Save draft', ...(connected ? ['Send message'] : [])].map(name => ({ id: name, name, run: () => { document.querySelector<HTMLButtonElement>(`.composer [data-command="${name === 'Save draft' ? 'save' : 'send'}"]`)?.click(); } })) : []),
     ...(view?.kind === 'message' ? [{ id: 'close-tab', name: 'Close current message tab', run: () => { if (view?.kind === 'message') void closeTab(view.id); } }] : []),
@@ -306,6 +305,7 @@
   }
   const nameOf = (account?: AccountInfo) => account?.settings?.name || account?.settings?.address || 'Demo account';
   /** Show an in-app notification, and a desktop one too while Colecto is in the background. */
+  $effect(() => { notificationPosition.value = notificationPrefs.position; });
   function alert(category: 'mail' | 'approvals', toast: Omit<Toast, 'id' | 'duration'> & { duration?: number }) {
     if (!notificationPrefs.enabled || !notificationPrefs[category]) return;
     notify(toast);
@@ -477,7 +477,7 @@
     </div>
   </div>
 {/if}
-<Toasts position={notificationPrefs.position} />
+
 
 {#snippet folderNav()}
 <nav class="folder-nav" aria-label="Mail folders">
