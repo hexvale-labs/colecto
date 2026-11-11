@@ -133,8 +133,9 @@ async fn run() -> Result<(), String> {
 }
 #[tokio::main]
 async fn main() {
+    colecto_host::logging::init();
     if let Err(error) = run().await {
-        eprintln!("{error}");
+        tracing::error!("{error}");
         std::process::exit(1);
     }
 }

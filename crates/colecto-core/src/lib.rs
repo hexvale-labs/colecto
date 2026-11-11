@@ -193,7 +193,17 @@ impl MailStore {
             }
             Account::Jmap(account) => {
                 account.validate()?;
-                serde_json::to_string(&("jmap", &account.session_url, &account.address))
+                if account.username.is_empty() {
+                    // Bearer accounts keep the key they had before password sign-in existed.
+                    serde_json::to_string(&("jmap", &account.session_url, &account.address))
+                } else {
+                    serde_json::to_string(&(
+                        "jmap",
+                        &account.session_url,
+                        &account.address,
+                        &account.username,
+                    ))
+                }
             }
         }
         .map_err(storage)?;
@@ -333,10 +343,15 @@ impl MailStore {
                 "Attachments must total at most 25 MB".into(),
             ));
         }
-        match account {
-            Account::Imap(account) => account.send(&input, &files),
-            Account::Jmap(account) => account.send(&input, &files),
+        let (protocol, result) = match account {
+            Account::Imap(account) => ("smtp", account.send(&input, &files)),
+            Account::Jmap(account) => ("jmap", account.send(&input, &files)),
+        };
+        match &result {
+            Ok(()) => tracing::info!(protocol, attachments = files.len(), "Message sent"),
+            Err(error) => tracing::warn!(protocol, %error, "Sending failed"),
         }
+        result
     }
     fn raw(&self, id: &str) -> Result<Vec<u8>, Error> {
         match &self.account {

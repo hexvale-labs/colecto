@@ -21,6 +21,7 @@
   import type { Workspace } from '../App.svelte';
   import Toasts from '../Toasts.svelte';
   import NotificationSettings from '../NotificationSettings.svelte';
+  import PrivacySettings from '../PrivacySettings.svelte';
   import AppearanceSettings from '../AppearanceSettings.svelte';
   import { notify, dismissKey, type Toast } from '../lib/toasts.svelte';
   import { subscribeEvents, type NotificationPreferences } from '../lib/api';
@@ -42,10 +43,12 @@
   let settingsDirty = $state(false);
   let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'bottom-right' });
   let accent = $state<string | null>(null);
+  let remoteImages = $state(false);
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); });
-  function savePreferences(input: { accent?: string; notifications?: NotificationPreferences }) {
+  function savePreferences(input: { accent?: string; notifications?: NotificationPreferences; remote_images?: boolean }) {
     if (input.accent !== undefined) accent = input.accent || null;
     if (input.notifications) notificationPrefs = input.notifications;
+    if (input.remote_images !== undefined) remoteImages = input.remote_images;
     void hostService.savePreferences(input).catch(e => notify({ title: 'Could not save your preference', body: (e as Error).message }));
   }
   let tabs = $state<{ account: string; id: string; subject: string; folder: 'Inbox' | 'Sent' }[]>([]);
@@ -392,6 +395,7 @@
       savedLayout = parseLayout(saved?.workspace); layoutReady = true;
       accent = saved?.accent ?? null;
       if (saved?.notifications) notificationPrefs = saved.notifications;
+      remoteImages = saved?.remote_images ?? false;
     });
     // Events act on accounts and pages, so they start once both are known.
     let stopEvents = () => {};
@@ -463,6 +467,7 @@
           {#if settingsPage === 'accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
           {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} onchange={(next) => savePreferences({ accent: next })} />
           {:else if settingsPage === 'notifications'}<NotificationSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
+          {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
           {:else if settingsPage === 'servers'}<section class="settings-section"><header class="section-head"><h2>Mail service</h2><p>You are connected to <strong class="selectable">{window.location.origin}</strong>. Accounts and saved drafts belong to this service.</p></header><div class="settings-card"><h3>Use another server</h3><p>Open a remote daemon’s HTTPS address. Your credentials stay on that server. Local services can also use HTTP on loopback.</p><form class="inline-form" onsubmit={visitServer}><label class="field">Server address<input type="url" bind:value={serverUrl} placeholder="https://mail.example.com" required autocomplete="url" /></label>{#if serverError}<p class="error-box" role="alert">{serverError}</p>{/if}<div class="button-row"><button class="secondary">Open server</button><button type="button" class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></div></form></div></section>
           {:else if settingsPage === 'send-approvals'}<SendApprovals />
           {:else if settingsPage === 'api-keys'}<ApiKeys {accounts} />
@@ -521,7 +526,7 @@
     </nav>{/if}
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
-        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />
+        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} {remoteImages} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />
         {:else if view?.kind === 'draft' && Composer}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
         {:else}
           <section class="welcome">

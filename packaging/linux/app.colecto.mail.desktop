@@ -2,8 +2,8 @@
 Type=Application
 Name=Colecto
 Comment=Email client
-Exec=colecto-host
+Exec=colecto
 Icon=app.colecto.mail
 Categories=Network;Email;
-StartupWMClass=colecto-host
+StartupWMClass=colecto
 Terminal=false

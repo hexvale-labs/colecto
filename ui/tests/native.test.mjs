@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hostBinary as binary } from './host-binary.mjs';
+import { appBinary as binary } from './host-binary.mjs';
 
 test('native window starts with its loopback service and bundled registry', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'colecto-native-'));
@@ -20,7 +20,7 @@ test('native window starts with its loopback service and bundled registry', asyn
     let url; let windowFound = false;
     while (Date.now() < deadline) {
       assert.equal(child.exitCode, null, `Native Host exited: ${errors}`);
-      url = output.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];
+      url = (output + errors).match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];
       windowFound = execFileSync('xwininfo', ['-root', '-tree'], { encoding: 'utf8' }).includes('"Colecto"');
       if (url && windowFound) break;
       await new Promise(resolve => setTimeout(resolve, 100));

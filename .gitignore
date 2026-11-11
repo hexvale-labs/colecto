@@ -4,6 +4,6 @@
 /ui/test-results/
 /ui/playwright-report/
 /.colecto/
-/crates/colecto-host/gen/
+/crates/colecto-app/gen/
 .vite/
 __pycache__/

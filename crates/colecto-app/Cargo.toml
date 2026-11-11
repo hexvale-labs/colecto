@@ -1,0 +1,33 @@
+[package]
+name = "colecto-app"
+description = "Colecto desktop and mobile app (Tauri)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Android and iOS load the app as a library; desktop runs the `colecto` binary.
+[lib]
+name = "colecto_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "colecto"
+path = "src/main.rs"
+
+[dependencies]
+axum.workspace = true
+colecto-host.workspace = true
+tauri.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zeroize.workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true
+
+# Android has no system OpenSSL for native-tls to link; build it from source there.
+[target.'cfg(target_os = "android")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }

@@ -1,177 +1,104 @@
-# Colecto
+<p align="center">
+  <img src="docs/branding/logo-square.svg" alt="" width="96" height="96">
+</p>
 
-A customizable email client with Rust core services and a Svelte UI. The
-single-owner mail service runs inside the desktop Host or as a standalone daemon.
-Browse mail, search Inbox/Sent through your provider, and save/reopen local drafts.
-The daemon can receive mail while the UI is closed. This remains a prototype;
-background receiving currently polls the latest 100 Inbox messages.
+<h1 align="center">Colecto</h1>
 
-The client defaults to dark mode. Open the gear beside the profile at the bottom
-of the sidebar for one Settings pane: appearance, accounts and credentials,
-server connections, scoped API keys, and extensions. Choose System, Dark, or Light. Account profile
-names are optional and fall back to the email address. Opening mail adds closable,
-account-specific tabs; Inbox, Drafts, and Sent remain below the open tabs.
+<p align="center">
+  A fast, keyboard-friendly email client for IMAP/SMTP and JMAP.<br>
+  Rust core, Svelte UI built from swappable extensions, and a daemon you can host yourself.
+</p>
 
-See [daemon deployment and notifications](docs/daemon.md) for authenticated remote
-HTTPS deployment, local HTTP over Unix sockets, supervisor-independent startup,
-and the optional Linux desktop notification agent. Systemd is optional.
-Apple and native Android push integration are deferred; a mobile browser layout
-is not evidence that native FCM/UnifiedPush or Android background services work.
+<p align="center">
+  <a href="https://github.com/hexvale-labs/colecto/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/hexvale-labs/colecto?sort=semver&display_name=tag&label=release&color=a2d6b1"></a>
+  <a href="https://github.com/hexvale-labs/colecto/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/hexvale-labs/colecto/ci.yml?branch=main&label=CI"></a>
+  <a href="https://github.com/hexvale-labs/colecto/pkgs/container/colecto-daemon"><img alt="Docker image" src="https://img.shields.io/badge/docker-ghcr.io-2496ed?logo=docker&logoColor=white"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android%20%7C%20iOS%20%7C%20web-555">
+  <img alt="Built with Rust and Tauri" src="https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri-b7410e?logo=rust">
+</p>
 
-## Run locally
+<p align="center">
+  <a href="https://github.com/hexvale-labs/colecto/releases/latest"><b>Download</b></a> ·
+  <a href="docs/docker.md"><b>Self-host with Docker</b></a> ·
+  <a href="docs/development.md"><b>Build from source</b></a>
+</p>
 
-Install stable Rust (1.89 or newer) with `rustfmt` and `clippy`, `just`, and
-Bun 1.4.4 or newer. Linux also needs OpenSSL development libraries and pkg-config
-(for example, `libssl-dev`, `libdbus-1-dev`, and `pkg-config` on Debian/Ubuntu). From the repository root:
+> [!NOTE]
+> Colecto is pre-alpha. It works with real mail accounts, but storage formats may still
+> change between versions. See the [roadmap](docs/alpha.md).
 
-```sh
-just install ui
-just run
-```
+## Features
 
-Open **http://127.0.0.1:4173**. Stop with Ctrl+C. Colecto binds only to IPv4
-loopback; open the printed address exactly, rather than `localhost`. The Host
-serves the built UI and API from the same origin. The browser prompts for the
-owner access token: open the private `.colecto/owner-token` file locally and
-copy its contents into that prompt. With `COLECTO_DATA_DIR`, use `owner-token`
-inside that directory instead. The Host generates the file with Unix mode `0600`
-and tightens its owned data directory to `0700`; it never prints the secret or
-puts it in a URL. Do not share or commit this file. An existing non-private token
-file is rejected; correct its ownership/permissions before restarting.
+- **IMAP/SMTP and JMAP**, side by side, with as many accounts as you like
+- **New mail in seconds** through IMAP IDLE and JMAP push, with polling as a fallback
+- **Read safely:** HTML mail renders in a script-free sandbox, and remote images wait
+  for your OK (or load automatically, if you choose in Settings → Privacy)
+- **Reply, reply all and forward**, with attachments in both directions
+- **Search** Inbox and Sent through your provider
+- **Local drafts and labels**, kept in a single embedded database
+- **Your layout:** panes split, tab and dock like an editor, and the layout follows
+  you between devices
+- **Keyboard first:** command palette (<kbd>Ctrl</kbd>+<kbd>K</kbd>), <kbd>C</kbd> to
+  compose, keyboard-resizable panes
+- **Extensions:** the whole UI is built from bundled extensions, and third-party
+  panels run in an isolated WebAssembly sandbox
+- **Self-hostable daemon** that keeps receiving mail while every app is closed, with
+  [Docker](docs/docker.md), systemd or any other supervisor
+- **Automation with guard rails:** scoped API keys and an MCP server, with your
+  approval required before anything is sent
+- **Encrypted credentials**, protected by your system keychain or a master password
+- **Notifications** in the app and on the desktop, positioned where you want them
+- **Your accent colour**, on a calm dark interface
+- **Runs everywhere:** Linux, Windows, macOS, Android, iOS and the browser
 
-The native app (`just run native`) connects automatically, injecting its local owner
-credential only at the exact local service origin. Remote HTTPS navigation
-receives no local credential. Ordinary browsers retain the entered owner token
-only for that browser session. In Settings → API keys, create separately scoped
-keys for automation, selecting explicit accounts and operations. Copy each key
-when created; it cannot be recovered later. Scoped keys cannot manage settings
-or directly send mail. The MCP server is off until you turn it on on the same page.
+Have an idea? [Open an issue](https://github.com/hexvale-labs/colecto/issues/new) and
+tell us about it.
 
-The app icon comes from one source, `crates/colecto-host/icons/icon.svg` (the brand
-logo); `just icons` regenerates the desktop set from it. Wayland desktops take a
-window's icon from its desktop entry, so on Linux run `just desktop-install` once to
-install `app.colecto.mail.desktop` and the icons for the native build.
+### Planned
 
-Use **Compose** (the mint pencil beside the mail search, or press <kbd>C</kbd>) to write
-a note, then **Save draft**. Open **Drafts** to resume it.
-Leaving an edited draft asks before discarding unsaved changes. Saving failures
-keep the editor text, and never report success. Without account configuration, sending is disabled. With an account configured,
-**Send** submits plain-text mail through SMTP or JMAP, with Cc and attachments
-(attachments are SMTP only). Open a message to **Reply**, **Reply all** or
-**Forward**. HTML mail renders in a script-free sandbox with remote images blocked
-until you load them. See [the alpha roadmap](docs/alpha.md) for limits.
+- All server folders, with paging and incremental sync
+- Read/unread, star, archive, delete and move
+- Conversation threading
+- Inline (`cid:`) images in HTML mail
+- Encryption of stored mail
+- Native push notifications on Android and iOS
+- Hosting several users on one daemon
 
-The Host stores accounts, drafts, labels, and Inbox/Sent snapshots in one
-embedded Turso database, `.colecto/colecto.db`. This directory is ignored by
-git. Drafts and mail snapshots are plain text on disk and are not encrypted; use
-sample content. Only one Host may open a data directory at a time. A corrupt or
-unsupported store stops startup without overwriting it. Preserve that directory
-before manually attempting recovery. See [storage](docs/storage.md) for the
-record format and one-time legacy JSON import.
+### Not planned
 
-Optional environment variables:
+- POP3
 
-```sh
-COLECTO_PORT=4180 COLECTO_DATA_DIR=/path/to/other-data just run
-```
+## Get started
 
-A relative data directory is relative to the command's working directory.
-Keep this directory between runs to preserve drafts.
+1. [Download Colecto](https://github.com/hexvale-labs/colecto/releases/latest) for your
+   system. The builds are not code-signed; [here is how to install them](docs/install.md).
+2. Open **Settings → Accounts** and add your IMAP/SMTP or JMAP account.
+3. Optional: [host the daemon](docs/docker.md) so mail keeps arriving while your
+   devices are off, then point every app at it in **Settings → Servers**.
 
-## Check changes
+To build and run from a checkout instead, see [development](docs/development.md).
 
-```sh
-just verify          # Rust fmt/check/Clippy/tests, Svelte/TypeScript, UI build
-just perf-check      # verification plus three recorded Linux resource runs
-just install browsers # install the test browsers once
-just test browser     # browser flows and actual Host restart persistence
-```
+## Security
 
-The browser tests run a separate Host on port 4179 with temporary sample data.
-They do not use your `.colecto` drafts. Playwright may require system browser
-libraries on some Linux installations. The tests cover a narrow viewport, but
-real phone touch/keyboard behavior has not been verified.
-
-Run `just` (or `just help`) for all recipes; `just build release` builds optimized binaries. After editing UI source, `just run` rebuilds it.
-
-## Prototype boundaries
-
-- `colecto-extension-api`: version 1 wire types for the operations used today.
-- `colecto-core`: TLS IMAP/SMTP, prototype JMAP, MIME decoding (text, HTML, attachments), sample messages, draft
-  validation, IDs, and embedded Turso storage.
-- `colecto-host`: authenticated loopback HTTP/static adapter; validates explicit owner bearers,
-  scoped API keys, Host/origin, and built-in
-  module grants scoped to an explicitly selected account, persisted extension policy,
-  and isolated Wasm panels. API bodies are bounded to 512000 bytes.
-- `ui/src/extensions`: replaceable bundled mailbox, reader, and composer views.
-  The Host supplies their service clients; views cannot access storage directly.
-
-Built-in module identities are routing labels for trusted application code.
-Third-party Wasm panels run without WASI under resource limits, start disabled
-with no grants, and emit only declarative text/actions. Third-party JavaScript
-and HTML are not loaded. An optional Tauri desktop runner uses the same loopback
-Host and exposes no guest native IPC. Sync and tested mobile
-builds are not implemented. See [the extension contract](docs/extensions.md) for
-the exact security boundary and `just run native` prerequisites.
-
-The frontend build currently inherits a low-severity `deepmerge` advisory from
-`@sveltejs/vite-plugin-svelte`, with no upstream fix. The merge runs on trusted
-build configuration, not email or API input; track upstream before adding
-untrusted build configuration.
-
-## Connect a mail account
-
-IMAP receives mail; SMTP sends mail. **POP3 will not be supported.** JMAP is an
-experimental alternative. Add accounts in **Settings → Accounts & security**, or
-use the legacy `COLECTO_*` environment variables. Credentials are encrypted and
-protected by the OS credential store or an optional master password.
-
-See [accounts and credentials](docs/accounts.md) for provider setup, environment
-variables, delivery semantics, and the credential vault.
-
-## Extensions
-
-Bundled mail UI packages have TOML manifests in `extensions/`. The **Settings → Extensions**
-Host control shows metadata, enables/disables packages, and limits service
-capabilities per account, saved across restarts. It can install isolated
-third-party Wasm panels. `just run native` starts the optional Tauri desktop runner. See
-[the extension contract](docs/extensions.md) for setup and security limits.
-
-## Bun troubleshooting
-
-Run repository tasks with `just`, or run UI scripts from `ui/`, for example
-`cd ui && bun run --bun build`. There is no root `package.json`; `bun run build`
-from the repository root fails with `Script not found "build"`.
-
-`bun run` is not a test runner: executing the restart test that way fails with
-`Cannot use test outside of the test runner`. `just test browser` runs that test with
-`bun test`, then runs Playwright separately. Playwright matches only `*.spec.ts`
-to avoid collecting Bun tests. `bun run --bun test` explicitly runs the Playwright
-package script; bare `bun test` invokes Bun's own runner instead.
-
-The project uses `ui/bun.lock` and frozen installs. No npm installation is needed.
-These failures were reproduced locally; without your original error output,
-they do not establish which failure occurred on your machine.
-
-## Resource regression checks
-
-Run `just perf-check` after feature changes. Three isolated workloads record raw
-CPU and memory samples, mean/median, and environment/build provenance under
-`performance-results/`. Preserve that history for comparisons; see
-[resource measurement limits](docs/performance.md). Initial comparisons report
-changes without enforcing noisy hardware-dependent budgets.
+Please report vulnerabilities privately through
+[GitHub security advisories](https://github.com/hexvale-labs/colecto/security/advisories/new),
+not in public issues. See the [security policy](.github/SECURITY.md).
 
 ## Documentation
 
 | Document | Covers |
 | --- | --- |
-| [Project direction](docs/README.md) | Architecture, terminology, and how agents work here |
+| [Installing](docs/install.md) | Downloads for each platform and unsigned builds |
+| [Docker hosting](docs/docker.md) | Running the daemon with Docker Compose and connecting to it |
 | [Accounts and credentials](docs/accounts.md) | IMAP/SMTP/JMAP setup and credential protection |
-| [Storage](docs/storage.md) | `colecto.db` records, bounds, and legacy import |
-| [Daemon](docs/daemon.md) | Remote HTTPS, Unix sockets, notifications, MCP |
-| [Extensions](docs/extensions.md) | Manifests, capabilities, and the Wasm sandbox |
-| [Alpha roadmap](docs/alpha.md) | What alpha means, task status, reading/sending contracts |
+| [Daemon](docs/daemon.md) | Remote HTTPS, Unix sockets, supervisors, notifications |
+| [Extensions](docs/extensions.md) | Manifests, capabilities and the Wasm sandbox |
+| [Development](docs/development.md) | Building, running, logging, tests and releases |
+| [Project direction](docs/README.md) | Architecture, terminology and how agents work here |
+| [Storage](docs/storage.md) | `colecto.db` records, bounds and legacy import |
+| [Alpha roadmap](docs/alpha.md) | What alpha means and what is left |
 | [Performance](docs/performance.md) | Resource measurement and baselines |
+| [Design](docs/DESIGN.md) and [product](docs/PRODUCT.md) | Visual language and product principles |
 | [Prototype design](docs/prototype-design.md) | The original local demo design |
 | [Client review](docs/client-review.md), [UX review](docs/ux-review.md) | UI audits and adversarial fixtures |
 | [Specs](docs/superpowers/specs/) and [plans](docs/superpowers/plans/) | Approved designs and their implementation status |

@@ -6,6 +6,7 @@ export const settingsPages = [
   { id: 'accounts', name: 'Accounts', icon: 'account' },
   { id: 'appearance', name: 'Appearance', icon: 'palette' },
   { id: 'notifications', name: 'Notifications', icon: 'bell' },
+  { id: 'privacy', name: 'Privacy', icon: 'image' },
   { id: 'servers', name: 'Servers', icon: 'server' },
   { id: 'extensions', name: 'Extensions', icon: 'extension' },
   { id: 'api-keys', name: 'API keys', icon: 'key' },

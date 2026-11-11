@@ -26,14 +26,14 @@ perf: build::rust build::ui test::perf
 # Run the normal verification suite and record resource usage for feature changes.
 perf-check: verify perf
 
-# Tauri's generator also emits Android, iOS and macOS sets; copy those in when those targets exist.
-# Regenerate the desktop app icons from the single source, crates/colecto-host/icons/icon.svg.
+# Android and iOS icons are generated into their projects by the release workflow.
+# Regenerate the desktop app icons from the single source, crates/colecto-app/icons/icon.svg.
 icons:
     #!/usr/bin/env bash
     set -euo pipefail
     out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
-    bunx --bun @tauri-apps/cli@2.9.4 icon crates/colecto-host/icons/icon.svg -o "$out" > /dev/null
-    cp "$out"/{32x32.png,128x128.png,128x128@2x.png,icon.png,icon.ico} crates/colecto-host/icons/
+    bunx --bun @tauri-apps/cli@2.9.4 icon crates/colecto-app/icons/icon.svg -o "$out" > /dev/null
+    cp "$out"/{32x32.png,128x128.png,128x128@2x.png,icon.png,icon.ico,icon.icns} crates/colecto-app/icons/
 
 # Install the Linux desktop entry and icons. Pass `release` to point it at the release build.
 desktop-install profile='debug':
@@ -47,10 +47,10 @@ desktop-install profile='debug':
     target=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')
     data="${XDG_DATA_HOME:-$HOME/.local/share}"
     for size in 32x32 128x128 256x256; do
-      file=crates/colecto-host/icons/$size.png; [ "$size" = 256x256 ] && file=crates/colecto-host/icons/128x128@2x.png
+      file=crates/colecto-app/icons/$size.png; [ "$size" = 256x256 ] && file=crates/colecto-app/icons/128x128@2x.png
       install -Dm644 "$file" "$data/icons/hicolor/$size/apps/app.colecto.mail.png"
     done
-    install -Dm644 crates/colecto-host/icons/icon.svg "$data/icons/hicolor/scalable/apps/app.colecto.mail.svg"
+    install -Dm644 crates/colecto-app/icons/icon.svg "$data/icons/hicolor/scalable/apps/app.colecto.mail.svg"
     mkdir -p "$data/applications"
-    sed "s|^Exec=.*|Exec=$target/{{profile}}/colecto-host|" packaging/linux/app.colecto.mail.desktop > "$data/applications/app.colecto.mail.desktop"
+    sed "s|^Exec=.*|Exec=$target/{{profile}}/colecto|" packaging/linux/app.colecto.mail.desktop > "$data/applications/app.colecto.mail.desktop"
     echo "Installed Colecto ({{profile}}) desktop entry in $data/applications"

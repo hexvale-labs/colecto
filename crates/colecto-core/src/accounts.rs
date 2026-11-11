@@ -43,6 +43,7 @@ fn prepare_connection(
             session_url: settings.session_url.clone(),
             token: secret.into(),
             address: settings.address.clone(),
+            username: settings.username.clone(),
         }),
     };
     store.prepare_connection(account)
@@ -105,7 +106,7 @@ impl Accounts {
                         imap_port: 993,
                         smtp_host: String::new(),
                         smtp_port: 587,
-                        username: String::new(),
+                        username: a.username.clone(),
                         session_url: a.session_url.clone(),
                     },
                     secret: a.token.clone(),

@@ -1,8 +1,9 @@
 # Mail service and deployment
 
-Colecto has one reusable Rust `MailService` and two entrypoints in the
-`colecto-host` package: `colecto-host` for the optional desktop shell/local demo,
-and `colecto-daemon` for foreground service operation. Both use the existing
+Colecto has one reusable Rust `MailService`. The `colecto-host` package runs it as
+`colecto-host` (the local browser demo) and `colecto-daemon` (foreground service
+operation); the `colecto-app` package runs it inside the desktop and mobile app. To run
+the daemon in a container, see [Docker hosting](docker.md). Both use the existing
 core account stores and extension grants. There is one owner per data directory,
 with multiple accounts and clients. Multi-user hosting and admin users are not
 implemented.
@@ -107,6 +108,26 @@ Normal shutdown removes only the socket inode created by this instance. After a
 crash or SIGKILL, stop the old process and inspect/remove its stale socket before
 restarting. This intentional refusal prevents deleting another service's socket.
 `COLECTO_SOCKET` and `COLECTO_PUBLIC_ORIGIN` cannot be combined.
+
+## Logs
+
+The daemon logs to stderr through `tracing`. `COLECTO_LOG` (or `RUST_LOG`) sets the
+filter, for example `COLECTO_LOG=debug` or `COLECTO_LOG=warn,colecto_core=debug`; the
+default is `info` for Colecto and `warn` for libraries. Startup prints the listening
+address on stdout so scripts can read it.
+
+Under systemd (detected through `JOURNAL_STREAM`) every line starts with a syslog
+priority (`<3>` error, `<4>` warning, `<6>` info, `<7>` debug) and has no timestamp of
+its own, so the journal records real levels:
+
+```sh
+journalctl --user -u colecto-daemon -f          # follow
+journalctl --user -u colecto-daemon -p warning  # warnings and errors only
+```
+
+Elsewhere, including Docker, lines carry an RFC 3339 timestamp; colours are used
+only when stderr is a terminal. HTTP requests are logged at `debug` with method and
+path only. Credentials, tokens and message contents are never logged.
 
 ## Supervisors, including systems without systemd
 

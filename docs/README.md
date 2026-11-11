@@ -14,7 +14,7 @@ Call the small environment that starts the app, loads extensions, and mediates
 access the **Host**. These names describe responsibilities, not a mandate to
 create a separate crate for every service.
 
-Receiving uses IMAP and sending uses SMTP, or JMAP handles both in the prototype. POP3 will not be supported.
+Receiving uses IMAP and sending uses SMTP, or JMAP handles both. POP3 will not be supported.
 
 Core services own accounts and credentials, receiving and storing mail, reading
 and querying messages, composing drafts and sending mail, settings persistence,

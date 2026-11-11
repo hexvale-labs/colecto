@@ -7,14 +7,15 @@
   import type { Draft, Message, MessageContent, ReaderService, AttachmentInfo } from '../lib/api';
   import { replyDraft, type ReplyMode } from '../lib/reply';
   import { copyText } from '../lib/copy';
-  let { id, service, self = '', folder = 'Inbox', labels, labeling, labelError = '', onlabel, onback, onreply }: { labelError?: string; labels: Labels; labeling: boolean; onlabel: (name: string, remove: boolean) => void; id: string; folder?: string; self?: string; service: ReaderService; onback: () => void; onreply?: (draft: Draft) => void } = $props();
+  let { id, service, self = '', folder = 'Inbox', labels, labeling, labelError = '', remoteImages: alwaysRemote = false, onlabel, onback, onreply }: { remoteImages?: boolean; labelError?: string; labels: Labels; labeling: boolean; onlabel: (name: string, remove: boolean) => void; id: string; folder?: string; self?: string; service: ReaderService; onback: () => void; onreply?: (draft: Draft) => void } = $props();
   let message = $state<Message | null>(null);
   let content = $state<MessageContent | null>(null);
   let contentError = $state('');
   let error = $state('');
   let loading = $state(true);
   let showHtml = $state(true);
-  let remoteImages = $state(false);
+  let allowRemote = $state(false);
+  let remoteImages = $derived(alwaysRemote || allowRemote);
   let downloading = $state<number | null>(null);
   // The frame has no scripts, forms, or same-origin access; this policy also blocks remote content until asked.
   // Mail that paints its own backgrounds or text colours keeps its light sheet, so dark ink stays readable.
@@ -91,7 +92,7 @@
       {#if content?.attachments.length}<ul class="attachments" aria-label="Attachments">{#each content.attachments as file (file.index)}<li><button class="attachment" disabled={downloading !== null} onclick={() => save(file)} aria-label={`Download ${file.name}`}><Icon name="attach" /><span class="attachment-name">{file.name}</span><small>{downloading === file.index ? 'Downloading…' : size(file.size)}</small></button></li>{/each}</ul>{/if}
       {#if contentError}<p class="content-note" role="status">Showing saved text. {contentError}</p>{/if}
       {#if content?.html}<div class="body-controls">
-        {#if showHtml && !remoteImages}<span class="body-note"><Icon name="image" />Remote images are blocked.</span><button class="text-button" onclick={() => remoteImages = true}>Load remote images</button>{/if}
+        {#if showHtml && !remoteImages}<span class="body-note"><Icon name="image" />Remote images are blocked.</span><button class="text-button" onclick={() => allowRemote = true}>Load remote images</button>{/if}
         <button class="text-button push" aria-pressed={!showHtml} onclick={() => showHtml = !showHtml}><Icon name="text" />{showHtml ? 'Show plain text' : 'Show formatted'}</button>
       </div>{/if}
       {#if contentLoading}<div class="body-skeleton" aria-hidden="true"><span></span><span></span><span></span></div>

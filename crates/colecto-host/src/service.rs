@@ -18,7 +18,6 @@ use axum::{
 use colecto_core::Accounts;
 use std::{
     convert::Infallible,
-    path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -169,14 +168,21 @@ pub struct MailService {
     closing: tokio::sync::watch::Sender<bool>,
 }
 impl MailService {
-    pub fn new(accounts: Accounts, policy: AccessPolicy, assets: PathBuf) -> Result<Self, String> {
-        match std::fs::canonicalize(&assets) {
-            Ok(root) if accounts.data_directory().starts_with(&root) => {
-                return Err("Static assets must not contain the private data directory".into());
+    pub fn new(
+        accounts: Accounts,
+        policy: AccessPolicy,
+        assets: impl Into<crate::Assets>,
+    ) -> Result<Self, String> {
+        let assets = assets.into();
+        if let crate::Assets::Directory(directory) = &assets {
+            match std::fs::canonicalize(directory) {
+                Ok(root) if accounts.data_directory().starts_with(&root) => {
+                    return Err("Static assets must not contain the private data directory".into());
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err("Cannot validate static assets directory".into()),
             }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err("Cannot validate static assets directory".into()),
         }
         let mut policy = policy;
         if policy.token.is_none() {
@@ -308,7 +314,7 @@ impl MailService {
         if let Ok(mut approvals) = self.host.approvals.lock()
             && approvals.maintain(api_keys::now()).is_err()
         {
-            eprintln!("Could not expire retained delivery requests");
+            tracing::warn!("Could not expire retained delivery requests");
         }
         let stores = {
             let Ok(accounts) = self.host.accounts.lock() else {
@@ -350,6 +356,7 @@ impl MailService {
                     }
                     match refreshed {
                         Ok(messages) => {
+                            tracing::debug!(%account, count = messages.len(), "Refreshed mail");
                             if let Ok(mut snapshots) = snapshots.lock()
                                 && let Some(event) = snapshots
                                     .observe(&account, messages.iter().map(|m| m.id.clone()))
@@ -357,12 +364,14 @@ impl MailService {
                                 let _ = events.send(("mail", event));
                             }
                         }
-                        Err(error) => eprintln!("Background receive failed for {account}: {error}"),
+                        Err(error) => {
+                            tracing::warn!(%account, %error, "Background receive failed")
+                        }
                     }
                 })
                 .await;
                 if let Err(error) = result {
-                    eprintln!("Background mail task failed: {error}");
+                    tracing::error!(%error, "Background mail task failed");
                 }
             });
         }
@@ -438,7 +447,7 @@ impl MailService {
                             break;
                         }
                         Err(error) => {
-                            eprintln!("Push notifications paused for {account}: {error}");
+                            tracing::warn!(%account, %error, "Push notifications paused");
                             break;
                         }
                     }
