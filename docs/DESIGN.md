@@ -149,7 +149,7 @@ a close button; approvals carry Approve, Reject and Review and stay until acted 
 others leave after six seconds unless hovered or focused. Owners can turn them off
 entirely or by type, choose one of eight positions on a drawn window (corners and edge
 midpoints, never a screenshot), and opt into desktop notifications, which only fire while
-Colecto is in the background. Notifications stay above Settings.
+Colecto is in the background. Notifications sit below Settings. The default is top center.
 
 ## Controls
 
