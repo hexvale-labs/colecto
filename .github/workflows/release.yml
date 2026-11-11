@@ -340,6 +340,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      # Build records would otherwise be uploaded as artifacts and attached to the release.
+      DOCKER_BUILD_RECORD_UPLOAD: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
