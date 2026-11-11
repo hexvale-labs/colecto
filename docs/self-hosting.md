@@ -1,14 +1,109 @@
-# Mail service and deployment
+# Self-hosting the daemon
+
+`colecto-daemon` is the mail service on its own: it keeps your accounts, receives mail
+while no app is open, and serves the web UI and API. Run it in Docker (quickest) or
+under any supervisor, then point the browser or the Colecto apps at it.
+
+## Docker
+
+The daemon keeps your accounts and receives mail while no app is open. Run it on a
+server, then reach it from the browser or the Colecto app. Images for `amd64` and
+`arm64` are published to `ghcr.io/hexvale-labs/colectod` for every release
+(tags `latest`, `vX.Y.Z`, `vX.Y` and `vX`).
+
+The daemon speaks plain HTTP and accepts outside connections only behind HTTPS, so
+the example below puts [Caddy](https://caddyserver.com) in front of it. Caddy gets a
+TLS certificate automatically.
+
+### Start it
+
+You need a domain name pointing at the server, with ports 80 and 443 open.
+
+```sh
+mkdir colecto && cd colecto
+curl -fsSLO https://raw.githubusercontent.com/hexvale-labs/colecto/main/packaging/docker/compose.yaml
+echo "COLECTO_DOMAIN=mail.example.org" > .env
+docker compose up -d
+docker compose exec colecto cat /data/access-token
+```
+
+On first start the container creates a random access token in its data volume. That
+last command prints it; keep it somewhere safe, like a password manager.
+
+### Connect to it
+
+- **Browser:** open `https://mail.example.org` and paste the access token.
+- **Colecto app:** open **Settings → Servers**, enter `https://mail.example.org`,
+  then paste the access token.
+- **Desktop notifications on Linux:** run `colecto-daemon notify` with
+  `COLECTO_PUBLIC_ORIGIN` and `COLECTO_TOKEN_FILE`; see [remote HTTPS deployment](#remote-https-deployment).
+
+Then add your mail accounts in **Settings → Accounts**.
+
+### Credentials in a container
+
+A container has no desktop keychain, so turn on **master password protection** in
+**Settings → Accounts** before adding accounts. Credentials are then encrypted with a
+key derived from that password. After the container restarts, the vault stays
+locked, and mail is not fetched, until you unlock it once in Settings.
+
+### Configuration
+
+Set these under `environment:` in `compose.yaml`.
+
+| Variable | Default in the image | Meaning |
+| --- | --- | --- |
+| `COLECTO_PUBLIC_ORIGIN` | required | The public HTTPS address, such as `https://mail.example.org` |
+| `COLECTO_TOKEN_FILE` | `/data/access-token` | Access token file; created on first start if missing |
+| `COLECTO_DATA_DIR` | `/data` | Database, owner token and extension data |
+| `COLECTO_SYNC_SECONDS` | `60` | How often to poll for mail (at least 10); push still applies |
+| `COLECTO_LOG` | `info` | Log filter, such as `debug` or `warn,colecto_core=debug` |
+| `COLECTO_BIND`, `COLECTO_PORT` | `0.0.0.0`, `4173` | Listener inside the container |
+
+Keep the `colecto` service off the public network; only Caddy should reach port 4173.
+To use another reverse proxy, forward to `colecto:4173`, keep the original `Host`
+header, and do not buffer `/api/v1/events` (it is a server-sent event stream).
+
+### Logs, updates and backups
+
+```sh
+docker compose logs -f colecto           # follow the logs
+docker compose pull && docker compose up -d  # update to the latest release
+```
+
+Everything the daemon stores lives in the `colecto-data` volume. Back it up while the
+container is stopped, for example:
+
+```sh
+docker compose stop colecto
+docker run --rm -v colecto_colecto-data:/data -v "$PWD":/backup debian:bookworm-slim \
+  tar czf /backup/colecto-data.tgz -C /data .
+docker compose start colecto
+```
+
+To rotate the access token, delete `/data/access-token` and restart the container; a
+new one is created and the old one stops working.
+
+### Build the image yourself
+
+From a checkout:
+
+```sh
+docker build -t colecto-daemon .
+```
+
+Or replace `image:` with the commented `build:` lines in `compose.yaml`.
+
+## How the service runs
 
 Colecto has one reusable Rust `MailService`. The `colecto-host` package runs it as
 `colecto-host` (the local browser demo) and `colecto-daemon` (foreground service
-operation); the `colecto-app` package runs it inside the desktop and mobile app. To run
-the daemon in a container, see [Docker hosting](docker.md). Both use the existing
-core account stores and extension grants. There is one owner per data directory,
+operation); the `colecto-app` package runs it inside the desktop and mobile app. The daemon and the app use the same
+account stores and extension policy. There is one owner per data directory,
 with multiple accounts and clients. Multi-user hosting and admin users are not
 implemented.
 
-## Local foreground service
+### Local foreground service
 
 Use `just run daemon` to build and run the service and UI. For a supervisor, build
 with `just build rust`, then run the executable directly:
@@ -44,7 +139,7 @@ through the UI. Background service operation therefore needs an available
 system credential store, or manual unlocking after startup. No plaintext
 credential fallback is added.
 
-## Remote HTTPS deployment
+### Remote HTTPS deployment
 
 Run behind an HTTPS reverse proxy. The public origin must contain only the
 HTTPS scheme and authority, with no path, query, or credentials. Generate an
@@ -79,7 +174,7 @@ origin; its login/settings interface keeps the token in session storage.
 The downstream API remains Colecto's versioned HTTP API, not a complete JMAP
 server. Upstream JMAP/IMAP/SMTP support remains separate from this choice.
 
-## HTTP over a Unix socket
+### HTTP over a Unix socket
 
 ```sh
 install -d -m 700 "$HOME/.local/run/colecto"
@@ -109,7 +204,7 @@ crash or SIGKILL, stop the old process and inspect/remove its stale socket befor
 restarting. This intentional refusal prevents deleting another service's socket.
 `COLECTO_SOCKET` and `COLECTO_PUBLIC_ORIGIN` cannot be combined.
 
-## Logs
+### Logs
 
 The daemon logs to stderr through `tracing`. `COLECTO_LOG` (or `RUST_LOG`) sets the
 filter, for example `COLECTO_LOG=debug` or `COLECTO_LOG=warn,colecto_core=debug`; the
@@ -129,7 +224,7 @@ Elsewhere, including Docker, lines carry an RFC 3339 timestamp; colours are used
 only when stderr is a terminal. HTTP requests are logged at `debug` with method and
 path only. Credentials, tokens and message contents are never logged.
 
-## Supervisors, including systems without systemd
+### Supervisors, including systems without systemd
 
 The daemon does not daemonize itself and does not call systemd APIs. Any
 supervisor that launches a foreground process and sends termination signals can
@@ -155,7 +250,7 @@ Set the same environment and executable in an OpenRC service or another init
 system. The supervisor owns restart policy; never launch two instances against
 one data directory.
 
-## Desktop notifications from a remote daemon
+### Desktop notifications from a remote daemon
 
 The optional Linux desktop session agent connects to the remote event stream;
 it does not establish additional upstream provider connections or store mail
@@ -188,45 +283,7 @@ stream is bounded and has no historical replay. Desktop notifications may be
 missed during disconnection; opening the client fetches the current mail state.
 The agent deliberately ignores initial `ready` and does not notify for old mail.
 
-## Android and future work
-
-Android integration is a separate platform adapter: an app-embedded Rust service
-must obey Android lifecycle and background restrictions. Local Android accounts
-cannot promise uninterrupted execution. Android FCM and UnifiedPush are the
-approved push choices; a server event stream alone is not either push service.
-This daemon foundation does not implement device registration, FCM credentials,
-UnifiedPush endpoint registration, Android Java/Kotlin services, or native mobile
-build validation. Apple support is deferred. No iOS background behavior is
-claimed.
-
-## Verification record
-
-- Added API tests for missing/wrong bearer tokens, forged Host identities,
-  authenticated access, origin rejection, and invalid remote configuration.
-- Added Unix socket tests covering unrelated files, active sockets,
-  replacement-file preservation, and owned cleanup.
-- Added notification parser tests for ready/empty/malformed messages and bounded
-  input, plus stopped background-worker lifecycle coverage.
-- Live provider synchronization, real reverse-proxy TLS deployment, graphical
-  notification delivery, and Android hardware remain platform integration checks.
-
-Implementation progress: the reusable service/runtime, standalone binary,
-remote authentication, Unix transport, polling events, Linux notification agent,
-and sample supervisor units are implemented. The standalone Unix HTTP process
-has been tested through a real request and graceful SIGTERM cleanup. Remote
-origin canonicalization has regression coverage for mixed-case hostnames and
-explicit default HTTPS ports. Final workspace verification is recorded in the
-root implementation plan, not implied by this subsystem record.
-
-Subsystem checks passed: `cargo test -p colecto-host --all-targets --locked`
-(11 unit tests, 5 daemon boundary tests, 6 existing HTTP integration tests,
-1 real Unix-socket process/shutdown test), and
-`cargo clippy -p colecto-host --all-targets --locked -- -D warnings`.
-The process test keeps an SSE subscription open during SIGTERM and verifies
-that both the stream and process exit before the owned socket disappears.
-The existing upstream `imap-proto` future-compatibility warning remains.
-
-## Owner bearers and scoped API keys
+### Owner bearers and scoped API keys
 
 Every API call requires an explicit `Authorization: Bearer <token>` header with
 the owner bearer or a scoped API key. Cookies never establish owner authority,
@@ -274,7 +331,7 @@ user. Windows filesystem ACL validation remains outside the tested Unix path.
 
 Configured static assets must not contain the private data directory; startup rejects overlapping roots so private owner credentials cannot become public assets.
 
-## Scoped automation and MCP
+### Scoped automation and MCP
 
 Generate a named API key in Settings → API keys, selecting each account and
 operation explicitly. `messages.send` grants permission to **request** delivery.

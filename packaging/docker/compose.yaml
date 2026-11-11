@@ -4,7 +4,7 @@
 #   docker compose exec colecto cat /data/access-token
 services:
   colecto:
-    image: ghcr.io/hexvale-labs/colecto-daemon:latest
+    image: ghcr.io/hexvale-labs/colectod:latest
     # Or build from a checkout instead of pulling:
     # build: { context: ../.., dockerfile: Dockerfile }
     restart: unless-stopped

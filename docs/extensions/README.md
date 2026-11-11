@@ -1,5 +1,8 @@
 # Extension contract (API 1)
 
+The exact rules for extension packages, capabilities, the Wasm ABI and overlays.
+For a walkthrough, start with [Make your own extension](guide.md).
+
 Every package has an `extension.toml` manifest:
 
 ```toml
@@ -94,8 +97,8 @@ This is an in-process Wasm language/runtime sandbox, not OS process isolation or
 a claim of a security audit. Keep runtime security updates current. Native mail
 operations authorized by a guest still run in Core services and can take their
 normal transport timeout; fuel does not meter native service work. Pure guest
-CPU and memory are bounded. The current binary is a local single-user prototype,
-not a remotely authenticated multi-user service.
+CPU and memory are bounded. The Host serves a single owner; it is not a
+multi-user service.
 
 Trusted bundled code shares the application origin. Header identities on its
 HTTP path are routing labels, not authentication against compromised same-origin
@@ -159,7 +162,7 @@ validates an owner bearer with exact Host/Origin; it creates no cookie or sessio
 API keys use explicit account/capability grants independent of extension headers
 and cannot invoke Host controls or directly send mail. Wasm service calls retain
 their Host-bound enabled state and manifest capabilities.
-See [daemon authentication](daemon.md#owner-bearers-and-scoped-api-keys).
+See [daemon authentication](../self-hosting.md#owner-bearers-and-scoped-api-keys).
 
 ### Cached folders and error categories
 
@@ -227,7 +230,7 @@ and creates local image blob URLs; scripts cannot use blob URLs.
 `POST /api/v1/extensions/review` validates a package and returns its manifest without
 installing it, allowing the consent dialog to list capabilities.
 
-See [Make your own extension](extensions/guide.md) for a walkthrough and API policy.
+See [Make your own extension](guide.md) for a walkthrough and API policy.
 
 ## Large packages and compiled modules
 
