@@ -49,6 +49,8 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 ## Not planned
 
 - POP3
+- 32-bit platforms (Android `armv7` and `x86`, 32-bit Windows and Linux). Release CI
+  builds 64-bit `x64` and `arm64` only.
 
 ## Android push design
 

@@ -31,7 +31,9 @@ jmap:
       ghcr.io/cyrusimap/cyrus-docker-test-server@sha256:c5e84adf335bbd945395ec6b8aee1f6cb5675188b2a48d972432678032a01d46 > /dev/null
     trap 'docker rm -f "$name" > /dev/null' EXIT
     for _ in $(seq 90); do curl -sf -u user1:x http://localhost:8080/jmap > /dev/null && break; sleep 1; done
-    COLECTO_JMAP_TEST_URL=http://localhost:8080 cargo test -p colecto-core --locked --test jmap_server
+    # No `-p colecto-core`: selecting one package changes dependency features, which would
+    # rebuild dozens of crates that `cargo test` (and CI's shared cache) already built.
+    COLECTO_JMAP_TEST_URL=http://localhost:8080 cargo test --locked --test jmap_server
 
 # Linux/X11 native launch smoke check (requires xvfb and xwininfo).
 native:

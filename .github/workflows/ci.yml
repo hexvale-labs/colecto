@@ -29,18 +29,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Linux build dependencies
-        run: |
-          install() { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev libdbus-1-dev pkg-config; }
-          install && exit 0
-          # The runners' apt mirrors sometimes stop resolving; try other mirrors before giving up.
-          sudo sed -i 's#http://security.ubuntu.com/ubuntu/\?#mirror+file:/etc/apt/apt-mirrors.txt#' /etc/apt/sources.list.d/ubuntu.sources
-          for mirror in http://archive.ubuntu.com/ubuntu/ https://mirrors.edge.kernel.org/ubuntu/; do
-            echo "$mirror" | sudo tee /etc/apt/apt-mirrors.txt
-            install && exit 0
-          done
-          exit 1
-
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
@@ -69,14 +57,28 @@ jobs:
 
       - run: just install ui
 
-      # Browser builds depend on the installed Playwright version and on which
-      # browsers setup-browser asks for, not on the rest of the lockfile.
+      # Browser builds depend only on the installed Playwright version and the browsers
+      # installed below, not on the rest of the lockfile.
       - name: Resolve Playwright cache key
         id: playwright
         run: |
           version=$(jq -r .version ui/node_modules/playwright-core/package.json)
-          recipe=$(just --show install::browsers | sha256sum | cut -c1-12)
-          echo "key=playwright-${{ runner.os }}-$version-$recipe" >> "$GITHUB_OUTPUT"
+          echo "key=playwright-${{ runner.os }}-$version-chromium-webkit" >> "$GITHUB_OUTPUT"
+
+      # One apt transaction for the Rust build and Playwright's browser libraries. This skips
+      # `playwright install --with-deps`, which always runs a slow `apt-get update` first.
+      - name: List Playwright system libraries
+        id: playwright-deps
+        working-directory: ui
+        run: |
+          packages=$(bunx playwright install-deps --dry-run chromium webkit | sed -n 's/^  \([a-z0-9][a-z0-9.+-]*\)$/\1/p' | xargs)
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+      - name: Install Linux build and browser dependencies
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: libssl-dev libdbus-1-dev pkg-config ${{ steps.playwright-deps.outputs.packages }}
 
       - name: Cache Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -84,7 +86,9 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ steps.playwright.outputs.key }}
 
-      - run: just install browsers
+      - name: Install Playwright browsers
+        working-directory: ui
+        run: bunx playwright install chromium webkit
       - run: just verify
       - run: just test browser
 
@@ -107,16 +111,10 @@ jobs:
           persist-credentials: false
 
       - name: Install Linux build dependencies
-        run: |
-          install() { sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev libdbus-1-dev pkg-config; }
-          install && exit 0
-          # The runners' apt mirrors sometimes stop resolving; try other mirrors before giving up.
-          sudo sed -i 's#http://security.ubuntu.com/ubuntu/\?#mirror+file:/etc/apt/apt-mirrors.txt#' /etc/apt/sources.list.d/ubuntu.sources
-          for mirror in http://archive.ubuntu.com/ubuntu/ https://mirrors.edge.kernel.org/ubuntu/; do
-            echo "$mirror" | sudo tee /etc/apt/apt-mirrors.txt
-            install && exit 0
-          done
-          exit 1
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: libssl-dev libdbus-1-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -133,3 +131,32 @@ jobs:
           tool: just
 
       - run: just test jmap
+
+  # Each Cargo.lock or toolchain change saves a new Rust cache (700 MB for verify, more per
+  # release target) while the superseded one lingers for a week. Keep only the newest of
+  # each so the 10 GB repository budget holds CI and release caches together.
+  prune-caches:
+    if: github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete superseded Rust caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          seen=" "
+          gh cache list --key v0-rust- --limit 200 --sort created_at --order desc --json id,key \
+            --jq '.[] | "\(.id) \(.key)"' |
+          while read -r id key; do
+            family=${key%-*-*} # without the toolchain and lockfile hashes
+            if [[ "$seen" == *" $family "* ]]; then
+              echo "Deleting $key"; gh cache delete "$id"
+            else
+              seen+="$family "
+            fi
+          done

@@ -15,8 +15,8 @@ key. Platform-specific installation limits are described below.
 | Windows | `-setup.exe`, or `.msi` on x64 | SmartScreen: choose **More info → Run anyway** |
 | Android | `.apk` (`arm64` for most phones) | Allow installing from your browser or file manager. Each release is signed with a new throwaway key, so uninstall the old version before updating |
 
-Architectures: `x64` (Intel/AMD 64-bit), `arm64` (Apple Silicon, Snapdragon, most
-phones), `armv7` and `x86` (older Android devices).
+Architectures: `x64` (Intel/AMD 64-bit) and `arm64` (Apple Silicon, Snapdragon,
+phones). There are no 32-bit builds.
 
 Mobile builds are new and lightly tested. To keep mail flowing while your devices are
 off, [host the daemon](self-hosting.md) and connect the apps to it.

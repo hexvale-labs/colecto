@@ -1,10 +1,23 @@
 name: Release
 
 # A semver tag such as `v1.2.3` builds every platform Tauri supports, publishes a GitHub
-# release and pushes the daemon image. A manual run builds everything without publishing.
+# release and pushes the daemon image. Every other run builds everything without publishing.
+#
+# Build caches: a tag run can restore caches saved on main but not those saved by an earlier
+# tag, so only main saves them. Main rebuilds when dependencies or this workflow change, and
+# twice a week so a new stable toolchain is cached before the next release and GitHub does
+# not evict caches unused for 7 days. CI's prune-caches job deletes superseded entries.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - .github/workflows/release.yml
+      - .github/actions/**
+  schedule:
+    - cron: "17 4 * * 1,4"
   workflow_dispatch:
 
 concurrency:
@@ -14,8 +27,6 @@ concurrency:
 permissions:
   contents: read
 
-# No build caches here: GitHub scopes a cache to the tag that saved it, so the next release
-# could never restore it, and it would only push main's CI cache out of the 10 GB budget.
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
@@ -68,16 +79,22 @@ jobs:
 
       - name: Install Linux build dependencies
         if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
-            librsvg2-dev patchelf libssl-dev libdbus-1-dev pkg-config rpm xdg-utils
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: >-
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+            libssl-dev libdbus-1-dev pkg-config rpm xdg-utils
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
 
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: release-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -122,10 +139,19 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # One job per ABI: each compiles a single Rust target on its own runner instead of sharing
+  # one runner's cores. 32-bit ABIs (armv7, x86) are not built; see docs/roadmap.md.
   android:
     needs: version
+    name: android-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: arm64, target: aarch64, triple: aarch64-linux-android, abi: arm64 }
+          - { arch: x64, target: x86_64, triple: x86_64-linux-android, abi: x86_64 }
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -139,8 +165,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: ${{ matrix.triple }}
 
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: release-${{ matrix.triple }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # The Gradle version and Android plugins come from the Tauri CLI's project template.
+      # Only downloads are cached; build outputs are not reused.
+      - name: Restore Gradle downloads
+        id: gradle
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/wrapper/dists
+            ~/.gradle/caches/modules-2
+            !~/.gradle/caches/modules-2/*.lock
+          key: gradle-${{ runner.os }}-${{ env.TAURI_CLI }}
+          restore-keys: gradle-${{ runner.os }}-
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -170,19 +213,31 @@ jobs:
           grep -q '"usesCleartextTraffic"\] = "true"' gen/android/app/build.gradle.kts
           bunx "$TAURI_CLI" icon icons/icon.svg -o icons
 
-      - name: Build the APKs
+      - name: Build the APK
         working-directory: crates/colecto-app
         env:
           VERSION: ${{ needs.version.outputs.number }}
         run: >
           bun tauri android build --ci --apk --split-per-abi
-          --target aarch64 armv7 i686 x86_64 --config "{\"version\":\"$VERSION\"}"
+          --target ${{ matrix.target }} --config "{\"version\":\"$VERSION\"}"
 
-      # Android installs only signed APKs. A throwaway key costs nothing, but each release has a
+      - name: Save Gradle downloads
+        if: github.ref == 'refs/heads/main' && matrix.arch == 'arm64' && steps.gradle.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/wrapper/dists
+            ~/.gradle/caches/modules-2
+            !~/.gradle/caches/modules-2/*.lock
+          key: ${{ steps.gradle.outputs.cache-primary-key }}
+
+      # Android installs only signed APKs. A throwaway key costs nothing, but each APK has a
       # new one, so updating means uninstalling the old version first.
-      - name: Sign and name the APKs
+      - name: Sign and name the APK
         env:
           TAG: ${{ needs.version.outputs.tag }}
+          ABI: ${{ matrix.abi }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
@@ -191,16 +246,14 @@ jobs:
           keytool -genkeypair -keystore "$keystore" -storepass "$password" -keypass "$password" \
             -alias colecto -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Colecto" -noprompt
           mkdir dist
-          for abi in arm64:arm64 arm:armv7 x86:x86 x86_64:x64; do
-            source="crates/colecto-app/gen/android/app/build/outputs/apk/${abi%%:*}/release/app-${abi%%:*}-release-unsigned.apk"
-            "$apksigner" sign --v4-signing-enabled false --ks "$keystore" --ks-pass "pass:$password" \
-              --out "dist/colecto-$TAG-android-${abi##*:}.apk" "$source"
-          done
+          "$apksigner" sign --v4-signing-enabled false --ks "$keystore" --ks-pass "pass:$password" \
+            --out "dist/colecto-$TAG-android-$ARCH.apk" \
+            "crates/colecto-app/gen/android/app/build/outputs/apk/$ABI/release/app-$ABI-release-unsigned.apk"
           ls -l dist
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: android
+          name: android-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 
@@ -218,6 +271,10 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-ios
 
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: release-aarch64-apple-ios
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -231,6 +288,9 @@ jobs:
 
       - name: Generate the Xcode project
         working-directory: crates/colecto-app
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           brew install xcodegen
           # Xcode and Gradle call back into the CLI as `bun tauri ...`, which needs a package script.
@@ -266,6 +326,8 @@ jobs:
           if-no-files-found: error
 
   daemon-image:
+    # Scheduled runs only refresh the Rust caches; the image has none to refresh.
+    if: github.event_name != 'schedule'
     needs: version
     name: daemon image (${{ matrix.arch }})
     strategy:

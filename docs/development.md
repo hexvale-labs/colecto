@@ -79,8 +79,10 @@ from the same file.
 
 ## Releases
 
-Pushing a semver tag such as `v1.2.3` runs `.github/workflows/release.yml`; other
-tags, pull requests and pushes to `main` do not. It builds the app
+Pushing a semver tag such as `v1.2.3` runs `.github/workflows/release.yml` and
+publishes. Pushes to `main` that change `Cargo.lock`, a `Cargo.toml`, the workflow or
+`.github/actions/` also run it, as does a schedule on Mondays and Thursdays; those runs
+only build, to refresh the build caches (see below). It builds the app
 for Linux, Windows, Android, and unsigned macOS and iOS, names each file
 `colecto-v1.2.3-<platform>-<arch>.<ext>`, publishes a GitHub release with
 `SHA256SUMS.txt`, and pushes the daemon image to
@@ -93,6 +95,33 @@ updates the `colecto`, `colecto-bin` and `colecto-git` AUR packages (see
 `packaging/aur/README.md`).
 
 `just build release` builds optimized binaries locally.
+
+## CI build caches
+
+GitHub lets a run restore caches saved on its own branch or tag, or on `main`. Pull
+requests and tags never save; they restore what `main` saved, so an unchanged
+dependency tree is never rebuilt from scratch.
+
+| Cache | Saved by | Key |
+| --- | --- | --- |
+| Rust dependencies for CI (`verify`, also restored by `jmap`) | `ci.yml` on `main` | toolchain + `Cargo.lock` |
+| Rust dependencies per release target (`release-<triple>`) | `release.yml` on `main` | toolchain + `Cargo.lock` |
+| Gradle distribution and downloads | `release.yml` on `main`, `android-arm64` job | Tauri CLI version |
+| Bun packages, Playwright browsers | `ci.yml` | `ui/bun.lock`, Playwright version |
+
+- Only dependencies are cached (Swatinem/rust-cache drops workspace crates), so every
+  run still compiles Colecto itself.
+- The repository has 10 GB of cache. CI's `prune-caches` job deletes Rust caches
+  superseded by a newer toolchain or lockfile. GitHub also evicts anything unused for
+  7 days, which is why `release.yml` runs twice a week.
+- `just test jmap` runs workspace-wide (`cargo test --test jmap_server`), not with
+  `-p colecto-core`: selecting one package changes dependency features and would
+  rebuild dozens of crates the shared cache already holds.
+- `.github/actions/apt-install` times a small download from each Ubuntu mirror and
+  lists the working ones fastest first, because the runners' default mirror sometimes
+  stops resolving or slows to a crawl. It skips `apt-get update` unless the image's
+  package lists are stale. CI installs Playwright's libraries through it instead of
+  `playwright install --with-deps`.
 
 ## Stress fixtures
 
