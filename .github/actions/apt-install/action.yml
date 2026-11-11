@@ -1,0 +1,42 @@
+name: Install apt packages
+description: Install Ubuntu packages on a GitHub runner without waiting on slow or broken apt mirrors.
+
+inputs:
+  packages:
+    description: Space-separated package names.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -uo pipefail
+        # dpkg rebuilds the man-page index after every install, which takes longer than the install.
+        sudo rm -f /var/lib/man-db/auto-update
+        printf '%s\n' 'Acquire::Retries "2";' 'Acquire::http::Timeout "20";' 'Acquire::https::Timeout "20";' \
+          'DPkg::Lock::Timeout "120";' | sudo tee /etc/apt/apt.conf.d/90ci > /dev/null
+        install() { sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $PACKAGES; }
+
+        # Runner images ship recent package lists, so try without `apt-get update` first: it
+        # is the step that hangs for minutes when the image's mirror stops resolving.
+        install && exit 0
+        sudo apt-get update && install && exit 0
+
+        echo "::warning::apt mirror failed; retrying with other mirrors"
+        if [ "$(dpkg --print-architecture)" = amd64 ]; then
+          mirrors="http://archive.ubuntu.com/ubuntu/ https://mirrors.edge.kernel.org/ubuntu/"
+        else
+          mirrors="http://ports.ubuntu.com/ubuntu-ports/"
+        fi
+        for file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+          [ -f "$file" ] && sudo sed -i -E \
+            's#https?://(azure\.archive|archive|security|ports)\.ubuntu\.com/ubuntu(-ports)?/?#mirror+file:/etc/apt/apt-mirrors.txt#' "$file"
+        done
+        for mirror in $mirrors; do
+          echo "$mirror" | sudo tee /etc/apt/apt-mirrors.txt
+          sudo apt-get update && install && exit 0
+        done
+        exit 1
