@@ -104,11 +104,15 @@ dependency tree is never rebuilt from scratch.
 
 | Cache | Saved by | Key |
 | --- | --- | --- |
-| Rust dependencies for CI (`verify`, also restored by `jmap`) | `ci.yml` on `main` | toolchain + `Cargo.lock` |
-| Rust dependencies per release target (`release-<triple>`) | `release.yml` on `main` | toolchain + `Cargo.lock` |
+| Rust dependencies for CI (`verify`, also restored by `jmap`) | `ci.yml` on `main` | toolchain + `Cargo.lock` + root `Cargo.toml` |
+| Rust dependencies per release target (`release-<triple>`) | `release.yml` on `main` | toolchain + `Cargo.lock` + root `Cargo.toml` |
 | Gradle distribution and downloads | `release.yml` on `main`, `android-arm64` job | Tauri CLI version |
 | Bun packages, Playwright browsers | `ci.yml` on `main` | `ui/bun.lock`, Playwright version |
 
+- The root `Cargo.toml` hash is part of each Rust cache's `shared-key`, because
+  rust-cache itself ignores `[profile.*]` changes. Without it, a profile change keeps
+  restoring caches built for the old profile, which Cargo cannot use, and never saves
+  new ones.
 - Only dependencies are cached (Swatinem/rust-cache drops workspace crates), so every
   run still compiles Colecto itself.
 - The repository has 10 GB of cache. CI's `prune-caches` job deletes Rust caches

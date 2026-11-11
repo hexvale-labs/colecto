@@ -36,8 +36,12 @@ jobs:
 
       # Only main writes the Rust cache; pull requests restore from it instead of
       # each saving a near-identical ~800 MB copy that evicts the useful one.
+      # rust-cache keys on dependencies and the lockfile only, but [profile.*] in the root
+      # Cargo.toml changes every artifact too, so its hash is part of each shared-key (a
+      # plain `key` is ignored once shared-key is set).
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          shared-key: verify-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -141,7 +145,7 @@ jobs:
       # Reuse verify's cache (it compiles a superset of these crates) instead of storing another.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: verify
+          shared-key: verify-${{ hashFiles('Cargo.toml') }}
           save-if: false
 
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -171,7 +175,7 @@ jobs:
           gh cache list --key v0-rust- --limit 200 --sort created_at --order desc --json id,key \
             --jq '.[] | "\(.id) \(.key)"' |
           while read -r id key; do
-            family=${key%-*-*} # without the toolchain and lockfile hashes
+            family=$(sed -E 's/-[0-9a-f]{8,}//g' <<< "$key") # without the profile, toolchain and lockfile hashes
             if [[ "$seen" == *" $family "* ]]; then
               echo "Deleting $key"; gh cache delete "$id"
             else
