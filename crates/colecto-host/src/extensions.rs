@@ -30,6 +30,9 @@ fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
     {
         return Err("Unknown extension slot".into());
     }
+    if manifest.capabilities.contains(&Capability::AppNavigate) {
+        return Err("app.navigate is reserved for API keys".into());
+    }
     for (index, capability) in manifest.capabilities.iter().enumerate() {
         if manifest.capabilities[..index].contains(capability) {
             return Err("Duplicate capability".into());
@@ -225,6 +228,10 @@ impl Extensions {
         }
         self.commit(next)
     }
+    pub fn install_package(&mut self, package: &[u8]) -> Result<(), String> {
+        let (manifest, module) = crate::package::read(package)?;
+        self.install(&manifest, module)
+    }
     pub fn install(&mut self, source: &str, module: Vec<u8>) -> Result<(), String> {
         if source.len() > 8192 {
             return Err("Manifest too large".into());
@@ -309,6 +316,7 @@ mod tests {
         for invalid in [
             source.replace("api_version = 1", "api_version = 999"),
             source.replace("messages.read", "accounts.manage"),
+            source.replace("messages.read", "app.navigate"),
             source.replace("author = \"Colecto\"", "author = \"\""),
             format!("{source}entrypoint = \"https://evil.test\"\n"),
             source.replace("id = \"reader\"", "id = \"../reader\""),

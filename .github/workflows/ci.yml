@@ -58,7 +58,7 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('ui/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
-      - run: just setup-ui
+      - run: just install ui
 
       # Browser builds depend on the installed Playwright version and on which
       # browsers setup-browser asks for, not on the rest of the lockfile.
@@ -66,7 +66,7 @@ jobs:
         id: playwright
         run: |
           version=$(jq -r .version ui/node_modules/playwright-core/package.json)
-          recipe=$(just --show setup-browser | sha256sum | cut -c1-12)
+          recipe=$(just --show install::browsers | sha256sum | cut -c1-12)
           echo "key=playwright-${{ runner.os }}-$version-$recipe" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright browsers
@@ -75,9 +75,9 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ steps.playwright.outputs.key }}
 
-      - run: just setup-browser
+      - run: just install browsers
       - run: just verify
-      - run: just ui-test
+      - run: just test browser
 
       - name: Upload Playwright traces
         if: failure()

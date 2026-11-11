@@ -9,8 +9,8 @@ implemented.
 
 ## Local foreground service
 
-Use `just daemon` to build and run the service and UI. For a supervisor, build
-with `just build`, then run the executable directly:
+Use `just run daemon` to build and run the service and UI. For a supervisor, build
+with `just build rust`, then run the executable directly:
 
 ```sh
 COLECTO_DATA_DIR="$HOME/.local/state/colecto" ./target/debug/colecto-daemon
@@ -158,7 +158,11 @@ That file sets the public origin and absolute token-file path.
 headers and an explicit owner bearer. Cookie-only streaming is rejected; use
 a streaming HTTP client that can attach Authorization, not a cookie-dependent
 browser EventSource or a token in the URL. It starts with `ready`, then emits `mail` with `{account, ids}` for
-newly observed inbox IDs, and `resync` if a slow subscriber misses events. The
+newly observed inbox IDs, `approval` with `{id, account, from, subject}` when automation
+requests a send, `navigate` with `{target, account}` from MCP `app.navigate`, and `resync`
+if a slow subscriber misses events. Mail events follow polling and, where the provider
+supports it, IMAP IDLE or JMAP push, so new mail usually appears within seconds. The
+web client subscribes with `fetch` and shows these as in-app notifications. The
 stream is bounded and has no historical replay. Desktop notifications may be
 missed during disconnection; opening the client fetches the current mail state.
 The agent deliberately ignores initial `ready` and does not notify for old mail.
@@ -270,7 +274,7 @@ Nonbrowser MCP requests may omit Origin because every request requires an
 explicit bearer. All calls recheck current key policy, including revocation and
 expiry after initialization.
 
-For stdio clients, build `colecto-mcp` with `just build`, then configure the
+For stdio clients, build `colecto-mcp` with `just build rust`, then configure the
 executable with one argument, such as `https://mail.example.com/api/v1/mcp`
 (or `http://127.0.0.1:4173/api/v1/mcp` locally). Set `COLECTO_MCP_KEY_FILE` to a
 private `0600` file containing a scoped key. `COLECTO_MCP_KEY` is an alternative
@@ -281,9 +285,16 @@ Input lines are limited to 512000 bytes and responses to 1000000 bytes; oversize
 messages fail rather than truncate. Redirects are disabled.
 
 Tools expose `account.read`, `messages.list`, `messages.read`, `drafts.list`,
-`drafts.read`, `drafts.write`, `labels.list`, `messages.label`, `messages.send` and `send.status`.
-Each takes `account`; reads/status also take `id`, writes/send take `draft`, and
-label updates take `label`. Message lists accept `folder` and `q`. Discovery
+`drafts.read`, `drafts.write`, `labels.list`, `messages.label`, `messages.send`, `send.status`
+and `app.navigate`. Each takes `account`; reads/status also take `id`, writes/send take
+`draft`, label updates take `label`, and navigation takes `target`. Message lists accept
+`folder` and `q`; `q` searches the provider by sender, subject and text.
+
+`app.navigate` needs the `app.navigate` capability, which only API keys can hold. It
+opens one of `NAVIGATION_TARGETS` (`inbox`, `drafts`, `sent`, `compose` or
+`settings/<section>`) in every connected Colecto window by broadcasting a `navigate`
+event; mail pages also switch those windows to the key's `account`. The result reports
+how many windows were listening. Discovery
 confers no grants. Invalid inputs and operation failures return structured tool
 errors; authentication failures use HTTP 401. No approval tool exists.
 

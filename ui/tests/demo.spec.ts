@@ -1,6 +1,7 @@
 async function openExtensions(page: import('@playwright/test').Page) {
+  // Settings is a card over the workspace; open it unless it is open, or the workspace is off and Extensions shows on its own.
   const settings = page.getByRole('button', { name: 'Settings', exact: true });
-  if (await settings.count()) await settings.click();
+  if (!await page.getByRole('dialog', { name: 'Settings' }).count() && await settings.count()) await settings.click();
   await page.getByRole('button', { name: 'Extensions', exact: true }).click();
 }
 import { test, expect, ownerToken, chooseAccount } from './fixtures';
@@ -132,7 +133,7 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
   await page.getByLabel('Password or app password').fill('provider-secret');
   await page.getByRole('button', { name: 'Save account', exact: true }).click();
   await expect(page.getByText('Account saved. Open Inbox to check the connection.')).toBeVisible();
-  await page.getByRole('button', { name: 'Back to mail' }).click();
+  await page.getByRole('button', { name: 'Close settings' }).click();
   await chooseAccount(page, 'Work');
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await expect(page.getByText('No drafts yet')).toBeVisible();
@@ -228,19 +229,25 @@ test('installs Wasm disabled, consents to account access, revokes and removes it
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
   page.on('dialog', dialog => dialog.accept());
   await openExtensions(page);
-  await page.getByLabel('TOML manifest', { exact: true }).setInputFiles('../extensions/examples/connection-panel/extension.toml');
-  await page.getByLabel('Wasm module', { exact: true }).setInputFiles('../target/extensions/connection-panel.wasm');
-  await page.getByRole('button', { name: 'Install disabled', exact: true }).click();
+  await page.getByLabel('Extension package', { exact: true }).setInputFiles('../target/extensions/connection-panel.colectoext');
+  await page.getByRole('button', { name: 'Install', exact: true }).click();
+  // A warning that cannot be skipped for five seconds comes first; cancelling installs nothing.
+  const warning = page.getByRole('dialog', { name: 'Only install extensions you trust' });
+  await expect(warning.getByRole('button', { name: 'Install (5)' })).toBeDisabled();
+  await warning.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('group', { name: 'Connection panel', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Install', exact: true }).click();
+  await warning.getByRole('button', { name: 'Install anyway' }).click({ timeout: 8000 });
   const panel = page.getByRole('group', { name: 'Connection panel', exact: true });
   await expect(panel.getByRole('checkbox', { name: 'Enabled for all accounts' })).not.toBeChecked();
   await expect(panel.getByRole('checkbox', { name: 'account.read', exact: true })).not.toBeChecked();
   await panel.getByRole('checkbox', { name: 'Enabled for all accounts' }).check();
-  await page.getByRole('button', { name: 'Back to mail', exact: true }).click();
+  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
   await page.getByRole('button', { name: 'Connection panel', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Extension panel' })).toContainText('Permission required');
   await openExtensions(page);
   await panel.getByRole('checkbox', { name: 'account.read', exact: true }).check();
-  await page.getByRole('button', { name: 'Back to mail', exact: true }).click();
+  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
   await page.getByRole('button', { name: 'Connection panel', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Extension panel' })).toContainText('Account disconnected');
   await openExtensions(page);

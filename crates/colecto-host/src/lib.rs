@@ -7,6 +7,7 @@ mod store;
 use api_keys::{ApiKeys, Principal};
 mod extensions;
 pub mod notifications;
+pub mod package;
 pub mod runtime;
 mod service;
 pub use service::{AccessPolicy, MailService};
@@ -32,8 +33,13 @@ use std::{
 };
 use tower_http::services::ServeDir;
 
+/// Named server-sent events for connected clients: `mail`, `approval` and `navigate`.
+/// An empty payload closes every stream.
+pub(crate) type Events = tokio::sync::broadcast::Sender<(&'static str, String)>;
+
 #[derive(Clone)]
 struct Host {
+    events: Events,
     keys: Arc<Mutex<ApiKeys>>,
     preferences: Arc<Mutex<preferences::PreferenceStore>>,
     approvals: Arc<Mutex<approvals::Approvals>>,
@@ -317,7 +323,7 @@ async fn install_extension(
         host.extensions
             .lock()
             .map_err(|_| forbidden())?
-            .install(&input.manifest, input.module)
+            .install_package(&input.package)
             .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))
     })
     .await
@@ -477,6 +483,7 @@ fn extension_service(
                 .map_err(|_| "Mail delivery failed")?;
             serde_json::to_value(true)
         }
+        AppNavigate => return Err("Capability not granted".into()),
     };
     result.map_err(|_| "Cannot serialize service response".into())
 }
@@ -935,6 +942,29 @@ fn require_owner(principal: &Principal, headers: &HeaderMap) -> Result<(), Failu
     }
     host_grant(headers)
 }
+/// Ask every connected client to open `target`; mail pages also select `account`.
+fn navigate(
+    host: &Host,
+    principal: &Principal,
+    account: &str,
+    target: &str,
+) -> Result<serde_json::Value, Failure> {
+    let Principal::ApiKey(key) = principal else {
+        return Err(forbidden());
+    };
+    if !host.keys.lock().map_err(|_| forbidden())?.allows(
+        key,
+        account,
+        Capability::AppNavigate,
+        api_keys::now(),
+    ) {
+        return Err(forbidden());
+    }
+    let event = serde_json::json!({"target":target,"account":account}).to_string();
+    let clients = host.events.send(("navigate", event)).unwrap_or(0);
+    Ok(serde_json::json!({"target":target,"clients":clients}))
+}
+
 async fn request_delivery(
     host: Host,
     key: String,
@@ -951,9 +981,12 @@ async fn request_delivery(
         if !keys.allows(&key, &account, Capability::MessagesSend, api_keys::now()) {
             return Err(forbidden());
         }
+        let subject = input.subject.clone();
         let request = host.approvals.lock().map_err(|_| forbidden())?
             .create(&key, &account, &from, input, api_keys::now())
             .map_err(approval_failure)?;
+        // Connected clients offer Approve and Reject in a notification; the decision still goes through the owner-only route.
+        let _ = host.events.send(("approval", serde_json::json!({"id":request.id,"account":account,"from":from,"subject":subject}).to_string()));
         Ok(serde_json::json!({"id":request.id,"status":request.status,"expires_at":request.expires_at}))
     }).await.map_err(|_| approval_failure("Delivery request service unavailable".into()))?
 }
@@ -1136,6 +1169,7 @@ mod extension_service_tests {
             )
             .unwrap();
         let host = Host {
+            events: tokio::sync::broadcast::channel(1).0,
             keys: Arc::new(Mutex::new(
                 ApiKeys::open(database.clone(), dir.path()).unwrap(),
             )),

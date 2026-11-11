@@ -16,6 +16,20 @@ test('dropping on a group edge keeps splitting space, so three panes can share o
   expect(column.sizes.reduce((a, b) => a + b)).toBeCloseTo(1);
 });
 
+test('reordering groups within one column keeps every group\'s height', () => {
+  let layout = reconcile(defaultLayout(), ['mailbox', 'accounts', 'reader', 'ext:a']);
+  layout = dock(layout, 'ext:a', groupOf(layout, 'accounts').id, 'bottom');
+  const column = () => layout.root.children[0];
+  column().sizes = [0.6, 0.15, 0.25];
+  // Move the mail list below the extension: the order changes, the sizes travel with their groups.
+  layout = dock(layout, 'mailbox', groupOf(layout, 'ext:a').id, 'bottom');
+  expect(panes(layout).slice(0, 3)).toEqual([['accounts'], ['ext:a'], ['mailbox']]);
+  expect(column().sizes).toEqual([0.15, 0.25, 0.6]);
+  // Two groups swap places the same way, instead of resetting to an even split.
+  layout = dock(layout, 'ext:a', groupOf(layout, 'accounts').id, 'top');
+  expect(column().sizes).toEqual([0.25, 0.15, 0.6]);
+});
+
 test('the main area divides into four by splitting twice in each direction', () => {
   let layout = reconcile(defaultLayout(), ['mailbox', 'accounts', 'reader', 'ext:a', 'ext:b', 'ext:c']);
   const reader = () => groupOf(layout, 'reader').id;

@@ -59,6 +59,7 @@ struct MailCache {
     messages: Vec<Message>,
 }
 
+#[derive(Clone)]
 enum Account {
     Imap(MailAccount),
     Jmap(JmapAccount),
@@ -237,6 +238,13 @@ impl MailStore {
     }
     pub fn connected(&self) -> bool {
         self.account.is_some()
+    }
+    /// A detached handle for push notifications, so waiting never holds this store's lock.
+    pub fn push_watcher(&self) -> Option<PushWatcher> {
+        Some(PushWatcher {
+            account: self.account.clone()?,
+            key: self.account_key.clone()?,
+        })
     }
     pub fn refresh(&mut self) -> Result<Vec<Message>, Error> {
         self.query("inbox", "")
@@ -488,6 +496,26 @@ fn validate_query(folder: &str, search: &str) -> Result<(), Error> {
 }
 
 /// Parse a comma-separated address list; an empty list is allowed.
+/// Waits for the provider to report Inbox changes: IMAP IDLE or JMAP push.
+pub struct PushWatcher {
+    account: Account,
+    key: String,
+}
+impl PushWatcher {
+    /// Identifies the provider connection, so callers can tell when an account was reconfigured.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+    /// `Ok(true)` when new mail may have arrived, `Ok(false)` after a quiet `timeout`.
+    /// `Error::Invalid` means the provider does not support push; keep polling instead.
+    pub fn wait(&self, timeout: std::time::Duration) -> Result<bool, Error> {
+        match &self.account {
+            Account::Imap(account) => account.wait_for_inbox(timeout),
+            Account::Jmap(account) => account.wait_for_change(timeout),
+        }
+    }
+}
+
 pub(crate) fn mailboxes(list: &str) -> Result<Vec<lettre::message::Mailbox>, Error> {
     if list.trim().is_empty() {
         return Ok(Vec::new());

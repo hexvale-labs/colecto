@@ -36,6 +36,10 @@ native-tls = "0.2"
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "native-tls"] }
 mailparse = "0.16"
 base64 = "0.22"
+# Extension packages (.colectoext) are zip files; only Deflate and Stored entries are read.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# zip leaves the Deflate backend to us; this is the pure-Rust miniz_oxide one already in the tree.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
 
 argon2 = "0.5"
@@ -50,3 +54,8 @@ unsafe_code = "forbid"
 # smaller and faster to link than full debug info.
 [profile.dev]
 debug = "line-tables-only"
+
+# `just build release`: smaller, faster binaries. Thin LTO keeps link memory modest on small machines.
+[profile.release]
+lto = "thin"
+strip = "symbols"

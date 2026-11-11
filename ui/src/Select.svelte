@@ -14,10 +14,26 @@
   let button: HTMLButtonElement;
   let list = $state<HTMLElement>();
   let current = $derived(options.find(option => option.value === value));
+  const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Closing is quicker than opening and shrinks back toward the trigger.
+  function leave(node: HTMLElement) {
+    const from = placement === 'above' ? 4 : -4;
+    return { duration: reduced ? 0 : 120, easing: (t: number) => t * (2 - t), css: (t: number) => `opacity:${t};transform:scale(${0.97 + 0.03 * t}) translateY(${(1 - t) * from}px)` };
+  }
   async function show() {
     if (disabled || !options.length) return;
     active = Math.max(0, options.findIndex(option => option.value === value));
     open = true; await tick(); list?.focus();
+    document.getElementById(`${id}-${active}`)?.scrollIntoView({ block: 'nearest' });
+  }
+  // Typing jumps to the next option starting with those letters, as native menus do.
+  let typed = '';
+  let typedAt = 0;
+  function typeahead(key: string) {
+    typed = (Date.now() - typedAt > 700 ? '' : typed) + key.toLocaleLowerCase(); typedAt = Date.now();
+    const order = [...options.keys()].map(offset => (active + (typed.length === 1 ? 1 : 0) + offset) % options.length);
+    const found = order.find(index => options[index].label.toLocaleLowerCase().startsWith(typed));
+    if (found !== undefined) { active = found; document.getElementById(`${id}-${active}`)?.scrollIntoView({ block: 'nearest' }); }
   }
   function hide(refocus = true) { open = false; if (refocus) button.focus(); }
   function choose(index: number) { const option = options[index]; hide(); if (option && option.value !== value) onchange(option.value); }
@@ -28,6 +44,7 @@
     else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(active); }
     else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hide(); }
     else if (event.key === 'Tab') hide(false);
+    else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); typeahead(event.key); }
   }
 </script>
 
@@ -39,7 +56,7 @@
   </button>
   {#if open}
     <div class="select-scrim" aria-hidden="true" onpointerdown={() => hide(false)}></div>
-    <ul bind:this={list} {id} class="select-menu {placement}" role="listbox" tabindex="-1" aria-label={label} aria-activedescendant={`${id}-${active}`} onkeydown={keydown}>
+    <ul bind:this={list} {id} class="select-menu {placement}" out:leave role="listbox" tabindex="-1" aria-label={label} aria-activedescendant={`${id}-${active}`} onkeydown={keydown}>
       {#each options as option, index (option.value)}
         <!-- svelte-ignore a11y_click_events_have_key_events (the listbox handles keys) -->
         <li id={`${id}-${index}`} role="option" aria-label={option.label} aria-selected={option.value === value} class:active={index === active} onpointermove={() => active = index} onclick={() => choose(index)}>

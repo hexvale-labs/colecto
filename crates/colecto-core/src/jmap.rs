@@ -9,6 +9,7 @@ const CORE: &str = "urn:ietf:params:jmap:core";
 const MAIL: &str = "urn:ietf:params:jmap:mail";
 const SUBMISSION: &str = "urn:ietf:params:jmap:submission";
 
+#[derive(Clone)]
 pub struct JmapAccount {
     pub session_url: String,
     pub token: String,
@@ -77,6 +78,7 @@ struct Session<'a> {
     download: String,
     id: String,
     submission: bool,
+    event_source: Option<String>,
 }
 impl JmapAccount {
     pub fn validate(&self) -> Result<(), Error> {
@@ -113,8 +115,73 @@ impl JmapAccount {
             api: secure_url(field(&data, "apiUrl")?)?,
             download: data["downloadUrl"].as_str().unwrap_or_default().to_owned(),
             submission: data["accounts"][&id]["accountCapabilities"][SUBMISSION].is_object(),
+            event_source: data["eventSourceUrl"].as_str().map(str::to_owned),
             id,
         })
+    }
+    /// JMAP push (RFC 8620 §7.3): block until the account's Email state moves past the
+    /// state seen on connect (`Ok(true)`), or until `timeout` passes (`Ok(false)`).
+    pub(crate) fn wait_for_change(&self, timeout: Duration) -> Result<bool, Error> {
+        let session = self.session()?;
+        let template = session.event_source.as_deref().ok_or_else(|| {
+            Error::Invalid("This JMAP server does not offer push notifications".into())
+        })?;
+        let baseline = session.call("Email/get", json!({"ids":[]}))?["state"]
+            .as_str()
+            .ok_or_else(failed)?
+            .to_owned();
+        let url = secure_url(
+            &template
+                .replace("{types}", "Email")
+                .replace("{closeafter}", "no")
+                .replace("{ping}", "60"),
+        )?;
+        let started = std::time::Instant::now();
+        let response = Client::builder()
+            .timeout(timeout)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| failed())?
+            .get(url)
+            .bearer_auth(&self.token)
+            .header("Accept", "text/event-stream")
+            .send()
+            .map_err(http_error)?;
+        if !response.status().is_success() {
+            return Err(failed());
+        }
+        let mut reader = std::io::BufReader::new(response);
+        let mut data = String::new();
+        loop {
+            let mut line = Vec::new();
+            let read = std::io::BufRead::read_until(
+                &mut std::io::Read::take(&mut reader, 65_537),
+                b'\n',
+                &mut line,
+            );
+            match read {
+                // The request deadline ends a quiet stream; anything earlier is a dropped connection.
+                Err(_) | Ok(0) if started.elapsed() + Duration::from_secs(1) >= timeout => {
+                    return Ok(false);
+                }
+                Err(_) | Ok(0) => return Err(failed()),
+                Ok(count) if count > 65_536 => return Err(failed()),
+                Ok(_) => {}
+            }
+            let line = String::from_utf8_lossy(&line);
+            let line = line.trim_end_matches(['\r', '\n']);
+            if line.is_empty() {
+                if email_state(&data, &session.id).is_some_and(|state| state != baseline) {
+                    return Ok(true);
+                }
+                data.clear();
+            } else if let Some(value) = line.strip_prefix("data:") {
+                if data.len() + value.len() > 65_536 {
+                    return Err(failed());
+                }
+                data.push_str(value.trim_start());
+            }
+        }
     }
     pub fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
         crate::validate_query(folder, search)?;
@@ -299,6 +366,17 @@ impl Session<'_> {
         Ok(field(mailbox, "id")?.to_owned())
     }
 }
+/// The Email state for `account` in a JMAP StateChange event, if it names one.
+fn email_state(data: &str, account: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(data).ok()?;
+    (value["@type"] == "StateChange")
+        .then(|| {
+            value["changed"][account]["Email"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .flatten()
+}
 fn method_result(data: &Value, method: &str) -> Result<Value, Error> {
     let responses = data["methodResponses"].as_array().ok_or_else(failed)?;
     if let Some(error) = responses.iter().find(|v| v[0] == "error" && v[2] == "call") {
@@ -439,6 +517,7 @@ mod tests {
             download: String::new(),
             id: "account".into(),
             submission: false,
+            event_source: None,
         };
         let messages = session.query("sent", "needle").unwrap();
         assert_eq!(
@@ -519,6 +598,7 @@ mod tests {
             download: String::new(),
             id: "account".into(),
             submission: true,
+            event_source: None,
         };
         let error = session
             .call("Identity/get", json!({}))
@@ -586,5 +666,20 @@ mod tests {
             )
             .is_ok()
         );
+    }
+    #[test]
+    fn push_events_report_only_email_state_for_this_account() {
+        let event = r#"{"@type":"StateChange","changed":{"a1":{"Email":"s2","Mailbox":"m1"}}}"#;
+        assert_eq!(email_state(event, "a1").as_deref(), Some("s2"));
+        assert_eq!(email_state(event, "other"), None);
+        assert_eq!(
+            email_state(
+                r#"{"@type":"StateChange","changed":{"a1":{"Mailbox":"m2"}}}"#,
+                "a1"
+            ),
+            None
+        );
+        assert_eq!(email_state(r#"{"@type":"Ping"}"#, "a1"), None);
+        assert_eq!(email_state("not json", "a1"), None);
     }
 }

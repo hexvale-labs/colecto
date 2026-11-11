@@ -3,7 +3,7 @@
 /ui/dist/
 /ui/test-results/
 /ui/playwright-report/
-/.colecto-demo/
+/.colecto/
 /crates/colecto-host/gen/
 .vite/
 __pycache__/

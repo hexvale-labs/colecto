@@ -162,8 +162,10 @@ async fn authenticate(
 pub struct MailService {
     host: Host,
     router: Router,
-    events: tokio::sync::broadcast::Sender<String>,
+    events: crate::Events,
     snapshots: Arc<Mutex<NotificationSnapshots>>,
+    /// Accounts with a running push watcher, and provider keys known not to support push.
+    watching: Arc<Mutex<Watching>>,
     closing: tokio::sync::watch::Sender<bool>,
 }
 impl MailService {
@@ -200,7 +202,9 @@ impl MailService {
             directory,
             api_keys::now(),
         )?));
+        let (events, _) = tokio::sync::broadcast::channel(64);
         let host = Host {
+            events: events.clone(),
             approvals,
             preferences,
             status_polls: Arc::default(),
@@ -211,7 +215,6 @@ impl MailService {
             origin: policy.origin.clone(),
             execution: Arc::new(tokio::sync::Semaphore::new(2)),
         };
-        let (events, _) = tokio::sync::broadcast::channel::<String>(64);
         let stream_events = events.clone();
         let (closing, stopped) = tokio::sync::watch::channel(false);
         let router = build_app(host.clone(), assets)
@@ -246,9 +249,9 @@ impl MailService {
                                     event = receiver.recv() => event,
                                 };
                                 match event {
-                                    Ok(data) if data.is_empty() => None,
-                                    Ok(data) => Some((
-                                        Ok(Event::default().event("mail").data(data)),
+                                    Ok((_, data)) if data.is_empty() => None,
+                                    Ok((name, data)) => Some((
+                                        Ok(Event::default().event(name).data(data)),
                                         (receiver, stopped, false),
                                     )),
                                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
@@ -275,6 +278,7 @@ impl MailService {
             router,
             events,
             snapshots: Arc::new(Mutex::new(NotificationSnapshots::default())),
+            watching: Arc::default(),
             closing,
         })
     }
@@ -288,15 +292,19 @@ impl MailService {
             .lock()
             .map_or_else(|e| e.into_inner().database(), |a| a.database())
     }
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String> {
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<(&'static str, String)> {
         self.events.subscribe()
     }
     /// One bounded polling pass; failed or busy accounts don't block unrelated accounts.
     pub async fn refresh_once(&self) {
         let (_stop, receiver) = tokio::sync::watch::channel(false);
-        self.refresh_until_stopped(receiver).await;
+        self.refresh_until_stopped(receiver, None).await;
     }
-    async fn refresh_until_stopped(&self, stop: tokio::sync::watch::Receiver<bool>) {
+    async fn refresh_until_stopped(
+        &self,
+        stop: tokio::sync::watch::Receiver<bool>,
+        only: Option<&str>,
+    ) {
         if let Ok(mut approvals) = self.host.approvals.lock()
             && approvals.maintain(api_keys::now()).is_err()
         {
@@ -309,7 +317,7 @@ impl MailService {
             accounts
                 .list()
                 .into_iter()
-                .filter(|a| a.connected)
+                .filter(|a| a.connected && only.is_none_or(|id| id == a.id))
                 .filter_map(|a| accounts.store(&a.id).ok().map(|s| (a.id, s)))
                 .collect::<Vec<_>>()
         };
@@ -317,6 +325,7 @@ impl MailService {
         for (account, store) in stores {
             let events = self.events.clone();
             let snapshots = self.snapshots.clone();
+            let watching = self.watching.clone();
             let semaphore = self.host.execution.clone();
             let stop = stop.clone();
             tasks.spawn(async move {
@@ -330,13 +339,22 @@ impl MailService {
                     let Ok(mut store) = store.try_lock() else {
                         return;
                     };
-                    match store.refresh() {
+                    let refreshed = store.refresh();
+                    if let Ok(mut watching) = watching.lock() {
+                        // Push needs a working connection; failing accounts stay on polling alone.
+                        if refreshed.is_ok() {
+                            watching.healthy.insert(account.clone());
+                        } else {
+                            watching.healthy.remove(&account);
+                        }
+                    }
+                    match refreshed {
                         Ok(messages) => {
                             if let Ok(mut snapshots) = snapshots.lock()
                                 && let Some(event) = snapshots
                                     .observe(&account, messages.iter().map(|m| m.id.clone()))
                             {
-                                let _ = events.send(event);
+                                let _ = events.send(("mail", event));
                             }
                         }
                         Err(error) => eprintln!("Background receive failed for {account}: {error}"),
@@ -359,12 +377,101 @@ impl MailService {
             if *stop.borrow() {
                 break;
             }
-            self.refresh_until_stopped(stop.clone()).await;
+            self.refresh_until_stopped(stop.clone(), None).await;
+            self.watch_push(&stop);
             tokio::select! { _ = tokio::time::sleep(interval) => {}, result = stop.changed() => { if result.is_err() || *stop.borrow() { break; } } }
         }
         let _ = self.closing.send(true);
-        let _ = self.events.send(String::new());
+        let _ = self.events.send(("", String::new()));
     }
+    /// Start an IMAP IDLE or JMAP push watcher for each connected account that lacks one.
+    /// Watchers refresh their account as soon as the provider reports a change; polling
+    /// continues underneath, so a failed or unsupported watcher only costs latency.
+    fn watch_push(&self, stop: &tokio::sync::watch::Receiver<bool>) {
+        let candidates = {
+            let Ok(accounts) = self.host.accounts.lock() else {
+                return;
+            };
+            accounts
+                .list()
+                .into_iter()
+                .filter(|a| a.connected)
+                .filter_map(|a| accounts.store(&a.id).ok().map(|s| (a.id, s)))
+                .collect::<Vec<_>>()
+        };
+        let healthy = self
+            .watching
+            .lock()
+            .map(|w| w.healthy.clone())
+            .unwrap_or_default();
+        for (account, store) in candidates {
+            if !healthy.contains(&account) {
+                continue;
+            }
+            let Some(watcher) = store.try_lock().ok().and_then(|s| s.push_watcher()) else {
+                continue;
+            };
+            {
+                let Ok(mut watching) = self.watching.lock() else {
+                    return;
+                };
+                if watching.unsupported.contains(watcher.key())
+                    || !watching.running.insert(account.clone())
+                {
+                    continue;
+                }
+            }
+            let service = self.clone();
+            let stop = stop.clone();
+            let runtime = tokio::runtime::Handle::current();
+            // A detached thread: an idle connection must never delay shutdown.
+            std::thread::spawn(move || {
+                while !*stop.borrow() {
+                    match watcher.wait(PUSH_WAIT) {
+                        Ok(true) => runtime
+                            .block_on(service.refresh_until_stopped(stop.clone(), Some(&account))),
+                        Ok(false) => {}
+                        Err(colecto_core::Error::Invalid(_)) => {
+                            if let Ok(mut watching) = service.watching.lock() {
+                                watching.unsupported.insert(watcher.key().to_owned());
+                            }
+                            break;
+                        }
+                        Err(error) => {
+                            eprintln!("Push notifications paused for {account}: {error}");
+                            break;
+                        }
+                    }
+                    // Stop when the account was disconnected or reconfigured.
+                    let current = service
+                        .host
+                        .accounts
+                        .lock()
+                        .ok()
+                        .and_then(|accounts| accounts.store(&account).ok())
+                        .and_then(|store| store.lock().ok().and_then(|s| s.push_watcher()));
+                    if current.is_none_or(|current| current.key() != watcher.key()) {
+                        break;
+                    }
+                }
+                if let Ok(mut watching) = service.watching.lock() {
+                    watching.running.remove(&account);
+                }
+            });
+        }
+    }
+}
+
+/// Providers may drop idle connections after 30 minutes; re-checking sooner also notices
+/// disconnected accounts.
+const PUSH_WAIT: Duration = Duration::from_secs(10 * 60);
+
+#[derive(Default)]
+struct Watching {
+    /// Accounts whose last refresh succeeded.
+    healthy: std::collections::HashSet<String>,
+    running: std::collections::HashSet<String>,
+    unsupported: std::collections::HashSet<String>,
 }
 
 async fn acquire_for_refresh(

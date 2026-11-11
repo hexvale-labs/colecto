@@ -76,7 +76,11 @@ impl Fixture {
         let input = || KeyInput {
             name: "Fixture".into(),
             accounts: vec![account.clone(), "demo".into()],
-            capabilities: vec![Capability::MessagesSend, Capability::MessagesList],
+            capabilities: vec![
+                Capability::MessagesSend,
+                Capability::MessagesList,
+                Capability::AppNavigate,
+            ],
             expires_at: None,
         };
         let (key, secret) = keys.mint(input(), now()).unwrap();
@@ -401,6 +405,7 @@ async fn sdk_interop(expire: bool) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let service = f.service(&address.to_string());
+    let mut events = service.subscribe();
     let server = tokio::spawn(axum::serve(listener, service.router()).into_future());
     let url = format!("http://{address}/api/v1/mcp");
     let mut config = StreamableHttpClientTransportConfig::with_uri(url.clone());
@@ -491,6 +496,40 @@ async fn sdk_interop(expire: bool) {
         .unwrap();
     let pending = pending.structured_content.unwrap();
     assert_eq!(pending["status"], "pending");
+    // Open clients hear about the request so the owner can decide from a notification.
+    let (name, data) = events.recv().await.unwrap();
+    assert_eq!(name, "approval");
+    let data: Value = serde_json::from_str(&data).unwrap();
+    assert_eq!(
+        (&data["id"], &data["subject"]),
+        (&pending["id"], &json!("Exact snapshot"))
+    );
+    let navigate = |account: &str, target: &str| {
+        CallToolRequestParams::new("app.navigate").with_arguments(
+            json!({"account":account,"target":target})
+                .as_object()
+                .unwrap()
+                .clone(),
+        )
+    };
+    let opened = http
+        .call_tool(navigate(&f.account, "settings/notifications"))
+        .await
+        .unwrap();
+    assert!(!opened.is_error.unwrap_or(false));
+    let (name, data) = events.recv().await.unwrap();
+    assert_eq!(name, "navigate");
+    assert_eq!(
+        serde_json::from_str::<Value>(&data).unwrap(),
+        json!({"target":"settings/notifications","account":f.account})
+    );
+    for (account, target) in [
+        (f.account.as_str(), "settings/../secrets"),
+        ("not-granted", "inbox"),
+    ] {
+        let refused = http.call_tool(navigate(account, target)).await.unwrap();
+        assert_eq!(refused.is_error, Some(true));
+    }
     let wrong_account = http
         .call_tool(
             CallToolRequestParams::new("send.status").with_arguments(

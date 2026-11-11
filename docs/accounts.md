@@ -20,7 +20,7 @@ there is no plaintext fallback. Account management requires the local trusted
 Host; it is not a hosted multi-user authentication system.
 
 For an existing environment-based setup, the following variables remain supported
-before `just demo` (set secrets in your local environment, never in source control):
+before `just run` (set secrets in your local environment, never in source control):
 
 | Variable | Meaning |
 | --- | --- |
@@ -72,7 +72,7 @@ Instead of IMAP/SMTP, set `COLECTO_JMAP_SESSION_URL` to your provider's HTTPS
 session resource (often `https://provider.example/.well-known/jmap`),
 `COLECTO_JMAP_TOKEN` to a provider-issued bearer token, and
 `COLECTO_MAIL_ADDRESS` to an address advertised by that account's JMAP identities.
-Run `just demo`. Do not also set IMAP/SMTP variables. Partial configuration fails
+Run `just run`. Do not also set IMAP/SMTP variables. Partial configuration fails
 startup; server authentication and capability checks happen on first use.
 Tokens use the same credential storage as IMAP passwords; do not put them in source control. OAuth login and token
 refresh are not implemented. Redirects are rejected; supply the final session URL.

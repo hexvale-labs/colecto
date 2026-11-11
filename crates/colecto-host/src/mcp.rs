@@ -40,6 +40,7 @@ struct Input {
     folder: String,
     #[serde(default)]
     q: String,
+    target: Option<String>,
 }
 const TOOLS: &[&str] = &[
     "account.read",
@@ -54,6 +55,7 @@ const TOOLS: &[&str] = &[
     "labels.list",
     "messages.send",
     "send.status",
+    "app.navigate",
 ];
 fn tool(name: &str) -> Tool {
     let description = if name == "messages.send" {
@@ -63,7 +65,11 @@ fn tool(name: &str) -> Tool {
     } else if name == "messages.cached" {
         "Read the last successful local folder snapshot immediately, without provider access. Search is unsupported. Includes fetched_at; null means freshness is unknown."
     } else if matches!(name, "messages.list" | "messages.refresh") {
-        "Query the provider for Inbox or Sent and optional search. Empty searches update the bounded local folder cache. Requires messages.list; full bodies also require messages.read."
+        "List or search Inbox or Sent. Set q to search the provider by sender, subject and text; an empty q lists the folder and updates the bounded local cache. Requires messages.list; full bodies also require messages.read."
+    } else if name == "drafts.list" {
+        "List this account's saved drafts. Filter them yourself by recipient, subject or body."
+    } else if name == "app.navigate" {
+        "Open a page in the owner's running Colecto windows, such as a folder, the composer or a Settings page. Mail folders and compose switch those windows to this account. Requires app.navigate."
     } else {
         "Access this account using the authenticated key's current grants."
     };
@@ -71,6 +77,7 @@ fn tool(name: &str) -> Tool {
     match name {
         "messages.read" | "drafts.read" | "send.status" => required.push("id"),
         "drafts.write" | "messages.send" => required.push("draft"),
+        "app.navigate" => required.push("target"),
         "messages.label" => required.push("label"),
         _ => {}
     }
@@ -81,6 +88,7 @@ fn tool(name: &str) -> Tool {
             "id":{"type":"string","minLength":1,"maxLength":256},
             "folder":{"type":"string","enum":["inbox","sent"]},
             "q":{"type":"string","maxLength":1024},
+            "target":{"type":"string","enum":colecto_extension_api::NAVIGATION_TARGETS},
             "draft":{
                 "type":"object", "additionalProperties":false,
                 "required":["recipient","subject","body"],
@@ -182,6 +190,13 @@ impl MailMcp {
                     .draft
                     .ok_or_else(|| crate::approval_failure("Draft required".into()))?;
                 value!(crate::send(state, identity, headers, Ok(axum::Json(draft))))
+            }
+            "app.navigate" => {
+                let target = input
+                    .target
+                    .filter(|t| colecto_extension_api::NAVIGATION_TARGETS.contains(&t.as_str()))
+                    .ok_or_else(|| crate::approval_failure("Unknown navigation target".into()))?;
+                crate::navigate(&self.host, &principal, &input.account, &target)
             }
             "send.status" => {
                 crate::request_status(&self.host, &principal, &path.0, Some(&input.account)).await

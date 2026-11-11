@@ -12,6 +12,7 @@ use std::{
     time::Duration,
 };
 
+#[derive(Clone)]
 pub struct MailAccount {
     pub imap_host: String,
     pub imap_port: u16,
@@ -127,6 +128,15 @@ impl MailAccount {
         crate::validate_query(folder, search)?;
         let mut session = self.login()?;
         let result = query_session_with_identity(&mut session, folder, search);
+        let _ = session.logout();
+        result
+    }
+    /// IMAP IDLE (RFC 2177) on a read-only Inbox: `Ok(true)` when the server reports a change,
+    /// `Ok(false)` when `timeout` passes quietly.
+    pub(crate) fn wait_for_inbox(&self, timeout: Duration) -> Result<bool, Error> {
+        self.validate()?;
+        let mut session = self.login()?;
+        let result = idle_session(&mut session, timeout);
         let _ = session.logout();
         result
     }
@@ -264,6 +274,24 @@ fn fetch_session<T: std::io::Read + std::io::Write>(
         .find_map(|item| item.body())
         .map(<[u8]>::to_vec)
         .ok_or(Error::Missing)
+}
+
+fn idle_session<T>(session: &mut imap::Session<T>, timeout: Duration) -> Result<bool, Error>
+where
+    T: std::io::Read + std::io::Write + imap::extensions::idle::SetReadTimeout,
+{
+    if !session.capabilities().map_err(imap_error)?.has_str("IDLE") {
+        return Err(Error::Invalid(
+            "This IMAP server does not support IDLE".into(),
+        ));
+    }
+    session.examine("INBOX").map_err(imap_error)?;
+    let outcome = session
+        .idle()
+        .map_err(imap_error)?
+        .wait_with_timeout(timeout)
+        .map_err(imap_error)?;
+    Ok(outcome == imap::extensions::idle::WaitOutcome::MailboxChanged)
 }
 
 #[cfg(test)]
@@ -557,6 +585,65 @@ mod tests {
         let mut client = imap::Client::new(TcpStream::connect(address).unwrap());
         client.read_greeting().unwrap();
         client.login("me", "secret").unwrap()
+    }
+    /// A scripted server: answers CAPABILITY and EXAMINE, then `idle` decides what IDLE sees.
+    fn idle_server(capabilities: &'static str, idle: Option<&'static str>) -> std::net::SocketAddr {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(socket.try_clone().unwrap());
+            write!(socket, "* OK ready\r\n").unwrap();
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                let (tag, command) = line
+                    .trim_end()
+                    .split_once(' ')
+                    .unwrap_or((line.trim_end(), ""));
+                let tag = tag.to_owned();
+                match command {
+                    c if c.starts_with("LOGIN") => write!(socket, "{tag} OK in\r\n"),
+                    "CAPABILITY" => {
+                        write!(socket, "* CAPABILITY {capabilities}\r\n{tag} OK done\r\n")
+                    }
+                    c if c.starts_with("EXAMINE") => {
+                        write!(socket, "* 1 EXISTS\r\n{tag} OK [READ-ONLY]\r\n")
+                    }
+                    "IDLE" => {
+                        write!(socket, "+ idling\r\n").unwrap();
+                        if let Some(update) = idle {
+                            write!(socket, "{update}\r\n").unwrap();
+                        }
+                        // The client ends IDLE with DONE; the tagged reply completes it.
+                        let mut done = String::new();
+                        reader.read_line(&mut done).unwrap();
+                        assert_eq!(done.trim_end(), "DONE");
+                        write!(socket, "{tag} OK idle done\r\n")
+                    }
+                    _ => write!(socket, "{tag} OK done\r\n"),
+                }
+                .unwrap();
+                line.clear();
+            }
+        });
+        address
+    }
+    fn idle(address: std::net::SocketAddr) -> Result<bool, Error> {
+        let mut client = imap::Client::new(TcpStream::connect(address).unwrap());
+        client.read_greeting().unwrap();
+        let mut session = client.login("me", "secret").unwrap();
+        idle_session(&mut session, Duration::from_millis(400))
+    }
+    #[test]
+    fn idle_reports_new_mail_quiet_timeouts_and_unsupported_servers() {
+        assert!(idle(idle_server("IMAP4rev1 IDLE", Some("* 2 EXISTS"))).unwrap());
+        assert!(!idle(idle_server("IMAP4rev1 IDLE", None)).unwrap());
+        // Without IDLE the caller keeps polling instead of retrying push.
+        assert!(matches!(
+            idle(idle_server("IMAP4rev1", None)),
+            Err(Error::Invalid(_))
+        ));
     }
     #[test]
     fn lists_large_messages_from_headers_and_fetches_them_on_demand() {

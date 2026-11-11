@@ -427,7 +427,8 @@ async fn installed_wasm_uses_consented_account_grants_and_cannot_call_http_servi
         "../../../extensions/examples/connection-panel/module.wat"
     ))
     .unwrap();
-    let package = serde_json::json!({"manifest": manifest, "module": module}).to_string();
+    let package =
+        serde_json::json!({"package": colecto_host::package::write(manifest, &module)}).to_string();
     let response = router
         .clone()
         .oneshot(request(

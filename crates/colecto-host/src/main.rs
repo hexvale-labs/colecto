@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .parse()?;
         let directory = env::var_os("COLECTO_DATA_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(".colecto-demo"));
+            .unwrap_or_else(|| PathBuf::from(".colecto"));
         let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ui/dist");
         if !assets.join("index.html").is_file() {
             return Err("Frontend build missing; run just ui-build first".into());
@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let accounts = colecto_host::runtime::open_accounts(&directory)?;
         let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
         let authority = listener.local_addr()?.to_string();
-        println!("Colecto local demo: http://{authority}");
+        println!("Colecto: http://{authority}");
         println!("Draft directory: {}", directory.display());
         let service = colecto_host::MailService::new(
             accounts,

@@ -8,6 +8,7 @@
   import MailShell from './extensions/MailShell.svelte';
   import Select from './Select.svelte';
   import FilePick from './FilePick.svelte';
+  import InstallWarning from './InstallWarning.svelte';
   import mark from './assets/logo-square.svg';
   import { extensionHost, hostService, setAccessToken } from './lib/api';
   import type { AccountInfo, Capability, ExtensionState } from './lib/api';
@@ -15,8 +16,8 @@
   let token = $state('');
   function connectDialog(node: HTMLDialogElement) { node.showModal(); return { destroy() { node.close(); } }; }
   async function connect(event: SubmitEvent) { event.preventDefault(); busy = true; error = ''; setAccessToken(token); try { await hostService.accounts(); authRequired = false; token = ''; await reload(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
-  let manifestFile = $state<FileList | undefined>();
-  let moduleFile = $state<FileList | undefined>();
+  let packageFile = $state<FileList | undefined>();
+  let warning = $state<File | null>(null);
   let installNotice = $state('');
   let extensions = $state<ExtensionState[]>([]);
   let accounts = $state<AccountInfo[]>([]);
@@ -40,14 +41,19 @@
     catch (e) { const message = (e as Error).message; await reload(); error ||= message; }
     finally { busy = false; }
   }
-  async function install(event: SubmitEvent) {
+  function review(event: SubmitEvent) {
     event.preventDefault();
-    const manifest = manifestFile?.[0]; const module = moduleFile?.[0];
-    if (!manifest || !module) return;
-    if (manifest.size > 8192 || module.size > 65536) { error = 'Manifest must be at most 8 KiB and Wasm at most 64 KiB'; return; }
+    const file = packageFile?.[0];
+    if (!file) return;
+    if (!file.name.endsWith('.colectoext')) { error = 'Choose a .colectoext extension package.'; return; }
+    if (file.size > 96 * 1024) { error = 'Extension packages must be at most 96 KiB.'; return; }
+    error = ''; installNotice = ''; warning = file;
+  }
+  async function install(file: File) {
+    warning = null;
     busy = true; error = ''; installNotice = '';
     try {
-      await extensionHost.install(await manifest.text(), Array.from(new Uint8Array(await module.arrayBuffer())));
+      await extensionHost.install(Array.from(new Uint8Array(await file.arrayBuffer())));
       installNotice = 'Installed disabled with no account access. Review the requested permissions before enabling.';
       await reload();
     } catch (e) { const message = (e as Error).message; await reload(); error ||= message; }
@@ -74,14 +80,13 @@
 {#snippet extensionSettings(workspace?: Workspace)}
   <section class="extension-settings" aria-labelledby="extensions-title">
     <header class="section-head"><h2 id="extensions-title">Extensions</h2><p>Turn extensions on or off and decide which account data each one may use. Changes apply to new requests and are kept across restarts.</p></header>
-    <form class="settings-card" onsubmit={install}>
+    <form class="settings-card" onsubmit={review}>
       <fieldset disabled={busy || loading}><legend>Install extension</legend>
-        <p>Pick a TOML manifest and its Wasm binary. It installs turned off, with no account access. Author names are self-reported, not verified.</p>
-        <div class="file-grid">
-          <FilePick id="extension-manifest" label="TOML manifest" hint="extension.toml, up to 8 KiB" accept=".toml" bind:files={manifestFile} />
-          <FilePick id="extension-module" label="Wasm module" hint="module.wasm, up to 64 KiB" accept=".wasm" bind:files={moduleFile} />
+        <p>Pick a <code>.colectoext</code> package. It installs turned off, with no account access. Author names are self-reported, not verified.</p>
+        <div class="file-grid single">
+          <FilePick id="extension-package" label="Extension package" hint=".colectoext, up to 96 KiB" accept=".colectoext" bind:files={packageFile} />
         </div>
-        <button class="primary" type="submit" disabled={!manifestFile?.length || !moduleFile?.length}>Install disabled</button>
+        <button class="secondary" type="submit" disabled={!packageFile?.length}>Install</button>
       </fieldset>
       {#if installNotice}<p class="settings-notice" role="status">{installNotice}</p>{/if}
     </form>
@@ -127,3 +132,4 @@
 {/if}
 {#if error}<p class="error-box" role="alert">{error}<button class="secondary" disabled={busy} onclick={() => void reload()}>Retry</button></p>{/if}
 {#if !authRequired && !managing && !extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}<button class="secondary" onclick={manage}>Extensions</button>{/if}
+{#if warning}{@const file = warning}<InstallWarning name={file.name} oncancel={() => warning = null} onconfirm={() => void install(file)} />{/if}

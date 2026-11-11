@@ -69,7 +69,7 @@ fn valid_metadata(key: &KeyMetadata) -> bool {
         && key.accounts.len() <= 64
         && key.accounts.iter().all(|a| !a.is_empty() && a.len() <= 128)
         && !key.capabilities.is_empty()
-        && key.capabilities.len() <= 8
+        && key.capabilities.len() <= 9
         && key.expires_at.is_none_or(|t| t > key.created_at)
 }
 impl ApiKeys {

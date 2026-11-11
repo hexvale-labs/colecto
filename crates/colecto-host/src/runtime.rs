@@ -90,7 +90,7 @@ impl SecretStore for SystemSecrets {
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let directory = env::var_os("COLECTO_DATA_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(".colecto-demo"));
+        .unwrap_or_else(|| PathBuf::from(".colecto"));
     let assets = env::var_os("COLECTO_ASSETS")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ui/dist"));
@@ -149,7 +149,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let _ = stop.send(true);
     };
     if let Some(listener) = listener {
-        println!("Colecto local demo: http://{authority}");
+        println!("Colecto: http://{authority}");
         println!("Data directory: {}", directory.display());
         axum::serve(listener, service.router())
             .with_graceful_shutdown(shutdown)
