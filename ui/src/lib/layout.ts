@@ -72,6 +72,10 @@ function replace(node: Node, id: string, make: (group: Tabs) => Node): Node {
 export function dock(layout: Layout, pane: string, target: string, zone: Zone, index?: number): Layout {
   const source = groupOf(layout, pane);
   if (zone !== 'center' && source?.id === target && source.panes.length === 1) return layout;
+  if (zone !== 'center' && source?.panes.length === 1) {
+    const moved = reorder(layout, source.id, target, zone);
+    if (moved) return moved;
+  }
   const next = without(layout, pane);
   if (!next.root || !leaves(next.root).some(group => group.id === target)) return layout;
   if (zone === 'center') {
@@ -83,6 +87,27 @@ export function dock(layout: Layout, pane: string, target: string, zone: Zone, i
   const fresh = tabs(nextId(next.root), [pane]);
   const after = zone === 'right' || zone === 'bottom';
   next.root = tidy(replace(next.root, target, group => ({ kind: 'split', dir: zone === 'left' || zone === 'right' ? 'row' : 'column', sizes: [0.5, 0.5], children: after ? [group, fresh] : [fresh, group] })));
+  return next;
+}
+
+function parentOf(node: Node | null, id: string): { split: Split; index: number } | null {
+  if (!node || node.kind === 'tabs') return null;
+  const index = node.children.findIndex(child => child.kind === 'tabs' && child.id === id);
+  return index >= 0 ? { split: node, index } : node.children.map(child => parentOf(child, id)).find(Boolean) ?? null;
+}
+
+/** Moving a group beside a sibling in the same row or column reorders it; every group keeps its size. */
+function reorder(layout: Layout, source: string, target: string, zone: Edge): Layout | null {
+  const next = clone(layout);
+  const from = parentOf(next.root, source);
+  const to = parentOf(next.root, target);
+  if (!from || from.split !== to?.split || from.split.dir !== (zone === 'left' || zone === 'right' ? 'row' : 'column')) return null;
+  const { split } = from;
+  const [child] = split.children.splice(from.index, 1);
+  const [size] = split.sizes.splice(from.index, 1);
+  const at = split.children.findIndex(item => item.kind === 'tabs' && item.id === target) + (zone === 'right' || zone === 'bottom' ? 1 : 0);
+  split.children.splice(at, 0, child);
+  split.sizes.splice(at, 0, size);
   return next;
 }
 
