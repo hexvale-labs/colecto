@@ -1,5 +1,5 @@
 name: Install apt packages
-description: Install Ubuntu packages on a GitHub runner without waiting on slow or broken apt mirrors.
+description: Install Ubuntu packages on a GitHub runner from whichever apt mirror is fastest right now.
 
 inputs:
   packages:
@@ -18,25 +18,29 @@ runs:
         sudo rm -f /var/lib/man-db/auto-update
         printf '%s\n' 'Acquire::Retries "2";' 'Acquire::http::Timeout "20";' 'Acquire::https::Timeout "20";' \
           'DPkg::Lock::Timeout "120";' | sudo tee /etc/apt/apt.conf.d/90ci > /dev/null
-        install() { sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $PACKAGES; }
 
-        # Runner images ship recent package lists, so try without `apt-get update` first: it
-        # is the step that hangs for minutes when the image's mirror stops resolving.
-        install && exit 0
-        sudo apt-get update && install && exit 0
-
-        echo "::warning::apt mirror failed; retrying with other mirrors"
+        # The runner's default mirror (azure.archive.ubuntu.com) sometimes stops resolving or
+        # slows to a crawl, and apt waits 20 s per request before trying the next one. Time a
+        # small download from each mirror and list the working ones fastest first.
         if [ "$(dpkg --print-architecture)" = amd64 ]; then
-          mirrors="http://archive.ubuntu.com/ubuntu/ https://mirrors.edge.kernel.org/ubuntu/"
+          candidates="http://azure.archive.ubuntu.com/ubuntu/ http://archive.ubuntu.com/ubuntu/ https://mirrors.edge.kernel.org/ubuntu/"
         else
-          mirrors="http://ports.ubuntu.com/ubuntu-ports/"
+          candidates="http://azure.ports.ubuntu.com/ubuntu-ports/ http://ports.ubuntu.com/ubuntu-ports/"
         fi
-        for file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
-          [ -f "$file" ] && sudo sed -i -E \
-            's#https?://(azure\.archive|archive|security|ports)\.ubuntu\.com/ubuntu(-ports)?/?#mirror+file:/etc/apt/apt-mirrors.txt#' "$file"
-        done
-        for mirror in $mirrors; do
-          echo "$mirror" | sudo tee /etc/apt/apt-mirrors.txt
-          sudo apt-get update && install && exit 0
-        done
-        exit 1
+        release=$(. /etc/os-release && echo "$VERSION_CODENAME")
+        ranked=$(for mirror in $candidates; do
+          time=$(curl -fsS -o /dev/null --max-time 5 -w '%{time_total}' "${mirror}dists/$release/InRelease") &&
+            echo "$time $mirror"
+        done | sort -n | tee /dev/stderr | cut -d' ' -f2)
+        if [ -n "$ranked" ]; then
+          echo "$ranked" | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          # Route every Ubuntu source, including security updates, through the ranked list.
+          for file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            [ -f "$file" ] && sudo sed -i -E \
+              's#https?://([a-z.]+\.)?(archive|security|ports)\.ubuntu\.com/ubuntu(-ports)?/?#mirror+file:/etc/apt/apt-mirrors.txt#' "$file"
+          done
+        fi
+
+        install() { sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $PACKAGES; }
+        # Runner images ship recent package lists, so `apt-get update` is only needed when they are stale.
+        install || { sudo apt-get update && install; }

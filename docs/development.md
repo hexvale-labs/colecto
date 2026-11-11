@@ -117,9 +117,10 @@ dependency tree is never rebuilt from scratch.
 - `just test jmap` runs workspace-wide (`cargo test --test jmap_server`), not with
   `-p colecto-core`: selecting one package changes dependency features and would
   rebuild dozens of crates the shared cache already holds.
-- `.github/actions/apt-install` installs Ubuntu packages without `apt-get update` when
-  the runner image's lists are current, and switches mirrors when the default one stops
-  resolving. CI installs Playwright's libraries through it instead of
+- `.github/actions/apt-install` times a small download from each Ubuntu mirror and
+  lists the working ones fastest first, because the runners' default mirror sometimes
+  stops resolving or slows to a crawl. It skips `apt-get update` unless the image's
+  package lists are stale. CI installs Playwright's libraries through it instead of
   `playwright install --with-deps`.
 
 ## Stress fixtures
