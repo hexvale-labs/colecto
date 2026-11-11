@@ -142,15 +142,19 @@ dependency tree is never rebuilt from scratch.
 Measured on GitHub-hosted runners on 2026-11-11. A release's wall time is its
 slowest job.
 
-| Run | Before (v0.1.0) | First run, no cache | Cached |
-| --- | --- | --- | --- |
-| Release, wall time | 34 min | 18 min | 9 min |
-| Android | 33 min (4 ABIs on one runner) | 12 min per ABI | 4 to 6 min |
-| Linux | 8 to 11 min | 8 to 9 min | 5 min |
-| Windows | 12 to 15 min | 12 to 18 min | 6.5 to 8.5 min |
-| macOS and iOS | 8 to 16 min | 8 to 12 min | 5 min |
-| CI `verify` | 4 min; 12 to 20 min during mirror outages | | 4 to 4.5 min |
-| CI `jmap` | 1.5 min (85 crates rebuilt); 8 to 10 min during mirror outages | | 1 min |
+| Run | Before (v0.1.0) | First run, no cache | Cached, thin LTO | Cached, no LTO (current) |
+| --- | --- | --- | --- | --- |
+| Release, wall time | 34 min | 18 min | 9 min | 7.5 min |
+| `cargo build`, Windows | | | 6.5 min | 2.2 min |
+| `cargo build`, macOS | | | 4.5 min | 1.6 to 2 min |
+| `cargo build`, Linux, Android, iOS | | | 2.5 min | 1.1 to 1.5 min |
+| Slowest job | Android, 33 min | Windows, 18 min | Windows, 8.5 min | Android x64, 6 min |
+| CI `verify` | 4 min; 12 to 20 min during mirror outages | | | 4 to 4.5 min |
+| CI `jmap` | 1.5 min (85 crates rebuilt); 8 to 10 min during mirror outages | | | 1 min |
+
+With caches, most release jobs take 3 to 5 minutes: 1 to 2 minutes compiling
+Colecto's own crates, and the rest is setup and bundling (Windows MSI and NSIS
+about 50 s, Linux AppImage about 75 s).
 
 Android is faster without a cache too: it lost the 32-bit ABIs and builds each ABI on
 its own runner.
