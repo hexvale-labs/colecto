@@ -26,6 +26,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "license": "MIT OR Apache-2.0"
+    "license": "MIT OR Apache-2.0",
+    "linux": {
+      "deb": {
+        "desktopTemplate": "../../packaging/linux/Colecto.desktop.hbs"
+      },
+      "rpm": {
+        "desktopTemplate": "../../packaging/linux/Colecto.desktop.hbs"
+      }
+    }
   }
 }

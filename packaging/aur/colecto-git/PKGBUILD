@@ -1,0 +1,61 @@
+# Maintainer: Hexvale Labs <https://github.com/hexvale-labs>
+# Builds the latest commit on main. pkgver() derives the version, so this file only
+# changes when the build itself changes.
+pkgname=colecto-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc='A fast, extensible email client (development version)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/hexvale-labs/colecto'
+license=('MIT OR Apache-2.0')
+depends=('webkit2gtk-4.1' 'gtk3' 'openssl' 'dbus' 'hicolor-icon-theme')
+makedepends=('cargo' 'bun' 'git')
+optdepends=('org.freedesktop.secrets: keep account passwords in the system keyring')
+provides=('colecto')
+conflicts=('colecto' 'colecto-bin')
+options=('!lto')
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$pkgname"
+  local description
+  if description=$(git describe --long --tags --abbrev=7 2>/dev/null); then
+    printf '%s\n' "$description" | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+  else
+    printf '0.0.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+  fi
+}
+
+prepare() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+  cd ui
+  bun install --frozen-lockfile
+}
+
+build() {
+  cd "$pkgname"
+  (cd ui && bun run --bun build)
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p colecto-app -p colecto-host
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 target/release/colecto target/release/colecto-daemon target/release/colecto-mcp -t "$pkgdir/usr/bin/"
+
+  install -Dm644 packaging/linux/Colecto.desktop -t "$pkgdir/usr/share/applications/"
+  install -Dm644 crates/colecto-app/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/colecto.png"
+  install -Dm644 crates/colecto-app/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/colecto.png"
+  install -Dm644 crates/colecto-app/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/colecto.png"
+  install -Dm644 crates/colecto-app/icons/icon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/colecto.svg"
+
+  for unit in packaging/systemd/*.service; do
+    sed 's|/usr/local/bin/|/usr/bin/|' "$unit" | install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/${unit##*/}"
+  done
+
+  install -Dm644 LICENSE-MIT LICENSE-APACHE -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
