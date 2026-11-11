@@ -107,7 +107,7 @@ dependency tree is never rebuilt from scratch.
 | Rust dependencies for CI (`verify`, also restored by `jmap`) | `ci.yml` on `main` | toolchain + `Cargo.lock` |
 | Rust dependencies per release target (`release-<triple>`) | `release.yml` on `main` | toolchain + `Cargo.lock` |
 | Gradle distribution and downloads | `release.yml` on `main`, `android-arm64` job | Tauri CLI version |
-| Bun packages, Playwright browsers | `ci.yml` | `ui/bun.lock`, Playwright version |
+| Bun packages, Playwright browsers | `ci.yml` on `main` | `ui/bun.lock`, Playwright version |
 
 - Only dependencies are cached (Swatinem/rust-cache drops workspace crates), so every
   run still compiles Colecto itself.
@@ -122,6 +122,27 @@ dependency tree is never rebuilt from scratch.
   stops resolving or slows to a crawl. It skips `apt-get update` unless the image's
   package lists are stale. CI installs Playwright's libraries through it instead of
   `playwright install --with-deps`.
+- The daemon image has no layer cache. Its job (about 5 minutes) is never the slowest
+  in a release, and the Rust caches (750 to 850 MB per release target) already fill
+  most of the budget.
+
+### Measured timings
+
+Measured on GitHub-hosted runners on 2026-11-11. A release's wall time is its
+slowest job.
+
+| Run | Before (v0.1.0) | First run, no cache | Cached |
+| --- | --- | --- | --- |
+| Release, wall time | 34 min | 18 min | 9 min |
+| Android | 33 min (4 ABIs on one runner) | 12 min per ABI | 4 to 6 min |
+| Linux | 8 to 11 min | 8 to 9 min | 5 min |
+| Windows | 12 to 15 min | 12 to 18 min | 6.5 to 8.5 min |
+| macOS and iOS | 8 to 16 min | 8 to 12 min | 5 min |
+| CI `verify` | 4 min; 12 to 20 min during mirror outages | | 4 to 4.5 min |
+| CI `jmap` | 1.5 min (85 crates rebuilt); 8 to 10 min during mirror outages | | 1 min |
+
+Android is faster without a cache too: it lost the 32-bit ABIs and builds each ABI on
+its own runner.
 
 ## Stress fixtures
 
