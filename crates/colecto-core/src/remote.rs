@@ -633,14 +633,9 @@ mod tests {
                 "copy" | "expunge" => {
                     steps.push(("UID COPY 42", String::new()));
                     steps.push(("UID STORE 42 +FLAGS.SILENT (\\Deleted)", String::new()));
-                    steps.push((
-                        if operation == "copy" {
-                            "UID EXPUNGE 42"
-                        } else {
-                            "EXPUNGE"
-                        },
-                        String::new(),
-                    ));
+                    if operation == "copy" {
+                        steps.push(("UID EXPUNGE 42", String::new()));
+                    }
                 }
                 "flags" => {
                     steps.push(("UID STORE 42 +FLAGS.SILENT (\\Seen)", String::new()));
@@ -648,7 +643,6 @@ mod tests {
                 }
                 "delete" => {
                     steps.push(("UID STORE 42 +FLAGS.SILENT (\\Deleted)", String::new()));
-                    steps.push(("EXPUNGE", String::new()));
                 }
                 _ => {}
             }
@@ -1054,10 +1048,11 @@ fn organize_session<T: std::io::Read + std::io::Write>(
             session
                 .uid_store(&uid, "+FLAGS.SILENT (\\Deleted)")
                 .map_err(imap_error)?;
+            // A plain EXPUNGE would also remove messages other clients only marked as
+            // deleted, so without UIDPLUS the message stays flagged until the server or
+            // another client expunges it.
             if uidplus {
                 session.uid_expunge(&uid).map_err(imap_error)?;
-            } else {
-                session.expunge().map_err(imap_error)?;
             }
         }
     }
