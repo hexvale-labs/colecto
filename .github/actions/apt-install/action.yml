@@ -13,7 +13,9 @@ runs:
       env:
         PACKAGES: ${{ inputs.packages }}
       run: |
-        set -uo pipefail
+        # Not -e: unreachable mirrors and stale lists are expected and handled below. The
+        # step's result is the final install's.
+        set +e -uo pipefail
         # dpkg rebuilds the man-page index after every install, which takes longer than the install.
         sudo rm -f /var/lib/man-db/auto-update
         printf '%s\n' 'Acquire::Retries "2";' 'Acquire::http::Timeout "20";' 'Acquire::https::Timeout "20";' \

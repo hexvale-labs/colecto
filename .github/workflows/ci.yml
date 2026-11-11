@@ -48,14 +48,24 @@ jobs:
         with:
           bun-version-file: ui/package.json
 
-      - name: Cache Bun packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Like the Rust cache, only main saves Bun and Playwright caches; a pull request's
+      # copy could only be reused by that pull request and would crowd out release caches.
+      - name: Restore Bun packages
+        id: bun-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('ui/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
       - run: just install ui
+
+      - name: Save Bun packages
+        if: github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ steps.bun-cache.outputs.cache-primary-key }}
 
       # Browser builds depend only on the installed Playwright version and the browsers
       # installed below, not on the rest of the lockfile.
@@ -80,8 +90,9 @@ jobs:
         with:
           packages: libssl-dev libdbus-1-dev pkg-config ${{ steps.playwright-deps.outputs.packages }}
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: ${{ steps.playwright.outputs.key }}
@@ -89,6 +100,13 @@ jobs:
       - name: Install Playwright browsers
         working-directory: ui
         run: bunx playwright install chromium webkit
+
+      - name: Save Playwright browsers
+        if: github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright.outputs.key }}
       - run: just verify
       - run: just test browser
 
