@@ -3,7 +3,6 @@ use crate::api_keys::random;
 use colecto_core::Database;
 use colecto_extension_api::DraftInput;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 const RETENTION: u64 = 24 * 60 * 60;
 const MAX_REQUESTS: usize = 128;
@@ -40,15 +39,10 @@ pub struct Approvals {
     journal: Journal,
 }
 impl Approvals {
-    pub fn open(database: Database, directory: &Path, now: u64) -> Result<Self, String> {
+    pub fn open(database: Database, now: u64) -> Result<Self, String> {
         let mut journal = crate::store::open(
             &database,
-            directory,
             "send-approvals",
-            Some(crate::store::Legacy {
-                max_bytes: 16_000_000,
-                private: true,
-            }),
             || Journal {
                 version: 1,
                 requests: vec![],
@@ -229,7 +223,7 @@ mod tests {
     fn snapshot_replay_expiry_and_crash() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
-        let mut approvals = Approvals::open(database.clone(), dir.path(), 10).unwrap();
+        let mut approvals = Approvals::open(database.clone(), 10).unwrap();
         let mut draft = input();
         let request = approvals
             .create("key", "account", "from@example.test", draft.clone(), 10)
@@ -248,7 +242,7 @@ mod tests {
         assert_eq!(snapshot.body, "original");
         assert!(approvals.begin(&request.id, 11).is_err());
         drop(approvals);
-        let mut approvals = Approvals::open(database.clone(), dir.path(), 12).unwrap();
+        let mut approvals = Approvals::open(database.clone(), 12).unwrap();
         assert_eq!(
             approvals.get(&request.id, 12).unwrap().status,
             Status::Uncertain
@@ -268,7 +262,7 @@ mod tests {
     fn bounds_and_validation_prevent_unreviewable_requests() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
-        let mut approvals = Approvals::open(database.clone(), dir.path(), 10).unwrap();
+        let mut approvals = Approvals::open(database.clone(), 10).unwrap();
         let mut invalid = input();
         invalid.recipient = "not-an-address".into();
         let mut forward = input();
@@ -305,7 +299,7 @@ mod tests {
     fn rejected_and_failed_submission_never_replay() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
-        let mut approvals = Approvals::open(database.clone(), dir.path(), 10).unwrap();
+        let mut approvals = Approvals::open(database.clone(), 10).unwrap();
         let a = approvals
             .create("key", "account", "from", input(), 10)
             .unwrap();
@@ -324,7 +318,7 @@ mod tests {
         approvals.begin(&c.id, 11).unwrap();
         approvals.finish(&c.id, true).unwrap();
         drop(approvals);
-        let mut approvals = Approvals::open(database.clone(), dir.path(), 12).unwrap();
+        let mut approvals = Approvals::open(database.clone(), 12).unwrap();
         assert_eq!(approvals.get(&c.id, 12).unwrap().status, Status::Sent);
         assert!(approvals.begin(&c.id, 12).is_err());
     }

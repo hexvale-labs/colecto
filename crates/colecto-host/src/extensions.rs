@@ -5,7 +5,6 @@ use colecto_extension_api::{API_VERSION, Capability, ExtensionManifest, Extensio
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    path::Path,
     sync::Arc,
 };
 
@@ -85,7 +84,7 @@ pub struct Extensions {
     cache: HashMap<String, Arc<CachedPackage>>,
     memory_packages: HashMap<String, Arc<Vec<u8>>>,
 }
-const MAX_FILE: u64 = 4 * 1024 * 1024;
+const MAX_POLICY_BYTES: u64 = 4 * 1024 * 1024;
 impl Extensions {
     pub fn bundled() -> Self {
         let manifests: Vec<ExtensionManifest> = [
@@ -113,17 +112,12 @@ impl Extensions {
             memory_packages: HashMap::new(),
         }
     }
-    pub fn open(database: Database, directory: &Path) -> Result<Self, String> {
+    pub fn open(database: Database) -> Result<Self, String> {
         let mut extensions = Self::bundled();
         let empty = extensions.policy.clone();
         extensions.policy = crate::store::open(
             &database,
-            directory,
             "extensions",
-            Some(crate::store::Legacy {
-                max_bytes: MAX_FILE,
-                private: false,
-            }),
             || empty,
             |bytes| {
                 let policy: Policy = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
@@ -195,7 +189,7 @@ impl Extensions {
             if serde_json::to_vec(&next.policy)
                 .map_err(|e| e.to_string())?
                 .len() as u64
-                > MAX_FILE
+                > MAX_POLICY_BYTES
             {
                 return Err("Extension policy too large".into());
             }
@@ -473,7 +467,7 @@ mod tests {
     fn enabled_policy_and_packages_survive_restart() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
-        let open = || Extensions::open(database.clone(), dir.path()).unwrap();
+        let open = || Extensions::open(database.clone()).unwrap();
         let mut extensions = open();
         let source =
             include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");

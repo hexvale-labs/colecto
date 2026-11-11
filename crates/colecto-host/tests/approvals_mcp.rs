@@ -68,7 +68,7 @@ impl Fixture {
             Accounts::open(MailStore::open(dir.path()).unwrap(), backend.clone()).unwrap();
         let account = accounts.upsert(serde_json::from_value(json!({"address":"from@example.test","protocol":"jmap","imap_host":"localhost","smtp_host":"localhost","smtp_port":587,"session_url":format!("https://127.0.0.1:{port}/session"),"username":"from","secret":"fixture-secret"})).unwrap()).unwrap().id;
         let database = accounts.database();
-        let mut keys = ApiKeys::open(database.clone(), dir.path()).unwrap();
+        let mut keys = ApiKeys::open(database.clone()).unwrap();
         // MCP is off by default; these tests exercise it, so the owner has turned it on.
         database
             .set_record("host", "preferences", 1, br#"{"mcp":true}"#)
@@ -292,7 +292,7 @@ async fn revocation_disconnect_and_expiry_prevent_submission() {
             response(router.clone(), f.req(&f.secret, "POST", "/send", message())).await;
         let mut id = pending["id"].as_str().unwrap().to_owned();
         match reason {
-            "revoked" => ApiKeys::open(service.database(), f.dir.path())
+            "revoked" => ApiKeys::open(service.database())
                 .unwrap()
                 .revoke(&f.key, now())
                 .unwrap(),
@@ -333,8 +333,7 @@ async fn revocation_disconnect_and_expiry_prevent_submission() {
                 drop(service);
                 let database = colecto_core::Database::open(f.dir.path()).unwrap();
                 let mut approvals =
-                    colecto_host::approvals::Approvals::open(database, f.dir.path(), now())
-                        .unwrap();
+                    colecto_host::approvals::Approvals::open(database, now()).unwrap();
                 id = approvals
                     .create(
                         &f.key,
@@ -577,7 +576,7 @@ async fn sdk_interop(expire: bool) {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
     } else {
-        ApiKeys::open(service.database(), f.dir.path())
+        ApiKeys::open(service.database())
             .unwrap()
             .revoke(&f.key, now())
             .unwrap();
