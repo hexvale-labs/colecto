@@ -16,6 +16,8 @@ concurrency:
 permissions:
   contents: read
 
+# No build caches here: GitHub scopes a cache to the tag that saved it, so the next release
+# could never restore it, and it would only push main's CI cache out of the 10 GB budget.
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
@@ -78,10 +80,6 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          key: release-${{ matrix.target }}
-          save-if: ${{ startsWith(github.ref, 'refs/tags/') }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -145,10 +143,6 @@ jobs:
           toolchain: stable
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          key: release-android
-          save-if: ${{ startsWith(github.ref, 'refs/tags/') }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -226,10 +220,6 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-ios
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          key: release-ios
-          save-if: ${{ startsWith(github.ref, 'refs/tags/') }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -309,8 +299,6 @@ jobs:
         with:
           context: .
           platforms: linux/${{ matrix.arch }}
-          cache-from: type=gha,scope=daemon-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=daemon-${{ matrix.arch }}
           outputs: ${{ startsWith(github.ref, 'refs/tags/') && format('type=image,name=ghcr.io/{0}-daemon,push-by-digest=true,name-canonical=true,push=true', github.repository) || 'type=cacheonly' }}
 
       - name: Record the digest
