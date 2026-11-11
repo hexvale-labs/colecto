@@ -6,7 +6,7 @@ Host and daemon. Storage layout is described in [storage](storage.md).
 ## Connect a mail account
 
 IMAP receives mail; SMTP sends mail. **POP3 will not be supported.**
-Use **Settings → Accounts & security** inside the app to add IMAP/SMTP or JMAP accounts, edit
+Use **Settings → Accounts** inside the app to add IMAP/SMTP or JMAP accounts, edit
 settings, reconnect, and disconnect. The account selector stays available on
 narrow screens. Inbox, drafts, and the compose sender belong to the selected
 account. Saving settings does not verify the provider connection: open Inbox to
@@ -36,7 +36,7 @@ Any mail variable enables account mode; missing or invalid settings stop startup
 Certificates and hostnames are verified; plaintext authentication is unavailable.
 When unlocked, a legacy environment account is imported once into persistent
 account settings and the system credential store, retaining its existing `demo`
-identity and drafts. Saved settings then take precedence; use Settings → Accounts & security to
+identity and drafts. Saved settings then take precedence; use Settings → Accounts to
 update them. A password-protected vault suppresses environment credentials while
 locked; reconnect/import through the UI after unlocking. Secrets are never
 returned through the API or saved in the draft store. OAuth-only providers are not supported yet.
@@ -66,38 +66,58 @@ Credential changes and locking report busy while an account operation is active.
 Transport libraries follow the [imap client documentation](https://docs.rs/imap/2.4.1/imap/)
 and [lettre SMTP documentation](https://docs.rs/lettre/0.11.23/lettre/transport/smtp/).
 
-## Prototype JMAP account
+## JMAP accounts
 
-Instead of IMAP/SMTP, set `COLECTO_JMAP_SESSION_URL` to your provider's HTTPS
-session resource (often `https://provider.example/.well-known/jmap`),
-`COLECTO_JMAP_TOKEN` to a provider-issued bearer token, and
-`COLECTO_MAIL_ADDRESS` to an address advertised by that account's JMAP identities.
-Run `just run`. Do not also set IMAP/SMTP variables. Partial configuration fails
-startup; server authentication and capability checks happen on first use.
-Tokens use the same credential storage as IMAP passwords; do not put them in source control. OAuth login and token
-refresh are not implemented. Redirects are rejected; supply the final session URL.
+JMAP ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620),
+[RFC 8621](https://www.rfc-editor.org/rfc/rfc8621)) is a full alternative to
+IMAP/SMTP: one HTTPS connection receives, searches and sends mail, with push.
+In **Settings → Accounts**, choose **JMAP** and enter:
 
-This is an experimental transport following [RFC 8620](https://www.rfc-editor.org/rfc/rfc8620)
-and [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621), not a full sync client.
-It uses the primary mail account, fetches the latest 100 Inbox messages without
-marking them seen, lists plain text (up to 100000 bytes per body part), opens the raw message on
-demand for HTML and attachments, and
-keeps drafts local. HTTP responses are limited to 8000000 bytes, with 30-second
-request timeouts. Sending attachments, changes/push, and pagination are unsupported.
-The existing extension API and UI are shared by both transports.
+- **JMAP server or session URL:** the server's address, such as
+  `https://mail.example.com`, or its exact session URL. A bare address uses
+  `/.well-known/jmap`. Redirects are followed only to HTTPS on the same host, so your
+  credentials never go to another server. Plain HTTP is accepted only for a server on
+  this machine (`localhost`, `127.0.0.1`, `[::1]`).
+- **Username:** leave it empty to sign in with an **API token** (Fastmail and other
+  providers that issue bearer tokens). Fill it in to sign in with a **password** or app
+  password instead (Stalwart, Cyrus, Apache James and other servers using HTTP Basic).
+- **Email address:** the address to send as. Colecto uses the identity with that
+  address, then a `*@your-domain` wildcard identity, then the account's only identity.
 
-Sending requires submission capability, a matching identity, and mailboxes with
-`drafts` and `sent` roles. It creates a server draft and submits it, requesting a
-move to Sent after success. Submission acceptance is not final delivery or a
-guarantee that the subsequent mailbox update succeeded. Failure can leave a
-server draft or an uncertain send; check Sent and Drafts before retrying. There
-are no automatic retries or local draft deletions. Provider interoperability has
-not been verified against a live account; use a test account and separate data
-directory for this prototype.
+For a single account from the environment, set `COLECTO_JMAP_SESSION_URL`,
+`COLECTO_JMAP_TOKEN` (the token or password), `COLECTO_MAIL_ADDRESS` and optionally
+`COLECTO_JMAP_USERNAME`, and leave the IMAP/SMTP variables unset. Partial
+configuration fails startup; authentication and capability checks happen on first
+use. OAuth sign-in and token refresh are not implemented.
+
+What works, the same as IMAP/SMTP:
+
+- The primary mail account's latest 100 messages per folder, fetched without
+  marking them seen, in one request (`Email/query` with a back-referenced
+  `Email/get`). Plain text up to 100000 bytes per part is listed; the raw message is
+  downloaded on demand for HTML and attachments.
+- Search through the server's `text` filter.
+- Push through the session's event source: a change to the account's `Email` state
+  refreshes it within seconds, and polling continues underneath.
+- Sending with Cc, threading headers and attachments. Attachments are uploaded as
+  blobs first (respecting the server's `maxSizeUpload`), the message is created in
+  Drafts and submitted, and on success the server moves it to Sent and clears
+  `$draft`. Sending needs the submission capability and mailboxes with `drafts` and
+  `sent` roles. If the server refuses the message, the error names its reason (for
+  example `tooLarge`).
+
+Submission acceptance is not final delivery, and failure can leave a server draft or
+an uncertain send; check Sent and Drafts before retrying. There are no automatic
+retries. HTTP responses are limited to 8000000 bytes, with 30-second timeouts.
+
+`just test jmap` (also run in CI) sends a message with an attachment through a real
+JMAP server, the Cyrus test server in Docker, then receives it, searches for it,
+downloads the attachment and finds it in Sent. Push is covered by unit tests, because
+that server does not emit push events.
 
 ## Optional master password
 
-In **Settings → Accounts & security → Credential protection**, enable password protection with a
+In **Settings → Accounts → Credential protection**, enable password protection with a
 master password of at least 12 bytes. This is optional: the default is your
 system credential store. Password mode also works when no desktop keychain is
 available. Keep the password somewhere safe: Colecto cannot recover it.
@@ -115,7 +135,7 @@ with random salt/nonces and authenticated account metadata. The password and
 derived key are not saved. It locks on Host restart; **Lock credentials** also
 removes active mail credentials from memory. Local drafts remain accessible.
 Unlocking is shared by tabs using the same local Host. A tab that changes account
-security elsewhere may need to reopen Settings → Accounts & security to refresh its status.
+security elsewhere may need to reopen Settings → Accounts to refresh its status.
 
 You can change the password while unlocked or return to the system credential
 store. Credential transitions journal replacement entries before switching the

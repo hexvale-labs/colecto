@@ -1,0 +1,30 @@
+# Colecto daemon behind Caddy, which obtains a TLS certificate automatically.
+# Set COLECTO_DOMAIN (for example in a .env file next to this file), then run:
+#   docker compose up -d
+#   docker compose exec colecto cat /data/access-token
+services:
+  colecto:
+    image: ghcr.io/hexvale-labs/colecto-daemon:latest
+    # Or build from a checkout instead of pulling:
+    # build: { context: ../.., dockerfile: Dockerfile }
+    restart: unless-stopped
+    environment:
+      COLECTO_PUBLIC_ORIGIN: https://${COLECTO_DOMAIN:?Set COLECTO_DOMAIN to the public host name}
+      # COLECTO_LOG: debug
+    volumes:
+      - colecto-data:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    command: caddy reverse-proxy --from ${COLECTO_DOMAIN} --to colecto:4173
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+
+volumes:
+  colecto-data:
+  caddy-data:

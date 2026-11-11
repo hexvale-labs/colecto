@@ -88,6 +88,19 @@ test('renders HTML in a script-free sandbox, gates remote images, and prefills r
   await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveValue(/> Hello formatted world/);
 });
 
+test('loads remote images straight away when Privacy settings allow it', async ({ page }) => {
+  await page.route('**/api/v1/preferences', async route => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const response = await route.fetch();
+    return route.fulfill({ response, json: { ...await response.json(), remote_images: true } });
+  });
+  const remote: string[] = [];
+  await page.route('https://remote.test/**', route => { remote.push(route.request().url()); return route.abort(); });
+  await openHtml(page, '<p>Newsletter</p><img alt="banner" src="https://remote.test/banner.png">');
+  await expect.poll(() => remote.length).toBeGreaterThan(0);
+  await expect(page.getByRole('button', { name: 'Load remote images' })).toHaveCount(0);
+});
+
 test('keeps designed mail on its light sheet even when it ships dark-mode rules', async ({ page }) => {
   const html = '<style>@media (prefers-color-scheme: dark) { .copy { color: #fff !important } }</style><table bgcolor="#e1f2e8"><tr><td class="copy" style="color:#222">Welcome aboard</td></tr></table>';
   const message = { id: 'designed', sender: 'Support', address: 'support@example.test', subject: 'Welcome aboard', body: 'Welcome aboard', date: 'Today' };

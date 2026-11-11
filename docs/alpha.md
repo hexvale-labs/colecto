@@ -2,8 +2,8 @@
 
 Alpha means one owner can use Colecto as their daily client for real IMAP/SMTP
 accounts, without data loss, and without opening another client for routine
-mail. JMAP stays experimental. Desktop and browser only; mobile-native builds,
-encryption of mail at rest, conversation threading, multi-device sync and
+mail, over IMAP/SMTP or JMAP. Desktop and browser come first; Android and iOS
+builds exist but are lightly tested. Encryption of mail at rest, conversation threading, multi-device sync and
 multi-user hosting come after alpha. Until alpha, persisted formats may change
 without migrations.
 
@@ -39,5 +39,5 @@ Sending accepts comma-separated `recipient` and `cc`, `in_reply_to` and
 the original message's attachments on the server and also requires
 `messages.read`. Drafts keep recipients, Cc, threading and `forward_of`, but not
 uploaded files. Delivery requests from API keys cannot include attachments or
-forwards, because owner approval shows text only. JMAP sends threading headers
-and multiple recipients but rejects attachments.
+forwards, because owner approval shows text only. JMAP sends threading headers,
+multiple recipients and attachments.

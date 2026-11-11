@@ -1,0 +1,355 @@
+name: Release
+
+# A `v*` tag builds every platform Tauri supports, publishes a GitHub release and pushes the
+# daemon image. Pull requests that change this file build everything without publishing.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml", "crates/colecto-app/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  TAURI_CLI: "@tauri-apps/cli@2.12.4"
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      number: ${{ steps.version.outputs.number }}
+    steps:
+      - id: version
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$REF" == refs/tags/v* ]]; then tag="$REF_NAME"; else tag="v0.0.0"; fi
+          number="${tag#v}"
+          if ! [[ "$number" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tags must look like v1.2.3 (installers need a plain numeric version)"; exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    needs: version
+    name: ${{ matrix.platform }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux, arch: x64, runner: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bundles: "deb,rpm,appimage" }
+          - { platform: linux, arch: arm64, runner: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, bundles: "deb,rpm,appimage" }
+          - { platform: windows, arch: x64, runner: windows-2025, target: x86_64-pc-windows-msvc, bundles: "msi,nsis" }
+          # WiX cannot build Arm64 MSIs; NSIS can.
+          - { platform: windows, arch: arm64, runner: windows-11-arm, target: aarch64-pc-windows-msvc, bundles: "nsis" }
+          - { platform: macos, arch: arm64, runner: macos-15, target: aarch64-apple-darwin, bundles: "dmg" }
+          - { platform: macos, arch: x64, runner: macos-15, target: x86_64-apple-darwin, bundles: "dmg" }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      # linuxdeploy's bundled strip cannot read newer system libraries.
+      NO_STRIP: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libssl-dev libdbus-1-dev pkg-config rpm xdg-utils
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-${{ matrix.target }}
+          save-if: ${{ startsWith(github.ref, 'refs/tags/') }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: ui/package.json
+
+      - name: Build the UI
+        working-directory: ui
+        run: |
+          bun install --frozen-lockfile
+          bun run --bun build
+
+      - name: Build the app
+        working-directory: crates/colecto-app
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.number }}
+        run: >
+          bunx "$TAURI_CLI" build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          --config "{\"version\":\"$VERSION\"}"
+
+      - name: Name the installers
+        shell: bash
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          TARGET_DIR: target/${{ matrix.target }}/release/bundle
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          name="colecto-$TAG-${{ matrix.platform }}-${{ matrix.arch }}"
+          mkdir dist
+          for file in "$TARGET_DIR"/deb/*.deb "$TARGET_DIR"/rpm/*.rpm "$TARGET_DIR"/appimage/*.AppImage \
+                      "$TARGET_DIR"/msi/*.msi "$TARGET_DIR"/dmg/*.dmg; do
+            cp "$file" "dist/$name.${file##*.}"
+          done
+          for file in "$TARGET_DIR"/nsis/*.exe; do cp "$file" "dist/$name-setup.exe"; done
+          ls -l dist
+          [ -n "$(ls dist)" ]
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  android:
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-android
+          save-if: ${{ startsWith(github.ref, 'refs/tags/') }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: ui/package.json
+
+      - name: Build the UI
+        working-directory: ui
+        run: |
+          bun install --frozen-lockfile
+          bun run --bun build
+
+      - name: Generate the Android project
+        working-directory: crates/colecto-app
+        env:
+          VERSION: ${{ needs.version.outputs.number }}
+        run: |
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          bunx "$TAURI_CLI" android init --ci
+          # The app talks to its own service on http://127.0.0.1, which Android blocks by default.
+          sed -i 's/"usesCleartextTraffic"\] = "false"/"usesCleartextTraffic"] = "true"/' gen/android/app/build.gradle.kts
+          grep -q '"usesCleartextTraffic"\] = "true"' gen/android/app/build.gradle.kts
+          bunx "$TAURI_CLI" icon icons/icon.svg -o icons
+
+      - name: Build the APKs
+        working-directory: crates/colecto-app
+        env:
+          VERSION: ${{ needs.version.outputs.number }}
+        run: >
+          bunx "$TAURI_CLI" android build --ci --apk --split-per-abi
+          --target aarch64 armv7 i686 x86_64 --config "{\"version\":\"$VERSION\"}"
+
+      # Android installs only signed APKs. A throwaway key costs nothing, but each release has a
+      # new one, so updating means uninstalling the old version first.
+      - name: Sign and name the APKs
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          keystore="$RUNNER_TEMP/release.jks"
+          password=$(openssl rand -hex 16)
+          keytool -genkeypair -keystore "$keystore" -storepass "$password" -keypass "$password" \
+            -alias colecto -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Colecto" -noprompt
+          mkdir dist
+          for abi in arm64:arm64 arm:armv7 x86:x86 x86_64:x64; do
+            source="crates/colecto-app/gen/android/app/build/outputs/apk/${abi%%:*}/release/app-${abi%%:*}-release-unsigned.apk"
+            "$apksigner" sign --ks "$keystore" --ks-pass "pass:$password" \
+              --out "dist/colecto-$TAG-android-${abi##*:}.apk" "$source"
+          done
+          ls -l dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android
+          path: dist/*
+          if-no-files-found: error
+
+  ios:
+    needs: version
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-ios
+          save-if: ${{ startsWith(github.ref, 'refs/tags/') }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: ui/package.json
+
+      - name: Build the UI
+        working-directory: ui
+        run: |
+          bun install --frozen-lockfile
+          bun run --bun build
+
+      - name: Generate the Xcode project
+        working-directory: crates/colecto-app
+        run: |
+          brew install xcodegen
+          bunx "$TAURI_CLI" ios init --ci
+          bunx "$TAURI_CLI" icon icons/icon.svg -o icons
+
+      # Without an Apple developer account the app cannot be signed, so build it unsigned and
+      # package the .app as an .ipa by hand. Sideloading tools re-sign it on install.
+      - name: Build the unsigned IPA
+        working-directory: crates/colecto-app
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.number }}
+        run: |
+          set -euo pipefail
+          bunx "$TAURI_CLI" ios build --ci --target aarch64 --config "{\"version\":\"$VERSION\"}" \
+            -- CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= || true
+          app=$(find gen/apple/build -name '*.app' -path '*iphoneos*' -type d | head -1)
+          [ -n "$app" ] || { echo "::error::No .app was built"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/ipa/Payload" "$GITHUB_WORKSPACE/dist"
+          cp -R "$app" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/dist/colecto-$TAG-ios-arm64.ipa" Payload)
+          ls -l "$GITHUB_WORKSPACE/dist"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios
+          path: dist/*
+          if-no-files-found: error
+
+  daemon-image:
+    needs: version
+    name: daemon image (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          cache-from: type=gha,scope=daemon-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=daemon-${{ matrix.arch }}
+          outputs: ${{ startsWith(github.ref, 'refs/tags/') && format('type=image,name=ghcr.io/{0}-daemon,push-by-digest=true,name-canonical=true,push=true', github.repository) || 'type=cacheonly' }}
+
+      - name: Record the digest
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: mkdir -p digests && touch "digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [version, desktop, android, ios, daemon-image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the daemon image
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}-daemon
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          image=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          digests=$(find dist -maxdepth 1 -type f -size 0 -printf "$image@sha256:%f ")
+          docker buildx imagetools create -t "$image:$TAG" -t "$image:latest" $digests
+          find dist -maxdepth 1 -type f -size 0 -delete
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          (cd dist && sha256sum colecto-* > SHA256SUMS.txt)
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Colecto $TAG" --generate-notes \
+            --notes "Installers are not signed. See https://github.com/$GITHUB_REPOSITORY/blob/main/docs/install.md before installing."

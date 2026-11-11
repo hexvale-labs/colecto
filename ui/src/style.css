@@ -1,4 +1,4 @@
-/* Colecto is dark only. See DESIGN.md, "Light mode", before proposing otherwise. */
+/* Colecto is dark only. See docs/DESIGN.md, "Light mode", before proposing otherwise. */
 :root {
   /* Near-black ground with tiles lifted just enough to read as surfaces. Neutral, with a breath of the brand green. */
   --ground: oklch(0.112 0.002 165);

@@ -193,7 +193,17 @@ impl MailStore {
             }
             Account::Jmap(account) => {
                 account.validate()?;
-                serde_json::to_string(&("jmap", &account.session_url, &account.address))
+                if account.username.is_empty() {
+                    // Bearer accounts keep the key they had before password sign-in existed.
+                    serde_json::to_string(&("jmap", &account.session_url, &account.address))
+                } else {
+                    serde_json::to_string(&(
+                        "jmap",
+                        &account.session_url,
+                        &account.address,
+                        &account.username,
+                    ))
+                }
             }
         }
         .map_err(storage)?;

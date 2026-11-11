@@ -21,6 +21,18 @@ browser:
     bun test ./ui/tests/restart.test.mjs
     cd ui && bun run --bun test
 
+# Check JMAP against a real server: the Cyrus test server in Docker (needs port 8080 free).
+jmap:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name=colecto-jmap-test
+    docker rm -f "$name" > /dev/null 2>&1 || true
+    docker run -d --rm --name "$name" -p 127.0.0.1:8080:8080 \
+      ghcr.io/cyrusimap/cyrus-docker-test-server@sha256:c5e84adf335bbd945395ec6b8aee1f6cb5675188b2a48d972432678032a01d46 > /dev/null
+    trap 'docker rm -f "$name" > /dev/null' EXIT
+    for _ in $(seq 90); do curl -sf -u user1:x http://localhost:8080/jmap > /dev/null && break; sleep 1; done
+    COLECTO_JMAP_TEST_URL=http://localhost:8080 cargo test -p colecto-core --locked --test jmap_server
+
 # Linux/X11 native launch smoke check (requires xvfb and xwininfo).
 native:
     {{j}} build native

@@ -1,5 +1,5 @@
 //! Owner preferences: the workspace layout, the selected account, whether MCP is on,
-//! the accent colour and notification choices.
+//! the accent colour, notification choices and whether mail loads remote images.
 //! The UI owns the layout's shape; the Host only bounds it, because it never acts on it.
 use colecto_core::Database;
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,8 @@ pub struct Preferences {
     /// `#rrggbb`; absent means the default mint.
     pub accent: Option<String>,
     pub notifications: Notifications,
+    /// Load remote images in HTML mail without asking. Off by default: they can track opens.
+    pub remote_images: bool,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug)]
@@ -64,6 +66,7 @@ pub struct PreferencesInput {
     /// An empty string restores the default accent.
     pub accent: Option<String>,
     pub notifications: Option<Notifications>,
+    pub remote_images: Option<bool>,
 }
 
 fn validate(preferences: &Preferences) -> Result<(), String> {
@@ -131,6 +134,9 @@ impl PreferenceStore {
         if let Some(notifications) = input.notifications {
             next.notifications = notifications;
         }
+        if let Some(remote_images) = input.remote_images {
+            next.remote_images = remote_images;
+        }
         validate(&next)?;
         crate::store::save(&self.database, "preferences", &next)?;
         self.value = next;
@@ -154,7 +160,9 @@ mod tests {
             workspace: Some(workspace),
             accent: None,
             notifications: None,
+            remote_images: Some(true),
         };
+        assert!(!store.get().remote_images);
         store
             .update(input(serde_json::json!({"root": {}})))
             .unwrap();
@@ -165,6 +173,7 @@ mod tests {
         assert!(store.get().mcp);
         assert_eq!(store.get().account.as_deref(), Some("work"));
         assert_eq!(store.get().workspace, Some(serde_json::json!({"root": {}})));
+        assert!(store.get().remote_images);
     }
 
     #[test]
@@ -179,6 +188,7 @@ mod tests {
             workspace: None,
             accent: Some(value.into()),
             notifications: None,
+            remote_images: None,
         };
         for invalid in ["red", "#12345", "#1234567", "#12345g", "url(#a)"] {
             assert!(store.update(accent(invalid)).is_err(), "{invalid}");

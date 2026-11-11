@@ -84,8 +84,9 @@
           <label class="field">IMAP port<input required type="number" min="1" max="65535" bind:value={settings.imap_port} /></label>
           <label class="field">SMTP host<input required maxlength="253" autocapitalize="none" bind:value={settings.smtp_host} placeholder="smtp.example.com" /></label>
           <fieldset class="field segmented-field"><legend>SMTP port</legend><div class="segmented"><label><input type="radio" name="smtp-port" value={587} bind:group={settings.smtp_port} />587 STARTTLS</label><label><input type="radio" name="smtp-port" value={465} bind:group={settings.smtp_port} />465 TLS</label></div></fieldset>
-        {:else}<label class="field wide-field">JMAP session URL<input required type="url" maxlength="2048" autocapitalize="none" bind:value={settings.session_url} placeholder="https://mail.example.com/.well-known/jmap" /></label>{/if}
-        <label class="field wide-field">{settings.protocol === 'imap' ? 'Password or app password' : 'JMAP bearer token'}<input type="password" required={!editing} maxlength="8192" autocomplete="new-password" bind:value={secret} placeholder={editing ? 'Leave blank to keep saved credential' : ''} /></label>
+        {:else}<label class="field wide-field">JMAP server or session URL<input required type="url" maxlength="2048" autocapitalize="none" bind:value={settings.session_url} placeholder="https://mail.example.com" /></label>
+          <label class="field wide-field">Username (only for password sign-in)<input maxlength="320" autocomplete="username" autocapitalize="none" bind:value={settings.username} placeholder="Leave empty to use an API token" /></label>{/if}
+        <label class="field wide-field">{settings.protocol === 'imap' ? 'Password or app password' : settings.username ? 'Password or app password' : 'API token'}<input type="password" required={!editing} maxlength="8192" autocomplete="new-password" bind:value={secret} placeholder={editing ? 'Leave blank to keep saved credential' : ''} /></label>
       </div><div class="button-row"><button class="primary" type="submit">{working ? 'Saving…' : 'Save account'}</button>{#if editing}<button class="secondary" type="button" onclick={resetForm}>Cancel editing</button>{/if}</div></fieldset></form>
     </section>
   </div>

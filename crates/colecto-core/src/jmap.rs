@@ -1,7 +1,11 @@
-//! Prototype JMAP transport. Tokens remain in the trusted core.
+//! JMAP transport (RFC 8620, RFC 8621): receive, search, send with attachments and push.
+//! Tokens and passwords remain in the trusted core.
 use crate::{Error, mime::Attachment};
 use colecto_extension_api::{DraftInput, Message};
-use reqwest::{Url, blocking::Client};
+use reqwest::{
+    Url,
+    blocking::{Client, RequestBuilder},
+};
 use serde_json::{Value, json};
 use std::{io::Read, time::Duration};
 
@@ -11,9 +15,13 @@ const SUBMISSION: &str = "urn:ietf:params:jmap:submission";
 
 #[derive(Clone)]
 pub struct JmapAccount {
+    /// The session resource, or just the server's HTTPS origin to use `/.well-known/jmap`.
     pub session_url: String,
+    /// A bearer token, or the password when `username` is set.
     pub token: String,
     pub address: String,
+    /// Empty for bearer tokens; otherwise the token is sent as this user's password (Basic auth).
+    pub username: String,
 }
 
 fn failed() -> Error {
@@ -30,15 +38,21 @@ fn http_error(error: reqwest::Error) -> Error {
         failed()
     }
 }
+/// HTTPS, or plain HTTP to a server on this machine, where nothing crosses the network.
+fn secure_scheme(url: &Url) -> bool {
+    url.scheme() == "https"
+        || (url.scheme() == "http"
+            && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")))
+}
 fn secure_url(value: &str) -> Result<Url, Error> {
     let url = Url::parse(value).map_err(|_| failed())?;
-    if url.scheme() != "https"
+    if !secure_scheme(&url)
         || !url.username().is_empty()
         || url.password().is_some()
         || url.fragment().is_some()
     {
         return Err(Error::Invalid(
-            "JMAP requires an HTTPS URL without embedded credentials or fragment".into(),
+            "JMAP requires an HTTPS URL (or HTTP on this machine) without embedded credentials or fragment".into(),
         ));
     }
     Ok(url)
@@ -71,20 +85,57 @@ fn decode(response: reqwest::blocking::Response) -> Result<Value, Error> {
     serde_json::from_slice(&bytes).map_err(|_| failed())
 }
 
+/// Follow at most a few redirects, and only to a secure URL on the same host, so credentials never
+/// leave the configured server (`/.well-known/jmap` usually redirects to the real session).
+fn same_host_redirects() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        let host = attempt.previous().first().and_then(|url| url.host_str());
+        if attempt.previous().len() <= 3
+            && secure_scheme(attempt.url())
+            && attempt.url().host_str() == host
+        {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    })
+}
+
 struct Session<'a> {
     account: &'a JmapAccount,
     client: Client,
     api: Url,
     download: String,
+    upload: String,
+    max_upload: u64,
     id: String,
     submission: bool,
     event_source: Option<String>,
 }
 impl JmapAccount {
+    fn authorize(&self, request: RequestBuilder) -> RequestBuilder {
+        if self.username.is_empty() {
+            request.bearer_auth(&self.token)
+        } else {
+            request.basic_auth(&self.username, Some(&self.token))
+        }
+    }
+    fn session_resource(&self) -> Result<Url, Error> {
+        let mut url = secure_url(&self.session_url)?;
+        if url.path() == "/" && url.query().is_none() {
+            url.set_path("/.well-known/jmap");
+        }
+        Ok(url)
+    }
     pub fn validate(&self) -> Result<(), Error> {
         secure_url(&self.session_url)?;
         if self.token.trim().is_empty() || self.token.contains(['\r', '\n']) {
-            return Err(Error::Invalid("Configure a JMAP bearer token".into()));
+            return Err(Error::Invalid(
+                "Configure a JMAP bearer token or password".into(),
+            ));
+        }
+        if self.username.contains([':', '\r', '\n']) {
+            return Err(Error::Invalid("Invalid JMAP username".into()));
         }
         self.address
             .parse::<lettre::Address>()
@@ -95,13 +146,11 @@ impl JmapAccount {
         self.validate()?;
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::none())
+            .redirect(same_host_redirects())
             .build()
             .map_err(|_| failed())?;
         let data = decode(
-            client
-                .get(secure_url(&self.session_url)?)
-                .bearer_auth(&self.token)
+            self.authorize(client.get(self.session_resource()?))
                 .send()
                 .map_err(http_error)?,
         )?;
@@ -114,6 +163,10 @@ impl JmapAccount {
             client,
             api: secure_url(field(&data, "apiUrl")?)?,
             download: data["downloadUrl"].as_str().unwrap_or_default().to_owned(),
+            upload: data["uploadUrl"].as_str().unwrap_or_default().to_owned(),
+            max_upload: data["capabilities"][CORE]["maxSizeUpload"]
+                .as_u64()
+                .unwrap_or(u64::MAX),
             submission: data["accounts"][&id]["accountCapabilities"][SUBMISSION].is_object(),
             event_source: data["eventSourceUrl"].as_str().map(str::to_owned),
             id,
@@ -137,13 +190,13 @@ impl JmapAccount {
                 .replace("{ping}", "60"),
         )?;
         let started = std::time::Instant::now();
-        let response = Client::builder()
+        let client = Client::builder()
             .timeout(timeout)
-            .redirect(reqwest::redirect::Policy::none())
+            .redirect(same_host_redirects())
             .build()
-            .map_err(|_| failed())?
-            .get(url)
-            .bearer_auth(&self.token)
+            .map_err(|_| failed())?;
+        let response = self
+            .authorize(client.get(url))
             .header("Accept", "text/event-stream")
             .send()
             .map_err(http_error)?;
@@ -217,10 +270,8 @@ impl JmapAccount {
             .replace("{blobId}", blob)
             .replace("{type}", "message%2Frfc822")
             .replace("{name}", "message.eml");
-        let response = session
-            .client
-            .get(secure_url(&url)?)
-            .bearer_auth(&self.token)
+        let response = self
+            .authorize(session.client.get(secure_url(&url)?))
             .send()
             .map_err(http_error)?;
         if !response.status().is_success() {
@@ -237,17 +288,12 @@ impl JmapAccount {
         Ok(bytes)
     }
     pub(crate) fn send(&self, input: &DraftInput, attachments: &[Attachment]) -> Result<(), Error> {
-        if !attachments.is_empty() {
-            return Err(Error::Invalid(
-                "Attachments are not supported for JMAP accounts yet".into(),
-            ));
-        }
-        self.send_inner(input).map_err(|error| match error {
+        self.send_inner(input, attachments).map_err(|error| match error {
             Error::Transport(message) => Error::Transport(format!("{message} Sending may have an uncertain outcome; check Sent and delivery status before sending again.")),
             error => error,
         })
     }
-    fn send_inner(&self, input: &DraftInput) -> Result<(), Error> {
+    fn send_inner(&self, input: &DraftInput, attachments: &[Attachment]) -> Result<(), Error> {
         self.validate()?;
         crate::validate_draft(input)?;
         let addresses = |list: &str| -> Result<Vec<Value>, Error> {
@@ -282,27 +328,36 @@ impl JmapAccount {
                 "JMAP account does not support sending".into(),
             ));
         }
+        if !attachments.is_empty() {
+            email["attachments"] = attachments
+                .iter()
+                .map(|file| {
+                    Ok(
+                        json!({"blobId": session.upload(file)?, "type": file.content_type,
+                        "name": file.name, "disposition": "attachment"}),
+                    )
+                })
+                .collect::<Result<Vec<_>, Error>>()?
+                .into();
+        }
         let identities = session.call("Identity/get", json!({}))?;
-        let identity = list(&identities)?
-            .iter()
-            .find(|v| {
-                v["email"]
-                    .as_str()
-                    .is_some_and(|s| s.eq_ignore_ascii_case(&self.address))
-            })
-            .ok_or_else(failed)?;
+        let identity = identity_for(list(&identities)?, &self.address).ok_or_else(|| {
+            Error::Invalid(
+                "This JMAP account has no sending identity for your email address".into(),
+            )
+        })?;
         let drafts = session.mailbox("drafts")?;
         let sent = session.mailbox("sent")?;
         email["mailboxIds"] = json!({(drafts.clone()): true});
         email["keywords"] = json!({"$draft": true});
         let created = session.call("Email/set", json!({"create":{"message":email}}))?;
-        let email = field(&created["created"]["message"], "id")?;
+        let email = created_id(&created, "message")?;
         let result = session.call("EmailSubmission/set", json!({"create":{"submission":{
             "identityId":field(identity,"id")?,"emailId":email}},
             "onSuccessUpdateEmail":{"#submission":{
                 (format!("mailboxIds/{drafts}")):null,(format!("mailboxIds/{sent}")):true,"keywords/$draft":null
             }}}))?;
-        field(&result["created"]["submission"], "id")?;
+        created_id(&result, "submission")?;
         Ok(())
     }
 }
@@ -314,22 +369,22 @@ impl Session<'_> {
             filter["text"] = json!(search);
         }
         // shortcut: latest 100 messages only; add changes/pagination before full sync.
-        let query = self.call(
-            "Email/query",
-            json!({"filter":filter,
-            "sort":[{"property":"receivedAt","isAscending":false}],"limit":100}),
-        )?;
-        let ids = query["ids"].as_array().ok_or_else(failed)?;
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let data = self.call(
-            "Email/get",
-            json!({"ids":ids,
-            "properties":["id","from","subject","receivedAt","textBody","bodyValues"],
-            "fetchTextBodyValues":true,"maxBodyValueBytes":100000}),
-        )?;
-        let messages = list(&data)?;
+        // One request: Email/get takes the ids straight from the query's result.
+        let results = self.calls(&[
+            (
+                "Email/query",
+                json!({"filter":filter,
+                "sort":[{"property":"receivedAt","isAscending":false}],"limit":100}),
+            ),
+            (
+                "Email/get",
+                json!({"#ids":{"resultOf":"0","name":"Email/query","path":"/ids"},
+                "properties":["id","from","subject","receivedAt","textBody","bodyValues"],
+                "fetchTextBodyValues":true,"maxBodyValueBytes":100000}),
+            ),
+        ])?;
+        let ids = results[0]["ids"].as_array().ok_or_else(failed)?;
+        let messages = list(&results[1])?;
         ids.iter()
             .map(|id| {
                 let message = messages
@@ -341,21 +396,57 @@ impl Session<'_> {
             .collect()
     }
 
-    fn call(&self, method: &str, mut args: Value) -> Result<Value, Error> {
-        args["accountId"] = json!(self.id);
+    fn call(&self, method: &str, args: Value) -> Result<Value, Error> {
+        Ok(self.calls(&[(method, args)])?.remove(0))
+    }
+    /// Send several method calls in one request; call ids are their positions.
+    fn calls(&self, calls: &[(&str, Value)]) -> Result<Vec<Value>, Error> {
         let mut using = vec![CORE, MAIL];
-        if method.starts_with("Identity/") || method.starts_with("EmailSubmission/") {
+        if calls.iter().any(|(method, _)| {
+            method.starts_with("Identity/") || method.starts_with("EmailSubmission/")
+        }) {
             using.push(SUBMISSION);
         }
+        let method_calls = calls
+            .iter()
+            .enumerate()
+            .map(|(index, (method, args))| {
+                let mut args = args.clone();
+                args["accountId"] = json!(self.id);
+                json!([method, args, index.to_string()])
+            })
+            .collect::<Vec<_>>();
         let data = decode(
-            self.client
-                .post(self.api.clone())
-                .bearer_auth(&self.account.token)
-                .json(&json!({"using":using,"methodCalls":[[method,args,"call"]]}))
+            self.account
+                .authorize(self.client.post(self.api.clone()))
+                .json(&json!({"using":using,"methodCalls":method_calls}))
                 .send()
                 .map_err(http_error)?,
         )?;
-        method_result(&data, method)
+        calls
+            .iter()
+            .enumerate()
+            .map(|(index, (method, _))| method_result(&data, method, &index.to_string()))
+            .collect()
+    }
+    /// Upload one attachment and return its blob id (RFC 8620 §6.1).
+    fn upload(&self, file: &Attachment) -> Result<String, Error> {
+        if file.data.len() as u64 > self.max_upload {
+            return Err(Error::Invalid(format!(
+                "{} is larger than this JMAP server accepts",
+                file.name
+            )));
+        }
+        let url = self.upload.replace("{accountId}", &self.id);
+        let data = decode(
+            self.account
+                .authorize(self.client.post(secure_url(&url)?))
+                .header(reqwest::header::CONTENT_TYPE, &file.content_type)
+                .body(file.data.clone())
+                .send()
+                .map_err(http_error)?,
+        )?;
+        Ok(field(&data, "blobId")?.to_owned())
     }
     fn mailbox(&self, role: &str) -> Result<String, Error> {
         let data = self.call("Mailbox/get", json!({"properties":["id","role"]}))?;
@@ -365,6 +456,37 @@ impl Session<'_> {
             .ok_or_else(failed)?;
         Ok(field(mailbox, "id")?.to_owned())
     }
+}
+/// The identity to send as: an exact address match, then a `*@domain` wildcard identity,
+/// then the account's only identity (some servers leave its address empty).
+fn identity_for<'a>(identities: &'a [Value], address: &str) -> Option<&'a Value> {
+    fn email<'v>(identity: &&'v Value) -> &'v str {
+        identity["email"].as_str().unwrap_or_default()
+    }
+    let domain = address.rsplit_once('@').map(|(_, domain)| domain)?;
+    identities
+        .iter()
+        .find(|identity| email(identity).eq_ignore_ascii_case(address))
+        .or_else(|| {
+            identities.iter().find(|identity| {
+                email(identity)
+                    .strip_prefix("*@")
+                    .is_some_and(|wildcard| wildcard.eq_ignore_ascii_case(domain))
+            })
+        })
+        .or(match identities {
+            [only] => Some(only),
+            _ => None,
+        })
+}
+/// The server id of an object created by a `/set` call, or why the server refused it.
+fn created_id<'a>(result: &'a Value, key: &str) -> Result<&'a str, Error> {
+    if let Some(kind) = result["notCreated"][key]["type"].as_str() {
+        return Err(Error::Transport(format!(
+            "The JMAP server refused the message ({kind})."
+        )));
+    }
+    field(&result["created"][key], "id")
 }
 /// The Email state for `account` in a JMAP StateChange event, if it names one.
 fn email_state(data: &str, account: &str) -> Option<String> {
@@ -377,9 +499,9 @@ fn email_state(data: &str, account: &str) -> Option<String> {
         })
         .flatten()
 }
-fn method_result(data: &Value, method: &str) -> Result<Value, Error> {
+fn method_result(data: &Value, method: &str, call: &str) -> Result<Value, Error> {
     let responses = data["methodResponses"].as_array().ok_or_else(failed)?;
-    if let Some(error) = responses.iter().find(|v| v[0] == "error" && v[2] == "call") {
+    if let Some(error) = responses.iter().find(|v| v[0] == "error" && v[2] == call) {
         let detail = match error[1]["type"].as_str() {
             Some("forbidden") => "JMAP forbidden: mailbox access was rejected",
             Some("serverUnavailable") => "JMAP serverUnavailable: provider temporarily unavailable",
@@ -393,7 +515,7 @@ fn method_result(data: &Value, method: &str) -> Result<Value, Error> {
     }
     let response = responses
         .iter()
-        .find(|v| v[0] == method && v[2] == "call")
+        .find(|v| v[0] == method && v[2] == call)
         .ok_or_else(failed)?;
     Ok(response[1].clone())
 }
@@ -451,7 +573,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let api = Url::parse(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
         let server = std::thread::spawn(move || {
-            for index in 0..3 {
+            for index in 0..2 {
                 let (mut socket, _) = listener.accept().unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(5)))
@@ -471,31 +593,27 @@ mod tests {
                 let mut bytes = vec![0; length];
                 reader.read_exact(&mut bytes).unwrap();
                 let request: Value = serde_json::from_slice(&bytes).unwrap();
-                let call = &request["methodCalls"][0];
-                assert_eq!(call[1]["accountId"], "account");
-                let (method, response) = match index {
-                    0 => (
-                        "Mailbox/get",
-                        json!({"list":[{"id":"sent-id","role":"sent"},{"id":"inbox-id","role":"inbox"}]}),
-                    ),
-                    1 => {
-                        assert_eq!(
-                            call[1]["filter"],
-                            json!({"inMailbox":"sent-id","text":"needle"})
-                        );
-                        assert_eq!(call[1]["limit"], 100);
-                        ("Email/query", json!({"ids":["b","a"]}))
-                    }
-                    _ => {
-                        assert_eq!(call[1]["ids"], json!(["b", "a"]));
-                        (
-                            "Email/get",
-                            json!({"list":[{"id":"a","subject":"Older"},{"id":"b","subject":"Newest"}]}),
-                        )
-                    }
+                let calls = request["methodCalls"].as_array().unwrap();
+                assert!(calls.iter().all(|call| call[1]["accountId"] == "account"));
+                let responses = if index == 0 {
+                    assert_eq!(calls[0][0], "Mailbox/get");
+                    json!([["Mailbox/get",{"list":[{"id":"sent-id","role":"sent"},{"id":"inbox-id","role":"inbox"}]},"0"]])
+                } else {
+                    // The query and the fetch travel together, linked by a result reference.
+                    assert_eq!(calls[0][0], "Email/query");
+                    assert_eq!(
+                        calls[0][1]["filter"],
+                        json!({"inMailbox":"sent-id","text":"needle"})
+                    );
+                    assert_eq!(calls[0][1]["limit"], 100);
+                    assert_eq!(calls[1][0], "Email/get");
+                    assert_eq!(calls[1][1]["#ids"]["resultOf"], "0");
+                    json!([
+                        ["Email/query",{"ids":["b","a"]},"0"],
+                        ["Email/get",{"list":[{"id":"a","subject":"Older"},{"id":"b","subject":"Newest"}]},"1"]
+                    ])
                 };
-                assert_eq!(call[0], method);
-                let body = json!({"methodResponses":[[method,response,"call"]]}).to_string();
+                let body = json!({"methodResponses":responses}).to_string();
                 write!(
                     socket,
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -509,12 +627,15 @@ mod tests {
             session_url: "https://example.test/jmap".into(),
             token: "secret".into(),
             address: "me@example.test".into(),
+            username: String::new(),
         };
         let session = Session {
             account: &account,
             client: Client::new(),
             api,
             download: String::new(),
+            upload: String::new(),
+            max_upload: u64::MAX,
             id: "account".into(),
             submission: false,
             event_source: None,
@@ -567,7 +688,7 @@ mod tests {
             let request: Value = serde_json::from_slice(&body).unwrap();
             assert_eq!(
                 request["methodCalls"][0],
-                json!(["Identity/get",{"accountId":"account"},"call"])
+                json!(["Identity/get",{"accountId":"account"},"0"])
             );
             assert!(
                 request["using"]
@@ -576,7 +697,7 @@ mod tests {
                     .contains(&json!(SUBMISSION))
             );
             let body =
-                r#"{"methodResponses":[["error",{"description":"private server data"},"call"]]}"#;
+                r#"{"methodResponses":[["error",{"description":"private server data"},"0"]]}"#;
             write!(
                 socket,
                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -589,6 +710,7 @@ mod tests {
             session_url: "https://example.test".into(),
             token: "test-token".into(),
             address: "me@example.test".into(),
+            username: String::new(),
         };
         // Only this internal test bypasses HTTPS to exercise the wire format locally.
         let session = Session {
@@ -596,6 +718,8 @@ mod tests {
             client: Client::new(),
             api,
             download: String::new(),
+            upload: String::new(),
+            max_upload: u64::MAX,
             id: "account".into(),
             submission: true,
             event_source: None,
@@ -611,12 +735,41 @@ mod tests {
     #[test]
     fn validates_transport_and_credentials() {
         assert!(secure_url("http://example.test/jmap").is_err());
+        assert!(secure_url("http://localhost:8080/jmap").is_ok());
+        assert!(secure_url("http://127.0.0.1/jmap").is_ok());
+        assert!(secure_url("http://localhost.example.test/jmap").is_err());
         assert!(secure_url("https://user:secret@example.test/jmap").is_err());
         assert!(secure_url("https://example.test/jmap").is_ok());
+        let mut account = JmapAccount {
+            session_url: "https://example.test".into(),
+            token: "secret".into(),
+            address: "me@example.test".into(),
+            username: String::new(),
+        };
+        assert_eq!(
+            account.session_resource().unwrap().as_str(),
+            "https://example.test/.well-known/jmap"
+        );
+        account.session_url = "https://example.test/jmap/session".into();
+        assert_eq!(account.session_resource().unwrap().path(), "/jmap/session");
+        account.username = "me:you".into();
+        assert!(account.validate().is_err());
+        account.username = "me@example.test".into();
+        assert!(account.validate().is_ok());
+        assert!(
+            created_id(
+                &json!({"notCreated":{"message":{"type":"tooLarge"}}}),
+                "message"
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("tooLarge")
+        );
         let account = JmapAccount {
             session_url: "https://example.test/jmap".into(),
             token: "bad\r\nheader".into(),
             address: "me@example.test".into(),
+            username: String::new(),
         };
         assert!(account.validate().is_err());
     }
@@ -647,24 +800,46 @@ mod tests {
     fn rejects_method_errors_and_wrong_call_ids() {
         assert!(
             method_result(
-                &json!({"methodResponses":[["error",{"type":"forbidden"},"call"]]}),
-                "Email/get"
+                &json!({"methodResponses":[["error",{"type":"forbidden"},"0"]]}),
+                "Email/get",
+                "0"
             )
             .is_err()
         );
         assert!(
             method_result(
                 &json!({"methodResponses":[["Email/get",{},"other"]]}),
-                "Email/get"
+                "Email/get",
+                "0"
             )
             .is_err()
         );
         assert!(
             method_result(
-                &json!({"methodResponses":[["Email/get",{"list":[]},"call"]]}),
-                "Email/get"
+                &json!({"methodResponses":[["Email/get",{"list":[]},"0"]]}),
+                "Email/get",
+                "0"
             )
             .is_ok()
+        );
+    }
+    #[test]
+    fn picks_the_matching_wildcard_or_only_identity() {
+        let pick = |identities: Value| {
+            identity_for(identities.as_array().unwrap(), "Me@Example.test")
+                .map(|identity| identity["id"].as_str().unwrap().to_owned())
+        };
+        let exact = json!([{"id":"other","email":"other@example.test"},{"id":"me","email":"me@example.test"}]);
+        assert_eq!(pick(exact).as_deref(), Some("me"));
+        let wildcard = json!([{"id":"other","email":"x@elsewhere.test"},{"id":"any","email":"*@example.test"}]);
+        assert_eq!(pick(wildcard).as_deref(), Some("any"));
+        assert_eq!(
+            pick(json!([{"id":"only","email":""}])).as_deref(),
+            Some("only")
+        );
+        assert_eq!(
+            pick(json!([{"id":"a","email":"a@x.test"},{"id":"b","email":"b@x.test"}])),
+            None
         );
     }
     #[test]

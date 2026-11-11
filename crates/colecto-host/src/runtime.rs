@@ -31,6 +31,7 @@ pub fn open_accounts(directory: &Path) -> Result<Accounts, Box<dyn std::error::E
             session_url: required("COLECTO_JMAP_SESSION_URL")?,
             token: required("COLECTO_JMAP_TOKEN")?,
             address: required("COLECTO_MAIL_ADDRESS")?,
+            username: env::var("COLECTO_JMAP_USERNAME").unwrap_or_default(),
         })?;
     } else if keys.iter().any(|key| env::var_os(key).is_some()) {
         let required = |key: &str| env::var(key).map_err(|_| format!("Missing {key}"));
