@@ -4,6 +4,28 @@ use serde::{Deserialize, Serialize};
 pub const API_VERSION: u32 = 1;
 pub const DEMO_ACCOUNT: &str = "demo";
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FolderRole {
+    Inbox,
+    Sent,
+    Drafts,
+    Archive,
+    Trash,
+    Junk,
+    Other,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Folder {
+    pub id: String,
+    pub name: String,
+    pub role: FolderRole,
+    pub unread: u32,
+    pub total: u32,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Message {

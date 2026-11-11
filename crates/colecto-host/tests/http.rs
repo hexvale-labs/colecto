@@ -1185,3 +1185,38 @@ async fn binary_package_uploads_exceed_the_default_json_body_limit() {
     let list = to_bytes(response.into_body(), 65536).await.unwrap();
     assert!(list.len() < 8192);
 }
+
+#[tokio::test]
+async fn folders_require_message_list_permission() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = authenticated(app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    ))
+    .await;
+    for (extension, status) in [
+        ("inbox", StatusCode::OK),
+        ("composer", StatusCode::FORBIDDEN),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(request(
+                "GET",
+                "/api/v1/folders",
+                extension,
+                "http://127.0.0.1:4173",
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        if status == StatusCode::OK {
+            let folders: serde_json::Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), 200_000).await.unwrap())
+                    .unwrap();
+            assert_eq!(folders[0]["role"], "inbox");
+            assert_eq!(folders[0]["total"], 4);
+        }
+    }
+}

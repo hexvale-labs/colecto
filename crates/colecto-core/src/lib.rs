@@ -235,6 +235,46 @@ impl MailStore {
             key: self.account_key.clone()?,
         })
     }
+    /// Returns the last discovered folders when the provider is temporarily unavailable.
+    pub fn folders(&mut self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+        use colecto_extension_api::{Folder, FolderRole};
+        let Some(account) = &self.account else {
+            return Ok(vec![Folder {
+                id: "inbox".into(),
+                name: "Inbox".into(),
+                role: FolderRole::Inbox,
+                unread: self.messages.len() as u32,
+                total: self.messages.len() as u32,
+            }]);
+        };
+        let key = self.account_key.as_ref().ok_or(Error::Missing)?;
+        let result = match account {
+            Account::Imap(account) => account.folders(),
+            Account::Jmap(account) => account.folders(),
+        };
+        match result {
+            Ok(folders) => {
+                self.database.set_record(
+                    &self.namespace,
+                    "folders",
+                    1,
+                    &serde_json::to_vec(&(key, &folders)).map_err(storage)?,
+                )?;
+                Ok(folders)
+            }
+            Err(error) => {
+                if let Some(bytes) = self.database.get_record(&self.namespace, "folders", 1)? {
+                    let (provider, folders): (String, Vec<Folder>) =
+                        serde_json::from_slice(&bytes).map_err(storage)?;
+                    if &provider == key {
+                        return Ok(folders);
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
     pub fn refresh(&mut self) -> Result<Vec<Message>, Error> {
         self.query("inbox", "")
     }
@@ -593,6 +633,40 @@ mod cache_tests {
             address: "me@example.test".into(),
         }
     }
+    #[test]
+    fn offline_folders_survive_restart_and_are_provider_scoped() {
+        use colecto_extension_api::{Folder, FolderRole};
+        let dir = tempfile::tempdir().unwrap();
+        let mut provider = account();
+        provider.imap_host = "127.0.0.1".into();
+        provider.imap_port = 1;
+        let mut store = MailStore::open(dir.path()).unwrap();
+        store.connect_account(provider.clone()).unwrap();
+        let folders = vec![Folder {
+            id: "Projects/2026".into(),
+            name: "Projects/2026".into(),
+            role: FolderRole::Other,
+            unread: 2,
+            total: 8,
+        }];
+        store
+            .database
+            .set_record(
+                &store.namespace,
+                "folders",
+                1,
+                &serde_json::to_vec(&(&store.account_key, &folders)).unwrap(),
+            )
+            .unwrap();
+        drop(store);
+        let mut store = MailStore::open(dir.path()).unwrap();
+        store.connect_account(provider.clone()).unwrap();
+        assert_eq!(store.folders().unwrap(), folders);
+        provider.username = "another".into();
+        store.connect_account(provider).unwrap();
+        assert!(store.folders().is_err());
+    }
+
     #[test]
     fn mailbox_identity_change_removes_old_reader_and_snapshot_even_for_empty_results() {
         let dir = tempfile::tempdir().unwrap();

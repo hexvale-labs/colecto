@@ -236,6 +236,10 @@ impl JmapAccount {
             }
         }
     }
+    pub fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+        self.session()?.folders()
+    }
+
     pub fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
         crate::validate_query(folder, search)?;
         self.session()?.query(folder, search)
@@ -362,6 +366,34 @@ impl JmapAccount {
     }
 }
 impl Session<'_> {
+    fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+        let data = self.call(
+            "Mailbox/get",
+            json!({
+                "properties":["id","name","role","totalEmails","unreadEmails"]
+            }),
+        )?;
+        list(&data)?
+            .iter()
+            .map(|mailbox| {
+                Ok(colecto_extension_api::Folder {
+                    id: field(mailbox, "id")?.into(),
+                    name: field(mailbox, "name")?.into(),
+                    role: serde_json::from_value(mailbox["role"].clone())
+                        .unwrap_or(colecto_extension_api::FolderRole::Other),
+                    total: mailbox["totalEmails"]
+                        .as_u64()
+                        .and_then(|n| n.try_into().ok())
+                        .ok_or_else(failed)?,
+                    unread: mailbox["unreadEmails"]
+                        .as_u64()
+                        .and_then(|n| n.try_into().ok())
+                        .ok_or_else(failed)?,
+                })
+            })
+            .collect()
+    }
+
     fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
         let mailbox = self.mailbox(folder)?;
         let mut filter = json!({"inMailbox":mailbox});
@@ -573,7 +605,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let api = Url::parse(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
         let server = std::thread::spawn(move || {
-            for index in 0..2 {
+            for index in 0..3 {
                 let (mut socket, _) = listener.accept().unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(5)))
@@ -595,7 +627,19 @@ mod tests {
                 let request: Value = serde_json::from_slice(&bytes).unwrap();
                 let calls = request["methodCalls"].as_array().unwrap();
                 assert!(calls.iter().all(|call| call[1]["accountId"] == "account"));
-                let responses = if index == 0 {
+                let responses = if index == 2 {
+                    assert_eq!(calls[0][0], "Mailbox/get");
+                    assert!(
+                        calls[0][1]["properties"]
+                            .as_array()
+                            .unwrap()
+                            .contains(&json!("unreadEmails"))
+                    );
+                    json!([["Mailbox/get",{"list":[
+                        {"id":"in","name":"Inbox","role":"inbox","totalEmails":14,"unreadEmails":3},
+                        {"id":"custom","name":"Projects/2026","role":null,"totalEmails":8,"unreadEmails":0}
+                    ]},"0"]])
+                } else if index == 0 {
                     assert_eq!(calls[0][0], "Mailbox/get");
                     json!([["Mailbox/get",{"list":[{"id":"sent-id","role":"sent"},{"id":"inbox-id","role":"inbox"}]},"0"]])
                 } else {
@@ -648,6 +692,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["Newest", "Older"]
         );
+        let folders = session.folders().unwrap();
+        assert_eq!(folders[0].role, colecto_extension_api::FolderRole::Inbox);
+        assert_eq!((folders[0].total, folders[0].unread), (14, 3));
+        assert_eq!(folders[1].id, "custom");
+        assert_eq!(folders[1].role, colecto_extension_api::FolderRole::Other);
         server.join().unwrap();
     }
     #[test]
