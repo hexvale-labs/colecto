@@ -1,17 +1,15 @@
 name: Release
 
-# A `v*` tag builds every platform Tauri supports, publishes a GitHub release and pushes the
-# daemon image. Pull requests that change this file build everything without publishing.
+# A semver tag such as `v1.2.3` builds every platform Tauri supports, publishes a GitHub
+# release and pushes the daemon image. A manual run builds everything without publishing.
 on:
   push:
-    tags: ["v*"]
-  pull_request:
-    paths: [".github/workflows/release.yml", "crates/colecto-app/**"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -35,7 +33,7 @@ jobs:
           REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          # Untagged test builds use a placeholder; Android refuses 0.0.0.
+          # Manual test builds use a placeholder; Android refuses 0.0.0.
           if [[ "$REF" == refs/tags/v* ]]; then tag="$REF_NAME"; else tag="v0.0.1"; fi
           number="${tag#v}"
           if ! [[ "$number" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -195,7 +193,7 @@ jobs:
           mkdir dist
           for abi in arm64:arm64 arm:armv7 x86:x86 x86_64:x64; do
             source="crates/colecto-app/gen/android/app/build/outputs/apk/${abi%%:*}/release/app-${abi%%:*}-release-unsigned.apk"
-            "$apksigner" sign --ks "$keystore" --ks-pass "pass:$password" \
+            "$apksigner" sign --v4-signing-enabled false --ks "$keystore" --ks-pass "pass:$password" \
               --out "dist/colecto-$TAG-android-${abi##*:}.apk" "$source"
           done
           ls -l dist

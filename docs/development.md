@@ -78,12 +78,14 @@ from the same file.
 
 ## Releases
 
-Pushing a tag such as `v1.2.3` runs `.github/workflows/release.yml`. It builds the app
+Pushing a semver tag such as `v1.2.3` runs `.github/workflows/release.yml`; other
+tags, pull requests and pushes to `main` do not. It builds the app
 for Linux, Windows, macOS, Android and iOS, names each file
 `colecto-v1.2.3-<platform>-<arch>.<ext>`, publishes a GitHub release with
 `SHA256SUMS.txt`, and pushes the daemon image to
-`ghcr.io/hexvale-labs/colecto-daemon`. Pull requests that change the workflow or the
-app crate run the same builds without publishing. Nothing is code-signed; see
+`ghcr.io/hexvale-labs/colecto-daemon`. To test the pipeline without releasing, start
+it by hand from the Actions tab (**Release → Run workflow**): it builds everything and
+publishes nothing. Nothing is code-signed; see
 [installing](install.md).
 
 `just build release` builds optimized binaries locally.
