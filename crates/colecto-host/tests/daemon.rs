@@ -213,7 +213,7 @@ fn static_asset_roots_cannot_expose_the_private_data_directory_or_owner_token() 
         MailService::new(
             accounts,
             AccessPolicy::local("localhost".into()),
-            dir.path().into()
+            dir.path().to_path_buf()
         )
         .is_err()
     );

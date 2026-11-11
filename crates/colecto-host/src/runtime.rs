@@ -149,6 +149,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let _ = stop.send(true);
     };
     if let Some(listener) = listener {
+        // Scripts and tests read the address from stdout, so it stays a plain line.
         println!("Colecto: http://{authority}");
         println!("Data directory: {}", directory.display());
         axum::serve(listener, service.router())
@@ -172,6 +173,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     worker.await?;
+    tracing::info!("Colecto daemon stopped");
     Ok(())
 }
 

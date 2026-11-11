@@ -333,10 +333,15 @@ impl MailStore {
                 "Attachments must total at most 25 MB".into(),
             ));
         }
-        match account {
-            Account::Imap(account) => account.send(&input, &files),
-            Account::Jmap(account) => account.send(&input, &files),
+        let (protocol, result) = match account {
+            Account::Imap(account) => ("smtp", account.send(&input, &files)),
+            Account::Jmap(account) => ("jmap", account.send(&input, &files)),
+        };
+        match &result {
+            Ok(()) => tracing::info!(protocol, attachments = files.len(), "Message sent"),
+            Err(error) => tracing::warn!(protocol, %error, "Sending failed"),
         }
+        result
     }
     fn raw(&self, id: &str) -> Result<Vec<u8>, Error> {
         match &self.account {

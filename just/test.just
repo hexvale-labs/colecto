@@ -7,7 +7,7 @@ all: rust ui
 
 # Run workspace tests and doctests.
 rust:
-    cargo test --workspace --locked
+    cargo test --locked
 
 # Run UI unit tests without starting a browser or mail service.
 ui:

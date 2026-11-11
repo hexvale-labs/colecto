@@ -846,6 +846,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "colecto-app"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "colecto-host",
+ "tauri",
+ "tauri-build",
+ "tokio",
+ "tracing",
+ "zeroize",
+]
+
+[[package]]
 name = "colecto-core"
 version = "0.1.0"
 dependencies = [
@@ -863,6 +876,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tracing",
  "turso",
  "zeroize",
 ]
@@ -892,13 +906,14 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "subtle",
- "tauri",
- "tauri-build",
  "tempfile",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
  "tower",
  "tower-http",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
  "wasmi",
  "wat",
  "zeroize",
@@ -5807,6 +5822,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
  "url",
 ]
 

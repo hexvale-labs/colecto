@@ -6,6 +6,7 @@ pub mod preferences;
 mod store;
 use api_keys::{ApiKeys, Principal};
 mod extensions;
+pub mod logging;
 pub mod notifications;
 pub mod package;
 pub mod runtime;
@@ -32,6 +33,21 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tower_http::services::ServeDir;
+
+/// Looks up a request path such as `/index.html`, returning its bytes and MIME type.
+pub type AssetLookup = Arc<dyn Fn(&str) -> Option<(Vec<u8>, String)> + Send + Sync>;
+
+/// Where the bundled UI comes from: a directory on disk, or files compiled into the app.
+#[derive(Clone)]
+pub enum Assets {
+    Directory(PathBuf),
+    Embedded(AssetLookup),
+}
+impl From<PathBuf> for Assets {
+    fn from(directory: PathBuf) -> Self {
+        Self::Directory(directory)
+    }
+}
 
 /// Named server-sent events for connected clients: `mail`, `approval` and `navigate`.
 /// An empty payload closes every stream.
@@ -101,7 +117,7 @@ impl From<Error> for Failure {
             Error::Missing => Self(StatusCode::NOT_FOUND, error.to_string()),
             Error::Invalid(_) => Self(StatusCode::BAD_REQUEST, error.to_string()),
             Error::Storage(_) => {
-                eprintln!("Local mail storage error: {error}");
+                tracing::error!(%error, "Local mail storage error");
                 Self(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Could not access local mail storage. Your unsaved changes are still in the editor.".into(),
@@ -129,7 +145,7 @@ pub fn app_with_accounts(accounts: Accounts, authority: String, assets: PathBuf)
         .router()
 }
 
-fn build_app(host: Host, assets: PathBuf) -> Router {
+fn build_app(host: Host, assets: Assets) -> Router {
     let api = Router::new()
         .route(
             "/preferences",
@@ -178,10 +194,26 @@ fn build_app(host: Host, assets: PathBuf) -> Router {
         .route("/drafts", get(drafts).post(save_draft))
         .route("/drafts/{id}", get(draft))
         .fallback(|| async { Failure(StatusCode::NOT_FOUND, "API route not found".into()) });
-    Router::new()
-        .nest("/api/v1", api)
-        .fallback_service(ServeDir::new(assets))
+    let router = Router::new().nest("/api/v1", api);
+    let router = match assets {
+        Assets::Directory(directory) => router.fallback_service(ServeDir::new(directory)),
+        Assets::Embedded(lookup) => router.fallback(move |uri: axum::http::Uri| async move {
+            match lookup(uri.path()) {
+                Some((body, mime)) => ([(header::CONTENT_TYPE, mime)], body).into_response(),
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        }),
+    };
+    router
         .layer(DefaultBodyLimit::max(512_000))
+        // Path only: query strings can carry search terms, which stay out of logs.
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http().make_span_with(
+                |request: &axum::http::Request<_>| {
+                    tracing::debug_span!("request", method = %request.method(), path = request.uri().path())
+                },
+            ),
+        )
         .with_state(host)
 }
 

@@ -11,7 +11,7 @@ app:
 # Run the Tauri desktop shell (requires platform Tauri build prerequisites).
 native:
     {{j}} build ui
-    cargo run -p colecto-host --features native --locked
+    cargo run -p colecto-app --locked
 
 # Run the standalone mail service under any supervisor.
 daemon:

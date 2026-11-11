@@ -4,9 +4,9 @@ set working-directory := '..'
 [default]
 all: fmt rust lint ui
 
-# Compile every workspace crate.
+# Compile the core, extension API and host crates; `native` checks the app.
 rust:
-    cargo check --workspace --all-targets --locked
+    cargo check --all-targets --locked
 
 # Check Svelte components and TypeScript.
 ui:
@@ -14,7 +14,7 @@ ui:
 
 # Compile the optional native adapter.
 native:
-    cargo check -p colecto-host --features native --all-targets --locked
+    cargo check -p colecto-app --all-targets --locked
 
 # Check Rust formatting without modifying files.
 fmt:
@@ -22,4 +22,4 @@ fmt:
 
 # Treat Clippy warnings as errors.
 lint:
-    cargo clippy --workspace --all-targets --locked -- -D warnings
+    cargo clippy --all-targets --locked -- -D warnings

@@ -50,7 +50,7 @@ pub fn run_agent(
             Ok(())
         })();
         if let Err(error) = result {
-            eprintln!("Notification connection unavailable: {error}");
+            tracing::warn!(%error, retry_seconds = backoff, "Notification connection unavailable");
         }
         std::thread::sleep(Duration::from_secs(backoff));
         backoff = (backoff * 2).min(60);

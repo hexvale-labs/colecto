@@ -1,4 +1,5 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    colecto_host::logging::init();
     if std::env::args().nth(1).as_deref() == Some("notify") {
         let origin = std::env::var("COLECTO_PUBLIC_ORIGIN")?;
         let token_file = std::path::PathBuf::from(
