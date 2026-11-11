@@ -1,7 +1,7 @@
 <script lang="ts">
   import CornerPicker from './CornerPicker.svelte';
   import type { NotificationPreferences } from './lib/api';
-  import { notify } from './extensions/notifications/toasts.svelte';
+  import { notify } from './extensions/notifications/store.svelte';
   let { value, onchange }: { value: NotificationPreferences; onchange: (next: NotificationPreferences) => void } = $props();
   let note = $state('');
   const supported = typeof Notification === 'function';

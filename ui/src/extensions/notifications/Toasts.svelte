@@ -1,9 +1,9 @@
 <script lang="ts">
   import { flip } from 'svelte/animate';
   import Icon from '../../Icon.svelte';
-  import { dismiss, toasts, type Toast } from './toasts.svelte';
+  import { dismiss, toasts, type Toast } from './store.svelte';
   import type { Corner } from '../../lib/api';
-  import { notificationPosition } from './toasts.svelte';
+  import { notificationPosition } from './store.svelte';
   let position = $derived(notificationPosition.value);
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Leave toward the edge the toast came from, quicker than it arrived.
