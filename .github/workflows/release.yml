@@ -166,6 +166,8 @@ jobs:
           VERSION: ${{ needs.version.outputs.number }}
         run: |
           echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          # Vendored OpenSSL looks for `<triple>-ranlib`, which current NDKs only ship as llvm-ranlib.
+          echo "TARGET_RANLIB=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" >> "$GITHUB_ENV"
           export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
           # Xcode and Gradle call back into the CLI as `bun tauri ...`, which needs a package script.
           echo '{"private":true,"scripts":{"tauri":"tauri"},"devDependencies":{"@tauri-apps/cli":"'"${TAURI_CLI##*@}"'"}}' > package.json
