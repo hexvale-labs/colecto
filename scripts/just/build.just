@@ -24,3 +24,9 @@ release: ui
 # Build the small installable example extension package from its WAT source.
 extension:
     cargo run -p colecto-host --example build-extension --locked
+
+# Build and package the third-party pixel cat example.
+oneko:
+    rustup target add wasm32-unknown-unknown
+    cargo build --manifest-path docs/extensions/examples/oneko/Cargo.toml --target wasm32-unknown-unknown --release --locked
+    python3 scripts/python/package_oneko.py

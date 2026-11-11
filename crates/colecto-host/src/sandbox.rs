@@ -5,15 +5,18 @@ use wasmi::{
     Caller, Config, Engine, Extern, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
 };
 
-const MAX_MODULE: usize = 64 * 1024;
+use crate::package::MAX_MODULE;
+use std::sync::Arc;
 const MAX_OUTPUT: usize = 32 * 1024;
-const FUEL: u64 = 1_000_000;
+pub const FUEL: u64 = 10_000_000;
+pub const MAX_MEMORY: usize = 32 * 1024 * 1024;
 type Service = Box<dyn FnMut(Value) -> Result<Value, String> + Send>;
 struct Context {
     limits: StoreLimits,
     service: Service,
     action: Vec<u8>,
-    view: Option<ExtensionView>,
+    view: Option<serde_json::Value>,
+    assets: Option<Arc<crate::package::Assets>>,
     calls: u8,
 }
 fn engine() -> Engine {
@@ -21,9 +24,9 @@ fn engine() -> Engine {
     config.consume_fuel(true);
     Engine::new(&config)
 }
-fn compile(engine: &Engine, bytes: &[u8]) -> Result<Module, String> {
+fn compile_module(engine: &Engine, bytes: &[u8]) -> Result<Module, String> {
     if bytes.len() > MAX_MODULE || !bytes.starts_with(b"\0asm") {
-        return Err("Expected a Wasm binary of at most 64 KiB".into());
+        return Err("Expected a Wasm binary of at most 16 MiB".into());
     }
     let module = Module::new(engine, bytes).map_err(|e| e.to_string())?;
     for import in module.imports() {
@@ -33,9 +36,20 @@ fn compile(engine: &Engine, bytes: &[u8]) -> Result<Module, String> {
     }
     Ok(module)
 }
-pub fn validate(bytes: &[u8]) -> Result<(), String> {
-    compile(&engine(), bytes).map(|_| ())
+pub struct Compiled {
+    engine: Engine,
+    module: Module,
 }
+pub fn compile(bytes: &[u8]) -> Result<Arc<Compiled>, String> {
+    let engine = engine();
+    let module = compile_module(&engine, bytes)?;
+    Ok(Arc::new(Compiled { engine, module }))
+}
+#[cfg(test)]
+pub fn validate(bytes: &[u8]) -> Result<(), String> {
+    compile(bytes).map(|_| ())
+}
+
 fn read(caller: &Caller<'_, Context>, ptr: i32, len: i32) -> Option<Vec<u8>> {
     let len = usize::try_from(len).ok()?;
     let ptr = usize::try_from(ptr).ok()?;
@@ -65,14 +79,25 @@ fn write(caller: &mut Caller<'_, Context>, ptr: i32, capacity: i32, bytes: &[u8]
     }
     bytes.len() as i32
 }
+#[cfg(test)]
 pub fn run(bytes: &[u8], action: &str, service: Service) -> Result<ExtensionView, String> {
-    if action.len() > 128 {
+    let compiled = compile(bytes)?;
+    let value = run_output(&compiled, action, service, None)?;
+    serde_json::from_value(value).map_err(|e| e.to_string())
+}
+pub fn run_output(
+    compiled: &Compiled,
+    action: &str,
+    service: Service,
+    assets: Option<Arc<crate::package::Assets>>,
+) -> Result<Value, String> {
+    if action.len() > if assets.is_some() { MAX_OUTPUT } else { 128 } {
         return Err("Extension action too long".into());
     }
-    let engine = engine();
-    let module = compile(&engine, bytes)?;
+    let engine = &compiled.engine;
+    let module = &compiled.module;
     let limits = StoreLimitsBuilder::new()
-        .memory_size(2 * 1024 * 1024)
+        .memory_size(MAX_MEMORY)
         .table_elements(1024)
         .memories(1)
         .tables(1)
@@ -80,18 +105,19 @@ pub fn run(bytes: &[u8], action: &str, service: Service) -> Result<ExtensionView
         .trap_on_grow_failure(true)
         .build();
     let mut store = Store::new(
-        &engine,
+        engine,
         Context {
             limits,
             service,
             action: action.as_bytes().to_vec(),
             view: None,
+            assets,
             calls: 0,
         },
     );
     store.limiter(|data| &mut data.limits);
     store.set_fuel(FUEL).map_err(|e| e.to_string())?;
-    let mut linker = Linker::new(&engine);
+    let mut linker = Linker::new(engine);
     linker
         .func_wrap(
             "colecto",
@@ -113,16 +139,26 @@ pub fn run(bytes: &[u8], action: &str, service: Service) -> Result<ExtensionView
                 let Some(bytes) = read(&caller, ptr, len) else {
                     return -1;
                 };
-                let Ok(view) = serde_json::from_slice::<ExtensionView>(&bytes) else {
-                    return -1;
+                let view = if let Some(assets) = &caller.data().assets {
+                    match crate::overlay::validate(&bytes, assets)
+                        .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+                    {
+                        Ok(v) => v,
+                        Err(_) => return -1,
+                    }
+                } else {
+                    let Ok(view) = serde_json::from_slice::<ExtensionView>(&bytes) else {
+                        return -1;
+                    };
+                    if view.title.len() > 256
+                        || view.text.len() > 16384
+                        || view.actions.len() > 16
+                        || view.actions.iter().any(|s| s.is_empty() || s.len() > 128)
+                    {
+                        return -1;
+                    }
+                    serde_json::to_value(view).expect("serializable view")
                 };
-                if view.title.len() > 256
-                    || view.text.len() > 16_384
-                    || view.actions.len() > 16
-                    || view.actions.iter().any(|s| s.is_empty() || s.len() > 128)
-                {
-                    return -1;
-                }
                 caller.data_mut().view = Some(view);
                 0
             },
@@ -160,7 +196,7 @@ pub fn run(bytes: &[u8], action: &str, service: Service) -> Result<ExtensionView
         )
         .map_err(|e| e.to_string())?;
     let instance = linker
-        .instantiate_and_start(&mut store, &module)
+        .instantiate_and_start(&mut store, module)
         .map_err(|e| e.to_string())?;
     let function = instance
         .get_typed_func::<(), ()>(&store, "run")
@@ -194,7 +230,7 @@ mod tests {
         );
         for source in [
             "(module (func (export \"run\") (loop br 0)))",
-            "(module (memory (export \"memory\") 33) (func (export \"run\")))",
+            "(module (memory (export \"memory\") 513) (func (export \"run\")))",
             "(module (memory (export \"memory\") 1) (func (export \"run\") unreachable))",
             "(module (memory (export \"memory\") 1) (func (export \"run\")))",
         ] {
@@ -219,7 +255,7 @@ mod tests {
         // Emit first, so missing output cannot hide a failure to enforce limits.
         let grow = source.replace(
             "call $emit drop",
-            "call $emit drop i32.const 33 memory.grow drop",
+            "call $emit drop i32.const 513 memory.grow drop",
         );
         assert!(execute(&grow).is_err());
         let table = source.replace(

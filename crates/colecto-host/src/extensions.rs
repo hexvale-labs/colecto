@@ -1,8 +1,13 @@
 //! Only immutable bundled packages may execute in the trusted application origin.
+use crate::package::{MAX_INSTALLED, MAX_MANIFEST};
 use colecto_core::Database;
 use colecto_extension_api::{API_VERSION, Capability, ExtensionManifest, ExtensionState};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    sync::Arc,
+};
 
 fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
     let manifest: ExtensionManifest = toml::from_str(source).map_err(|e| e.to_string())?;
@@ -24,7 +29,7 @@ fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
         return Err("Extension metadata cannot be empty".into());
     }
     if ![
-        "shell", "mailbox", "reader", "composer", "accounts", "panel",
+        "shell", "mailbox", "reader", "composer", "accounts", "panel", "overlay",
     ]
     .contains(&manifest.slot.as_str())
     {
@@ -32,6 +37,13 @@ fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
     }
     if manifest.capabilities.contains(&Capability::AppNavigate) {
         return Err("app.navigate is reserved for API keys".into());
+    }
+    if manifest.capabilities.contains(&Capability::WindowOverlay) {
+        if !manifest.z_index.is_some_and(|z| (1..=10000).contains(&z)) {
+            return Err("window.overlay requires z_index between 1 and 10000".into());
+        }
+    } else if manifest.z_index.is_some() {
+        return Err("z_index requires window.overlay".into());
     }
     for (index, capability) in manifest.capabilities.iter().enumerate() {
         if manifest.capabilities[..index].contains(capability) {
@@ -45,22 +57,24 @@ fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
 #[serde(deny_unknown_fields)]
 struct Package {
     manifest: ExtensionManifest,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     module: Vec<u8>,
-}
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Grant {
-    id: String,
-    account: String,
-    capabilities: Vec<Capability>,
+    #[serde(default, skip_serializing_if = "crate::package::Assets::is_empty")]
+    assets: crate::package::Assets,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Policy {
     version: u32,
     disabled: HashSet<String>,
-    grants: Vec<Grant>,
+    #[serde(default, rename = "grants", skip_serializing)]
+    _obsolete_grants: serde_json::Value,
     packages: Vec<Package>,
+}
+struct CachedPackage {
+    generation: u64,
+    module: Arc<crate::sandbox::Compiled>,
+    assets: Arc<crate::package::Assets>,
 }
 #[derive(Clone)]
 pub struct Extensions {
@@ -68,6 +82,8 @@ pub struct Extensions {
     policy: Policy,
     database: Option<Database>,
     epoch: u64,
+    cache: HashMap<String, Arc<CachedPackage>>,
+    memory_packages: HashMap<String, Arc<Vec<u8>>>,
 }
 const MAX_FILE: u64 = 4 * 1024 * 1024;
 impl Extensions {
@@ -78,6 +94,7 @@ impl Extensions {
             include_str!("../../../ui/src/extensions/reader/extension.toml"),
             include_str!("../../../ui/src/extensions/composer/extension.toml"),
             include_str!("../../../ui/src/extensions/accounts/extension.toml"),
+            include_str!("../../../ui/src/extensions/notifications/extension.toml"),
         ]
         .into_iter()
         .map(|source| parse_manifest(source).expect("valid bundled manifest"))
@@ -87,11 +104,13 @@ impl Extensions {
             policy: Policy {
                 version: 1,
                 disabled: HashSet::new(),
-                grants: vec![],
+                _obsolete_grants: serde_json::Value::Null,
                 packages: vec![],
             },
             database: None,
             epoch: 0,
+            cache: HashMap::new(),
+            memory_packages: HashMap::new(),
         }
     }
     pub fn open(database: Database, directory: &Path) -> Result<Self, String> {
@@ -113,29 +132,51 @@ impl Extensions {
             },
         )?;
         extensions.database = Some(database);
+        let mut legacy = false;
+        for package in &mut extensions.policy.packages {
+            if !package.module.is_empty() {
+                let source = toml::to_string(&package.manifest).map_err(|e| e.to_string())?;
+                let bytes =
+                    crate::package::write_with_assets(&source, &package.module, &package.assets);
+                extensions
+                    .database
+                    .as_ref()
+                    .expect("database attached")
+                    .set_record("extension-packages", &package.manifest.id, 1, &bytes)
+                    .map_err(|e| e.to_string())?;
+                package.module.clear();
+                package.assets.clear();
+                legacy = true;
+            }
+        }
+        if legacy {
+            crate::store::save(
+                extensions.database.as_ref().expect("database attached"),
+                "extensions",
+                &extensions.policy,
+            )?;
+        }
+        let enabled: Vec<_> = extensions
+            .policy
+            .packages
+            .iter()
+            .filter(|p| !extensions.policy.disabled.contains(&p.manifest.id))
+            .map(|p| p.manifest.id.clone())
+            .collect();
+        for id in enabled {
+            extensions.load(&id)?;
+        }
         Ok(extensions)
     }
     fn check(&self, policy: &Policy) -> Result<(), String> {
-        if policy.version != 1 || policy.packages.len() > 16 {
+        if policy.version != 1 || policy.packages.len() > MAX_INSTALLED {
             return Err("Unsupported extension policy".into());
         }
         let mut ids: HashSet<String> = self.manifests.iter().map(|m| m.id.clone()).collect();
         for package in &policy.packages {
-            validate_package(&package.manifest, &package.module)?;
+            validate_manifest(&package.manifest)?;
             if !ids.insert(package.manifest.id.clone()) {
                 return Err("Duplicate extension ID".into());
-            }
-        }
-        let candidate = Self {
-            policy: policy.clone(),
-            ..self.clone()
-        };
-        let mut keys = HashSet::new();
-        for grant in &policy.grants {
-            if !keys.insert((&grant.id, &grant.account))
-                || !candidate.valid_grants(&grant.id, &grant.capabilities)
-            {
-                return Err("Invalid extension grants".into());
             }
         }
         if policy.disabled.iter().any(|id| !ids.contains(id)) {
@@ -148,14 +189,6 @@ impl Extensions {
             .iter()
             .chain(self.policy.packages.iter().map(|p| &p.manifest))
             .find(|m| m.id == id)
-    }
-    fn valid_grants(&self, id: &str, grants: &[Capability]) -> bool {
-        self.manifest(id).is_some_and(|m| {
-            grants
-                .iter()
-                .enumerate()
-                .all(|(i, c)| m.capabilities.contains(c) && !grants[..i].contains(c))
-        })
     }
     fn commit(&mut self, next: Self) -> Result<(), String> {
         if let Some(database) = &self.database {
@@ -171,7 +204,7 @@ impl Extensions {
         *self = next;
         Ok(())
     }
-    pub fn list(&self, account: &str) -> Vec<ExtensionState> {
+    pub fn list(&self, _account: &str) -> Vec<ExtensionState> {
         self.manifests
             .iter()
             .chain(self.policy.packages.iter().map(|p| &p.manifest))
@@ -181,46 +214,23 @@ impl Extensions {
                     manifest: manifest.clone(),
                     bundled,
                     enabled: !self.policy.disabled.contains(&manifest.id),
-                    grants: self
-                        .policy
-                        .grants
-                        .iter()
-                        .find(|g| g.id == manifest.id && g.account == account)
-                        .map(|g| g.capabilities.clone())
-                        .unwrap_or_else(|| {
-                            if bundled {
-                                manifest.capabilities.clone()
-                            } else {
-                                vec![]
-                            }
-                        }),
                 }
             })
             .collect()
     }
-    pub fn update(
-        &mut self,
-        id: &str,
-        account: &str,
-        enabled: bool,
-        grants: Vec<Capability>,
-    ) -> Result<(), String> {
-        if !self.valid_grants(id, &grants) {
-            return Err("Capabilities not declared by extension".into());
+    pub fn update(&mut self, id: &str, enabled: bool) -> Result<(), String> {
+        if self.manifest(id).is_none() {
+            return Err("Unknown extension".into());
         }
         let mut next = self.clone();
-        next.policy
-            .grants
-            .retain(|g| !(g.id == id && g.account == account));
-        next.policy.grants.push(Grant {
-            id: id.into(),
-            account: account.into(),
-            capabilities: grants,
-        });
         if enabled {
+            if !next.bundled_identity(id) && !next.cache.contains_key(id) {
+                next.load(id)?;
+            }
             next.policy.disabled.remove(id);
         } else {
             next.policy.disabled.insert(id.into());
+            next.cache.remove(id);
             next.epoch = next
                 .epoch
                 .checked_add(1)
@@ -228,30 +238,83 @@ impl Extensions {
         }
         self.commit(next)
     }
-    pub fn install_package(&mut self, package: &[u8]) -> Result<(), String> {
-        let (manifest, module) = crate::package::read(package)?;
-        self.install(&manifest, module)
-    }
-    pub fn install(&mut self, source: &str, module: Vec<u8>) -> Result<(), String> {
-        if source.len() > 8192 {
-            return Err("Manifest too large".into());
+    fn load(&mut self, id: &str) -> Result<(), String> {
+        let bytes = if let Some(database) = &self.database {
+            database
+                .get_record("extension-packages", id, 1)
+                .map_err(|e| e.to_string())?
+                .ok_or("Missing extension package")?
+        } else {
+            self.memory_packages
+                .get(id)
+                .ok_or("Missing extension package")?
+                .as_ref()
+                .clone()
+        };
+        let (source, module, assets) = crate::package::read_with_assets(&bytes)?;
+        let manifest = parse_manifest(&source)?;
+        if self.manifest(id).is_none_or(|expected| {
+            serde_json::to_value(expected).ok() != serde_json::to_value(&manifest).ok()
+        }) {
+            return Err("Stored extension manifest mismatch".into());
         }
-        let manifest = parse_manifest(source)?;
-        validate_package(&manifest, &module)?;
+        self.epoch = self
+            .epoch
+            .checked_add(1)
+            .ok_or("Extension generation exhausted")?;
+        self.cache.insert(
+            id.into(),
+            Arc::new(CachedPackage {
+                generation: self.epoch,
+                module: crate::sandbox::compile(&module)?,
+                assets: Arc::new(assets),
+            }),
+        );
+        Ok(())
+    }
+    pub fn install_package(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let (source, module, assets) = crate::package::read_with_assets(bytes)?;
+        let manifest = parse_manifest(&source)?;
+        validate_manifest(&manifest)?;
         if self.manifest(&manifest.id).is_some() {
             return Err("Extension ID already installed".into());
         }
-        if self.policy.packages.len() >= 16 {
+        if self.policy.packages.len() >= MAX_INSTALLED {
             return Err("Extension package limit reached".into());
         }
+        let compiled = crate::sandbox::compile(&module)?;
         let mut next = self.clone();
-        next.policy.disabled.insert(manifest.id.clone());
-        next.policy.packages.push(Package { manifest, module });
         next.epoch = next
             .epoch
             .checked_add(1)
             .ok_or("Extension generation exhausted")?;
+        let id = manifest.id.clone();
+        if let Some(database) = &next.database {
+            database
+                .set_record("extension-packages", &id, 1, bytes)
+                .map_err(|e| e.to_string())?;
+        } else {
+            next.memory_packages
+                .insert(id.clone(), Arc::new(bytes.to_vec()));
+        }
+        next.cache.insert(
+            id.clone(),
+            Arc::new(CachedPackage {
+                generation: next.epoch,
+                module: compiled,
+                assets: Arc::new(assets),
+            }),
+        );
+        next.policy.packages.push(Package {
+            manifest,
+            module: Vec::new(),
+            assets: Default::default(),
+        });
         self.commit(next)
+    }
+    #[cfg(test)]
+    pub fn install(&mut self, source: &str, module: Vec<u8>) -> Result<(), String> {
+        self.install_package(&crate::package::write(source, &module))
     }
     pub fn remove(&mut self, id: &str) -> Result<(), String> {
         if !self.policy.packages.iter().any(|p| p.manifest.id == id) {
@@ -259,27 +322,42 @@ impl Extensions {
         }
         let mut next = self.clone();
         next.policy.packages.retain(|p| p.manifest.id != id);
-        next.policy.grants.retain(|g| g.id != id);
+        next.cache.remove(id);
+        next.memory_packages.remove(id);
         next.policy.disabled.remove(id);
         next.epoch = next
             .epoch
             .checked_add(1)
             .ok_or("Extension generation exhausted")?;
-        self.commit(next)
+        self.commit(next)?;
+        if let Some(database) = &self.database {
+            database
+                .remove_record("extension-packages", id, 1)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
-    pub fn module(&self, id: &str) -> Option<(u64, Vec<u8>)> {
+    pub fn assets(&self, id: &str) -> Option<Arc<crate::package::Assets>> {
         if self.policy.disabled.contains(id) {
             return None;
         }
-        self.policy
-            .packages
-            .iter()
-            .find(|p| p.manifest.id == id)
-            .map(|p| (self.epoch, p.module.clone()))
+        self.cache.get(id).map(|p| p.assets.clone())
+    }
+    pub fn overlay(&self, id: &str) -> bool {
+        self.manifest(id)
+            .is_some_and(|m| m.capabilities.contains(&Capability::WindowOverlay))
+    }
+    pub fn module(&self, id: &str) -> Option<(u64, Arc<crate::sandbox::Compiled>)> {
+        if self.policy.disabled.contains(id) {
+            return None;
+        }
+        self.cache.get(id).map(|p| (p.generation, p.module.clone()))
     }
     pub fn allows(&self, id: &str, account: &str, capability: Capability) -> bool {
         self.list(account).iter().any(|state| {
-            state.manifest.id == id && state.enabled && state.grants.contains(&capability)
+            state.manifest.id == id
+                && state.enabled
+                && state.manifest.capabilities.contains(&capability)
         })
     }
     pub fn allows_guest(
@@ -289,7 +367,7 @@ impl Extensions {
         capability: Capability,
         epoch: u64,
     ) -> bool {
-        self.epoch == epoch
+        self.cache.get(id).is_some_and(|p| p.generation == epoch)
             && self.policy.packages.iter().any(|p| p.manifest.id == id)
             && self.allows(id, account, capability)
     }
@@ -297,117 +375,149 @@ impl Extensions {
         self.manifests.iter().any(|m| m.id == id)
     }
 }
-fn validate_package(manifest: &ExtensionManifest, module: &[u8]) -> Result<(), String> {
+fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), String> {
     parse_manifest(&toml::to_string(manifest).map_err(|e| e.to_string())?)?;
-    // Only declarative panels are executable third-party UI in this ABI.
-    if manifest.slot != "panel" {
-        return Err("Wasm extensions require slot = panel".into());
+    // Guests can only emit declarative panels or sprites.
+    if !["panel", "overlay"].contains(&manifest.slot.as_str()) {
+        return Err("Wasm extensions require slot = panel or overlay".into());
     }
-    super::sandbox::validate(module)
+    if toml::to_string(manifest).map_err(|e| e.to_string())?.len() > MAX_MANIFEST {
+        return Err("Manifest too large".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn toml_manifest_requires_metadata_and_known_permissions() {
-        let source = include_str!("../../../ui/src/extensions/reader/extension.toml");
-        assert_eq!(parse_manifest(source).unwrap().author, "Colecto");
+    fn compiled_cache_reuses_modules_but_instances_are_fresh_and_reinstall_invalidates() {
+        let mut extensions = Extensions::bundled();
+        let source =
+            include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");
+        let view = r#"{"title":"Fresh","text":"fresh","actions":[]}"#;
+        let escaped: String = view.bytes().map(|b| format!("\\{b:02x}")).collect();
+        let module = wat::parse_str(format!(
+            r#"(module
+            (import "colecto" "emit" (func $emit (param i32 i32) (result i32)))
+            (global $counter (mut i32) (i32.const 0))
+            (memory (export "memory") 1) (data (i32.const 0) "{escaped}")
+            (func (export "run")
+                global.get $counter if unreachable end
+                i32.const 1 global.set $counter
+                i32.const 0 i32.const {} call $emit drop))"#,
+            view.len()
+        ))
+        .unwrap();
+        extensions.install(source, module.clone()).unwrap();
+        let (generation, first) = extensions.module("connection-panel").unwrap();
+        for _ in 0..2 {
+            let (_, cached) = extensions.module("connection-panel").unwrap();
+            assert!(Arc::ptr_eq(&first, &cached));
+            assert_eq!(
+                crate::sandbox::run_output(&cached, "open", Box::new(|_| unreachable!()), None)
+                    .unwrap()["text"],
+                "fresh"
+            );
+        }
+        extensions.update("connection-panel", false).unwrap();
+        assert!(!extensions.cache.contains_key("connection-panel"));
+        extensions.remove("connection-panel").unwrap();
+        extensions.install(source, module).unwrap();
+        let (next, reinstalled) = extensions.module("connection-panel").unwrap();
+        assert_ne!(generation, next);
+        assert!(!Arc::ptr_eq(&first, &reinstalled));
+        assert!(!extensions.allows_guest(
+            "connection-panel",
+            "a",
+            Capability::AccountRead,
+            generation
+        ));
+    }
+    #[test]
+    fn installed_package_count_boundary() {
+        let mut extensions = Extensions::bundled();
+        let source =
+            include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");
+        let module = wat::parse_str("(module (func (export \"run\")))").unwrap();
+        for index in 0..=MAX_INSTALLED {
+            let installed = extensions.install(
+                &source.replace("connection-panel", &format!("example-{index}")),
+                module.clone(),
+            );
+            assert_eq!(installed.is_ok(), index < MAX_INSTALLED);
+            if index >= MAX_INSTALLED - 2 {
+                assert_eq!(
+                    extensions.policy.packages.len(),
+                    (index + 1).min(MAX_INSTALLED)
+                );
+            }
+        }
+    }
+    #[test]
+    fn overlay_manifest_requires_exact_layer_contract() {
+        let source = include_str!("../../../ui/src/extensions/notifications/extension.toml");
+        assert!(parse_manifest(source).is_ok());
         for invalid in [
-            source.replace("api_version = 1", "api_version = 999"),
-            source.replace("messages.read", "accounts.manage"),
-            source.replace("messages.read", "app.navigate"),
-            source.replace("author = \"Colecto\"", "author = \"\""),
-            format!("{source}entrypoint = \"https://evil.test\"\n"),
-            source.replace("id = \"reader\"", "id = \"../reader\""),
+            source.replace("z_index = 500", ""),
+            source.replace("500", "0"),
+            source.replace("500", "10001"),
+            source.replace("window.overlay", "account.read"),
+            source.replace("window.overlay", "app.navigate"),
+            format!("{source}\nunknown = true"),
         ] {
             assert!(parse_manifest(&invalid).is_err(), "{invalid}");
         }
     }
     #[test]
-    fn grants_cannot_escalate_and_revocation_is_account_scoped() {
-        let mut extensions = Extensions::bundled();
-        assert!(extensions.allows("composer", "a", Capability::MessagesSend));
-        assert!(
-            extensions
-                .update("reader", "a", true, vec![Capability::MessagesSend])
-                .is_err()
-        );
-        assert!(extensions.update("unknown", "a", true, vec![]).is_err());
-        assert!(
-            extensions
-                .update("composer", "a", true, vec![Capability::DraftsRead])
-                .is_ok()
-        );
-        assert!(!extensions.allows("composer", "a", Capability::MessagesSend));
-        assert!(extensions.allows("composer", "b", Capability::MessagesSend));
-        assert!(extensions.update("composer", "a", false, vec![]).is_ok());
-        assert!(!extensions.allows("composer", "b", Capability::MessagesSend));
-        assert!(!extensions.allows("host", "a", Capability::MessagesRead));
-    }
-    fn panel() -> String {
-        include_str!("../../../ui/src/extensions/reader/extension.toml")
-            .replace("reader", "example")
-            .replace("slot = \"example\"", "slot = \"panel\"")
-    }
-    #[test]
-    fn packages_and_revoked_grants_survive_restart_without_implicit_access() {
+    fn enabled_policy_and_packages_survive_restart() {
         let dir = tempfile::tempdir().unwrap();
-        let module = wat::parse_str("(module (func (export \"run\")))").unwrap();
         let database = Database::open(dir.path()).unwrap();
         let open = || Extensions::open(database.clone(), dir.path()).unwrap();
         let mut extensions = open();
-        extensions.install(&panel(), module.clone()).unwrap();
-        assert!(extensions.module("example").is_none());
-        assert!(!extensions.allows("example", "a", Capability::MessagesRead));
-        extensions
-            .update("example", "a", true, vec![Capability::MessagesRead])
-            .unwrap();
-        extensions.update("composer", "a", true, vec![]).unwrap();
-        drop(extensions);
-        let mut extensions = open();
-        assert!(extensions.module("example").is_some());
-        assert!(extensions.allows("example", "a", Capability::MessagesRead));
-        assert!(!extensions.allows("example", "b", Capability::MessagesRead));
-        assert!(!extensions.allows("composer", "a", Capability::MessagesSend));
-        assert!(extensions.install(&panel(), module).is_err());
-        let old_epoch = extensions.module("example").unwrap().0;
-        extensions.remove("example").unwrap();
+        let source =
+            include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");
         extensions
             .install(
-                &panel(),
+                source,
                 wat::parse_str("(module (func (export \"run\")))").unwrap(),
             )
             .unwrap();
-        extensions
-            .update("example", "a", true, vec![Capability::MessagesRead])
-            .unwrap();
-        assert!(!extensions.allows_guest("example", "a", Capability::MessagesRead, old_epoch));
-        assert!(extensions.allows_guest(
-            "example",
-            "a",
-            Capability::MessagesRead,
-            extensions.module("example").unwrap().0
-        ));
-        extensions.remove("example").unwrap();
-        assert!(!open().list("a").iter().any(|s| s.manifest.id == "example"));
+        assert!(open().allows("connection-panel", "new-account", Capability::AccountRead));
+        extensions.update("connection-panel", false).unwrap();
+        let mut restored = open();
+        assert!(!restored.allows("connection-panel", "new-account", Capability::AccountRead));
+        restored.remove("connection-panel").unwrap();
+        assert!(open().module("connection-panel").is_none());
+        for invalid in [
+            source.replace("api_version = 1", "api_version = 2"),
+            source.replace("account.read", "accounts.manage"),
+            source.replace("connection-panel", "../escape"),
+        ] {
+            assert!(parse_manifest(&invalid).is_err());
+        }
     }
     #[test]
-    fn corrupt_legacy_policy_fails_closed_and_stays_untouched() {
-        let dir = tempfile::tempdir().unwrap();
-        let database = Database::open(dir.path()).unwrap();
-        std::fs::write(dir.path().join("extensions.json"), "corrupt").unwrap();
-        assert!(Extensions::open(database.clone(), dir.path()).is_err());
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("extensions.json")).unwrap(),
-            "corrupt"
-        );
-        std::fs::write(
-            dir.path().join("extensions.json"),
-            r#"{"version":1,"disabled":["reader"],"grants":[],"packages":[]}"#,
-        )
-        .unwrap();
-        let extensions = Extensions::open(database, dir.path()).unwrap();
-        assert!(!extensions.allows("reader", "a", Capability::MessagesRead));
+    fn install_enables_declared_access_everywhere_and_disable_revokes() {
+        let mut extensions = Extensions::bundled();
+        extensions
+            .install(
+                include_str!("../../../docs/extensions/examples/connection-panel/extension.toml"),
+                wat::parse_str("(module (func (export \"run\")))").unwrap(),
+            )
+            .unwrap();
+        let epoch = extensions.module("connection-panel").unwrap().0;
+        for account in ["a", "b"] {
+            assert!(extensions.allows("connection-panel", account, Capability::AccountRead));
+            assert!(!extensions.allows("connection-panel", account, Capability::MessagesRead));
+        }
+        extensions.update("connection-panel", false).unwrap();
+        assert!(!extensions.allows("connection-panel", "a", Capability::AccountRead));
+        extensions.update("connection-panel", true).unwrap();
+        assert!(!extensions.allows_guest("connection-panel", "a", Capability::AccountRead, epoch));
+        let old =
+            br#"{"version":1,"disabled":[],"grants":[{"nonsense":"obsolete"}],"packages":[]}"#;
+        let policy: Policy = serde_json::from_slice(old).unwrap();
+        extensions.check(&policy).unwrap();
     }
 }

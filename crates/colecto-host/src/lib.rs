@@ -8,6 +8,7 @@ use api_keys::{ApiKeys, Principal};
 mod extensions;
 pub mod logging;
 pub mod notifications;
+mod overlay;
 pub mod package;
 pub mod runtime;
 mod service;
@@ -25,8 +26,8 @@ use axum::{
 use colecto_core::{Accounts, Error, MailStore, SecretStore};
 use colecto_extension_api::{
     AccountInfo, AccountInput, ApiError, Capability, Draft, DraftInput, ExtensionInstallInput,
-    ExtensionPolicyInput, ExtensionRunInput, ExtensionState, ExtensionView, Message,
-    MessageContent, SecurityInfo, SecurityInput,
+    ExtensionPolicyInput, ExtensionRunInput, ExtensionState, Message, MessageContent, SecurityInfo,
+    SecurityInput,
 };
 use std::{
     path::PathBuf,
@@ -153,10 +154,21 @@ fn build_app(host: Host, assets: Assets) -> Router {
         )
         .route("/api-keys", get(list_api_keys).post(mint_api_key))
         .route("/api-keys/{id}", axum::routing::delete(revoke_api_key))
-        .route("/extensions", get(list_extensions).post(install_extension))
+        .route(
+            "/extensions",
+            get(list_extensions)
+                .post(install_extension)
+                .layer(DefaultBodyLimit::max(package::MAX_UPLOAD_BODY)),
+        )
         .route(
             "/extensions/{id}",
             axum::routing::post(update_extension).delete(remove_extension),
+        )
+        .route("/extensions/{id}/assets/{name}", get(extension_asset))
+        .route(
+            "/extensions/review",
+            axum::routing::post(review_extension)
+                .layer(DefaultBodyLimit::max(package::MAX_UPLOAD_BODY)),
         )
         .route("/extensions/{id}/run", axum::routing::post(run_extension))
         .route("/accounts", get(list_accounts).post(upsert_account))
@@ -236,12 +248,11 @@ async fn boundary(State(host): State<Host>, request: Request, next: Next) -> Res
         next.run(request).await
     };
     let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
+    headers.entry(header::CONTENT_SECURITY_POLICY).or_insert(
         HeaderValue::from_static(
             // Email HTML renders in a script-free sandboxed srcdoc frame that inherits
             // this policy; the frame adds its own stricter policy for remote images.
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
         ),
     );
     headers.insert(
@@ -329,33 +340,50 @@ async fn update_extension(
     input: Result<Json<ExtensionPolicyInput>, JsonRejection>,
 ) -> Result<Json<bool>, Failure> {
     host_grant(&headers)?;
-    let account = extension_account(&host, &headers)?;
+    extension_account(&host, &headers)?;
     let Json(input) =
         input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid extension policy".into()))?;
     host.extensions
         .lock()
         .map_err(|_| forbidden())?
-        .update(&id, &account, input.enabled, input.grants)
+        .update(&id, input.enabled)
         .map_err(|error| {
-            if error == "Capabilities not declared by extension" { forbidden() }
+            if error == "Unknown extension" { forbidden() }
             else { Failure(StatusCode::INTERNAL_SERVER_ERROR, "Could not confirm extension policy persistence. Reload permissions before retrying.".into()) }
         })?;
     Ok(Json(true))
 }
 
+fn extension_upload(headers: &HeaderMap, body: axum::body::Bytes) -> Result<Vec<u8>, Failure> {
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/json"))
+    {
+        serde_json::from_slice::<ExtensionInstallInput>(&body)
+            .map(|input| input.package)
+            .map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid extension package".into()))
+    } else if body.len() <= package::MAX_PACKAGE {
+        Ok(body.to_vec())
+    } else {
+        Err(Failure(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Extension package must be at most 16 MiB".into(),
+        ))
+    }
+}
 async fn install_extension(
     State(host): State<Host>,
     headers: HeaderMap,
-    input: Result<Json<ExtensionInstallInput>, JsonRejection>,
+    body: axum::body::Bytes,
 ) -> Result<Json<bool>, Failure> {
     host_grant(&headers)?;
-    let Json(input) =
-        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid extension package".into()))?;
+    let bytes = extension_upload(&headers, body)?;
     tokio::task::spawn_blocking(move || {
         host.extensions
             .lock()
             .map_err(|_| forbidden())?
-            .install_package(&input.package)
+            .install_package(&bytes)
             .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))
     })
     .await
@@ -366,6 +394,57 @@ async fn install_extension(
         )
     })??;
     Ok(Json(true))
+}
+async fn review_extension(
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<colecto_extension_api::ExtensionManifest>, Failure> {
+    host_grant(&headers)?;
+    let bytes = extension_upload(&headers, body)?;
+    tokio::task::spawn_blocking(move || {
+        let mut extensions = extensions::Extensions::bundled();
+        extensions
+            .install_package(&bytes)
+            .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+        Ok(Json(
+            extensions
+                .list("")
+                .into_iter()
+                .find(|e| !e.bundled)
+                .ok_or_else(forbidden)?
+                .manifest,
+        ))
+    })
+    .await
+    .map_err(|_| {
+        Failure(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Extension review failed".into(),
+        )
+    })?
+}
+async fn extension_asset(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path((id, name)): Path<(String, String)>,
+) -> Result<impl IntoResponse, Failure> {
+    host_grant(&headers)?;
+    let assets = host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .assets(&id)
+        .ok_or_else(forbidden)?;
+    let bytes = assets.get(&name).ok_or_else(forbidden)?.clone();
+    let content_type = package::asset_content_type(&name, &bytes).ok_or_else(forbidden)?;
+    Ok((
+        [
+            ("content-type", content_type),
+            ("x-content-type-options", "nosniff"),
+            ("content-security-policy", "sandbox; default-src 'none'"),
+        ],
+        bytes,
+    ))
 }
 async fn remove_extension(
     State(host): State<Host>,
@@ -385,7 +464,7 @@ async fn run_extension(
     headers: HeaderMap,
     Path(id): Path<String>,
     input: Result<Json<ExtensionRunInput>, JsonRejection>,
-) -> Result<Json<ExtensionView>, Failure> {
+) -> Result<Json<serde_json::Value>, Failure> {
     host_grant(&headers)?;
     let account = extension_account(&host, &headers)?;
     let Json(input) =
@@ -396,6 +475,14 @@ async fn run_extension(
         .map_err(|_| forbidden())?
         .module(&id)
         .ok_or_else(forbidden)?;
+    let assets = {
+        let extensions = host.extensions.lock().map_err(|_| forbidden())?;
+        if extensions.overlay(&id) {
+            Some(extensions.assets(&id).ok_or_else(forbidden)?)
+        } else {
+            None
+        }
+    };
     let permit = host.execution.clone().try_acquire_owned().map_err(|_| {
         Failure(
             StatusCode::TOO_MANY_REQUESTS,
@@ -404,10 +491,11 @@ async fn run_extension(
     })?;
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        sandbox::run(
+        sandbox::run_output(
             &module,
             &input.action,
             Box::new(move |request| extension_service(&host, &id, &account, epoch, request)),
+            assets,
         )
         .map(Json)
         .map_err(|_| {
@@ -515,7 +603,7 @@ fn extension_service(
                 .map_err(|_| "Mail delivery failed")?;
             serde_json::to_value(true)
         }
-        AppNavigate => return Err("Capability not granted".into()),
+        AppNavigate | WindowOverlay => return Err("Capability not granted".into()),
     };
     result.map_err(|_| "Cannot serialize service response".into())
 }
@@ -1192,14 +1280,7 @@ mod extension_service_tests {
                 wat::parse_str("(module (func (export \"run\")))").unwrap(),
             )
             .unwrap();
-        extensions
-            .update(
-                "connection-panel",
-                "demo",
-                true,
-                vec![Capability::AccountRead],
-            )
-            .unwrap();
+        extensions.update("connection-panel", true).unwrap();
         let host = Host {
             events: tokio::sync::broadcast::channel(1).0,
             keys: Arc::new(Mutex::new(
@@ -1245,7 +1326,7 @@ mod extension_service_tests {
         host.extensions
             .lock()
             .unwrap()
-            .update("connection-panel", "demo", true, vec![])
+            .update("connection-panel", false)
             .unwrap();
         assert!(extension_service(&host, "connection-panel", "demo", epoch, valid).is_err());
     }

@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { capabilityLabel } from './lib/capabilities';
+  import type { Capability } from './lib/api';
   import Icon from './Icon.svelte';
-  let { name, onconfirm, oncancel }: { name: string; onconfirm: () => void; oncancel: () => void } = $props();
+  let { name, capabilities, onconfirm, oncancel }: { name: string; capabilities: Capability[]; onconfirm: () => void; oncancel: () => void } = $props();
   // A short, unskippable pause, so the warning is read rather than clicked through.
   let left = $state(5);
   function show(node: HTMLDialogElement) {
@@ -16,11 +18,12 @@
   <div id="install-warning-text" class="warning-text">
     <p>You are about to install <strong>{name}</strong>.</p>
     <ul>
-      <li>Extensions run in a sandbox and must ask before reading your mail, but an extension can still lie about what it is for. Its name, author and description come from whoever made it, and Colecto cannot verify them.</li>
+      <li>Extensions run in a sandbox and receive all listed capabilities when installed, but an extension can still lie about what it is for. Its name, author and description come from whoever made it, and Colecto cannot verify them.</li>
       <li>Anything you let it read, it can collect and keep, and it can misuse what it is given.</li>
       <li>Prefer open-source extensions from authors you know, where others can read the code. If you are unsure, do not install it.</li>
     </ul>
-    <p>It installs turned off, with no access to your accounts, until you allow it.</p>
+    <p>Install enables these capabilities on every account:</p>
+    <ul>{#each capabilities as capability}<li>{capabilityLabel(capability)}</li>{/each}</ul>
   </div>
   <div class="warning-actions">
     <!-- svelte-ignore a11y_autofocus (the safe choice takes focus in a warning) -->

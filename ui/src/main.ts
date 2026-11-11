@@ -1,3 +1,5 @@
+import { installLayers } from './lib/layers';
+installLayers();
 import { mount } from 'svelte';
 import App from './App.svelte';
 import '@fontsource-variable/mona-sans/wdth.css';

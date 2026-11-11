@@ -91,22 +91,33 @@ export const hostService = {
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 
-export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.label' | 'app.navigate';
+export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.label' | 'app.navigate' | 'window.overlay';
 export interface ExtensionState {
-  manifest: { id: string; name: string; description: string; author: string; api_version: number; slot: string; capabilities: Capability[] };
+  manifest: { id: string; name: string; description: string; author: string; api_version: number; slot: string; z_index?: number; capabilities: Capability[] };
   bundled: boolean;
   enabled: boolean;
-  grants: Capability[];
 }
 export interface ExtensionView { title: string; text: string; actions: string[] }
+async function uploadExtension<T>(path: string, pkg: Uint8Array): Promise<T> {
+  let response: Response;
+  try { response = await fetch(`/api/v1/extensions${path}`, { method: 'POST', credentials: 'omit', headers: { ...headers('host','demo'), 'content-type': 'application/octet-stream' }, body: new Blob([pkg as BlobPart]) }); }
+  catch { throw new ServiceError('Cannot reach Colecto. Try again when the service is available.', 'network'); }
+  if (response.status === 401) window.dispatchEvent(new Event('colecto-auth-required'));
+  const data = await response.json().catch(() => null);
+  if (!response.ok || data === null) throw new ServiceError(data?.error ?? 'Extension upload failed.',data?.category ?? 'invalid_response',response.status);
+  return data as T;
+}
 export const extensionHost = {
   /** `pkg` is a .colectoext file: a zip with manifest.toml and module.wasm. */
-  install: (pkg: number[]) => request<boolean>('host', 'demo', '/extensions', { package: pkg }),
+  install: (pkg: Uint8Array) => uploadExtension<boolean>('', pkg),
+  review: (pkg: Uint8Array) => uploadExtension<ExtensionState['manifest']>('/review', pkg),
+  asset: (id: string, name: string) => download('host', 'demo', `/extensions/${encodeURIComponent(id)}/assets/${encodeURIComponent(name)}`),
+  frame: (account: string, id: string, action: string) => request<OverlayOutput>('host', account, `/extensions/${encodeURIComponent(id)}/run`, { action }),
   remove: (id: string) => request<boolean>('host', 'demo', `/extensions/${encodeURIComponent(id)}`, {}, 'DELETE'),
   run: (account: string, id: string, action: string) => request<ExtensionView>('host', account, `/extensions/${encodeURIComponent(id)}/run`, { action }),
   list: (account: string) => request<ExtensionState[]>('host', account, '/extensions'),
-  update: (account: string, id: string, enabled: boolean, grants: Capability[]) =>
-    request<boolean>('host', account, `/extensions/${encodeURIComponent(id)}`, { enabled, grants }),
+  update: (account: string, id: string, enabled: boolean) =>
+    request<boolean>('host', account, `/extensions/${encodeURIComponent(id)}`, { enabled }),
 };
 
 export interface ApiKeyInput { name: string; accounts: string[]; capabilities: Capability[]; expires_at?: number }
@@ -153,3 +164,5 @@ export function subscribeEvents(onevent: (name: string, data: unknown) => void):
   })();
   return () => controller.abort();
 }
+
+export interface OverlayOutput { overlay: { items: { image: string; x: number; y: number; width: number; height: number; frame: { x: number; y: number; width: number; height: number } }[] }; state: string }

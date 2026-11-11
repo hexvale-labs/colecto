@@ -108,13 +108,17 @@ test('approval requests arrive as notifications with decisions, a close button a
   await expect(toasts.getByRole('status', { name: '2 new messages' })).toBeVisible();
   await toasts.getByRole('status', { name: '2 new messages' }).getByRole('button', { name: 'Dismiss notification' }).click();
   await expect(toasts.getByRole('status')).toHaveCount(0);
-  // Notifications stay above Settings.
+  await expect(toasts).toHaveAttribute('data-position', 'top');
+  // Settings covers the notification layer.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(request).toBeInViewport();
+  await expect(page.locator('.settings-overlay')).toBeVisible();
+  expect(await page.locator('.settings-overlay').evaluate(el => Number(getComputedStyle(el).zIndex))).toBeGreaterThan(await page.locator('.extension-overlay').first().evaluate(el => Number(getComputedStyle(el).zIndex)));
+  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
   await request.getByRole('button', { name: 'Reject' }).click();
   expect(decided).toEqual([expect.stringContaining('/send-requests/r1/reject')]);
   await expect(toasts.getByRole('status', { name: 'Request rejected' })).toBeVisible();
 
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await settings.getByRole('button', { name: 'Notifications', exact: true }).click();
   await settings.getByRole('radio', { name: 'Top left' }).check();

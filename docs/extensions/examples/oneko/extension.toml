@@ -1,0 +1,8 @@
+id = "oneko"
+name = "Oneko"
+author = "Colecto Extras"
+description = "A tiny pixel cat who lives on your screen, naps while you read and scampers after your cursor."
+api_version = 1
+slot = "overlay"
+capabilities = ["window.overlay"]
+z_index = 10000

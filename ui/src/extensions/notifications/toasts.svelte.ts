@@ -26,3 +26,5 @@ export function dismissKey(key: string) {
   const index = toasts.findIndex(toast => toast.key === key);
   if (index >= 0) toasts.splice(index, 1);
 }
+
+export const notificationPosition = $state<{ value: import('../../lib/api').Corner }>({ value: 'top' });

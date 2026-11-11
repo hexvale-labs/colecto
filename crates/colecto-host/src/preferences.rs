@@ -17,6 +17,7 @@ pub struct Preferences {
     /// `#rrggbb`; absent means the default mint.
     pub accent: Option<String>,
     pub notifications: Notifications,
+    notification_position_chosen: bool,
     /// Load remote images in HTML mail without asking. Off by default: they can track opens.
     pub remote_images: bool,
 }
@@ -51,7 +52,7 @@ impl Default for Notifications {
             mail: true,
             approvals: true,
             system: false,
-            position: Corner::BottomRight,
+            position: Corner::Top,
         }
     }
 }
@@ -106,8 +107,13 @@ impl PreferenceStore {
             None,
             Preferences::default,
             |bytes| {
-                let value: Preferences =
+                let mut value: Preferences =
                     serde_json::from_slice(bytes).map_err(|_| "Invalid preferences")?;
+                if !value.notification_position_chosen
+                    && value.notifications.position == Corner::BottomRight
+                {
+                    value.notifications.position = Corner::Top;
+                }
                 validate(&value)?;
                 Ok(value)
             },
@@ -132,6 +138,8 @@ impl PreferenceStore {
             next.accent = (!accent.is_empty()).then_some(accent.to_ascii_lowercase());
         }
         if let Some(notifications) = input.notifications {
+            next.notification_position_chosen |=
+                notifications.position != next.notifications.position;
             next.notifications = notifications;
         }
         if let Some(remote_images) = input.remote_images {
@@ -148,6 +156,35 @@ impl PreferenceStore {
 mod tests {
     use super::*;
 
+    #[test]
+    fn legacy_default_moves_to_top_but_new_position_choices_persist() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        crate::store::save(
+            &database,
+            "preferences",
+            &serde_json::json!({"notifications":{"position":"bottom-right"}}),
+        )
+        .unwrap();
+        let mut store = PreferenceStore::open(database.clone(), dir.path()).unwrap();
+        assert_eq!(store.get().notifications.position, Corner::Top);
+        store
+            .update(
+                serde_json::from_value(
+                    serde_json::json!({"notifications":{"position":"bottom-right"}}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            PreferenceStore::open(database, dir.path())
+                .unwrap()
+                .get()
+                .notifications
+                .position,
+            Corner::BottomRight
+        );
+    }
     #[test]
     fn mcp_starts_off_and_preferences_survive_restart_within_bounds() {
         let dir = tempfile::tempdir().unwrap();
