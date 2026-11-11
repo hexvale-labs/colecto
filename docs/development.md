@@ -68,7 +68,7 @@ The browser tests run a separate Host on port 4179 with temporary sample data an
 not touch your `.colecto` directory. Playwright may need system browser libraries.
 
 `just perf-check` records CPU and memory samples with build and environment details
-under `performance-results/`. See [performance](performance.md).
+under `docs/performance/results/`. See [performance](performance/README.md).
 
 ## Icons
 

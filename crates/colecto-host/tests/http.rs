@@ -422,9 +422,10 @@ async fn installed_wasm_uses_consented_account_grants_and_cannot_call_http_servi
         )
     };
     let router = authenticated(create()).await;
-    let manifest = include_str!("../../../extensions/examples/connection-panel/extension.toml");
+    let manifest =
+        include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");
     let module = wat::parse_str(include_str!(
-        "../../../extensions/examples/connection-panel/module.wat"
+        "../../../docs/extensions/examples/connection-panel/module.wat"
     ))
     .unwrap();
     let package =

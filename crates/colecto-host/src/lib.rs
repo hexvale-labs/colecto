@@ -1188,7 +1188,7 @@ mod extension_service_tests {
         let mut extensions = extensions::Extensions::open(database.clone(), dir.path()).unwrap();
         extensions
             .install(
-                include_str!("../../../extensions/examples/connection-panel/extension.toml"),
+                include_str!("../../../docs/extensions/examples/connection-panel/extension.toml"),
                 wat::parse_str("(module (func (export \"run\")))").unwrap(),
             )
             .unwrap();

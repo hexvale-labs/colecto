@@ -25,6 +25,7 @@
       "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "license": "MIT OR Apache-2.0"
   }
 }

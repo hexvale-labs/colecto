@@ -14,13 +14,13 @@ after a one-second settle following the workload. An initial one-second idle
 sample follows browser startup. Compilation is outside the measured interval.
 Temporary processes and data are cleaned up even when a workload fails.
 
-Each timestamped JSON under `performance-results/` retains the three raw runs,
+Each timestamped JSON under `docs/performance/results/` retains the three raw runs,
 mean/median, commit/dirty status, executable/UI hashes, machine/kernel/CPU, workload,
 build profile, and browser-driver/Node versions. These files are ignored by git
 but persist locally. Keep or archive this directory for long-term trends; in CI,
-upload `performance-results/*.json` as retained artifacts and restore prior
+upload `docs/performance/results/*.json` as retained artifacts and restore prior
 history before measuring. CI runs `just verify` and `just ui-test`, but not `just perf`, so it records no history yet.
-The committed initial sample in `docs/performance-baseline.json` is evidence from
+The committed initial sample in `docs/performance/baseline.json` is evidence from
 one development machine, not a universal budget. Refresh that committed sample
 from the final integrated run after feature changes; git history then retains
 a reviewable sequence even when local raw history is unavailable.
@@ -48,9 +48,9 @@ budgets after several stable runs; do not gate changes on a guessed RAM limit.
 For lower-noise daemon-only or release comparisons:
 
 ```sh
-python3 scripts/resource_bench.py --skip-ui
+python3 scripts/python/resource_bench.py --skip-ui
 cargo build --release -p colecto-host --locked
-python3 scripts/resource_bench.py --binary target/release/colecto-host
+python3 scripts/python/resource_bench.py --binary target/release/colecto-host
 ```
 
 The daemon-only workload fetches sample inbox mail 12 times; it is a distinct

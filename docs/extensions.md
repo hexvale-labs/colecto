@@ -41,7 +41,7 @@ The runtime accepts binary Wasm, not JavaScript, Svelte, HTML, arbitrary URLs or
 WASI applications. Third-party UI currently contributes **panels**; replacing the
 bundled mailbox, reader, composer or shell with a Wasm package is not supported.
 Those bundled components remain explicitly registered trusted Svelte code, with
-TOML manifests in `extensions/<id>/extension.toml`. They initially receive their
+TOML manifests in `ui/src/extensions/<id>/extension.toml`. They initially receive their
 manifest permissions. Account and credential protection, extension consent and
 failure recovery remain trusted Host controls.
 

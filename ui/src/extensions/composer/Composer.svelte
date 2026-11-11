@@ -1,8 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { Draft, ComposerService, OutgoingAttachment } from '../lib/api';
-  import Icon from '../Icon.svelte';
-  import { copyText } from '../lib/copy';
+  import type { Draft, ComposerService, OutgoingAttachment } from '../../lib/api';
+  import Icon from '../../Icon.svelte';
+  import { copyText } from '../../lib/copy';
   let { connected, sender, draft, service, onback, ondirty, onbusy, onsaved }: {
     connected: boolean; sender: string; draft: Draft | null; service: ComposerService; onback: () => void;
     ondirty: (dirty: boolean) => void; onbusy: (busy: boolean) => void; onsaved: (draft: Draft) => void;

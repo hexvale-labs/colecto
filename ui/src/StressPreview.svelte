@@ -1,6 +1,6 @@
 <script lang="ts">
-  import Mailbox from './extensions/Mailbox.svelte';
-  import Reader from './extensions/Reader.svelte';
+  import Mailbox from './extensions/inbox/Mailbox.svelte';
+  import Reader from './extensions/reader/Reader.svelte';
   import { demo, worst } from './lib/stress-fixtures';
   let mode = $state(new URLSearchParams(location.search).get('data') || 'Demo data');
   let selected = $state('');

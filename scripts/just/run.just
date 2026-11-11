@@ -1,4 +1,4 @@
-set working-directory := '..'
+set working-directory := '../..'
 j := just_executable() + " --justfile " + quote(justfile_directory() / "justfile")
 
 # Run Colecto in the browser at http://127.0.0.1:4173 (Ctrl+C to stop).

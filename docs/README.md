@@ -179,7 +179,7 @@ optional account profile names, and account-bound open-message tabs. Mobile layo
 in browser tests; Android-native lifecycle, FCM, UnifiedPush, battery use, and
 physical-device keyboard behavior remain separate platform validation work.
 Apple is outside the initial platform scope. Resource regression work uses
-`just perf-check`; see [performance](performance.md).
+`just perf-check`; see [performance](performance/README.md).
 
 ## Client productivity
 

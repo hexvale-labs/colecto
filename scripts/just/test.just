@@ -1,4 +1,4 @@
-set working-directory := '..'
+set working-directory := '../..'
 j := just_executable() + " --justfile " + quote(justfile_directory() / "justfile")
 
 # Run the fast suites: Rust tests and UI unit tests.
@@ -40,4 +40,4 @@ native:
 
 # Test the Linux resource recorder's aggregation, isolation, and comparison rules.
 perf:
-    python3 -m unittest discover -s scripts -p '*_test.py'
+    python3 -m unittest discover -s scripts/python -p '*_test.py'

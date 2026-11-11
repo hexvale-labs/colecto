@@ -97,7 +97,7 @@ not in public issues. See the [security policy](.github/SECURITY.md).
 | [Project direction](docs/README.md) | Architecture, terminology and how agents work here |
 | [Storage](docs/storage.md) | `colecto.db` records, bounds and legacy import |
 | [Alpha roadmap](docs/alpha.md) | What alpha means and what is left |
-| [Performance](docs/performance.md) | Resource measurement and baselines |
+| [Performance](docs/performance/README.md) | Resource measurement and baselines |
 | [Design](docs/DESIGN.md) and [product](docs/PRODUCT.md) | Visual language and product principles |
 | [Prototype design](docs/prototype-design.md) | The original local demo design |
 | [Client review](docs/client-review.md), [UX review](docs/ux-review.md) | UI audits and adversarial fixtures |

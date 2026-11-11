@@ -1,4 +1,4 @@
-set working-directory := '..'
+set working-directory := '../..'
 
 # Run every static check: formatting, compilation, Clippy and Svelte.
 [default]
