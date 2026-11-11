@@ -1,4 +1,4 @@
-//! Version 1 contracts shared by core services and the local demo Host.
+//! Version 1 contracts shared by core services and the local Host.
 use serde::{Deserialize, Serialize};
 
 pub const API_VERSION: u32 = 1;

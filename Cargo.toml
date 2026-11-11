@@ -50,3 +50,8 @@ unsafe_code = "forbid"
 # smaller and faster to link than full debug info.
 [profile.dev]
 debug = "line-tables-only"
+
+# `just build release`: smaller, faster binaries. Thin LTO keeps link memory modest on small machines.
+[profile.release]
+lto = "thin"
+strip = "symbols"

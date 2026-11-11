@@ -18,28 +18,28 @@ and the optional Linux desktop notification agent. Systemd is optional.
 Apple and native Android push integration are deferred; a mobile browser layout
 is not evidence that native FCM/UnifiedPush or Android background services work.
 
-## Run the local demo
+## Run locally
 
 Install stable Rust (1.89 or newer) with `rustfmt` and `clippy`, `just`, and
 Bun 1.4.4 or newer. Linux also needs OpenSSL development libraries and pkg-config
 (for example, `libssl-dev`, `libdbus-1-dev`, and `pkg-config` on Debian/Ubuntu). From the repository root:
 
 ```sh
-just setup-ui
-just demo
+just install ui
+just run
 ```
 
-Open **http://127.0.0.1:4173**. Stop with Ctrl+C. The demo binds only to IPv4
+Open **http://127.0.0.1:4173**. Stop with Ctrl+C. Colecto binds only to IPv4
 loopback; open the printed address exactly, rather than `localhost`. The Host
 serves the built UI and API from the same origin. The browser prompts for the
-owner access token: open the private `.colecto-demo/owner-token` file locally and
+owner access token: open the private `.colecto/owner-token` file locally and
 copy its contents into that prompt. With `COLECTO_DATA_DIR`, use `owner-token`
 inside that directory instead. The Host generates the file with Unix mode `0600`
 and tightens its owned data directory to `0700`; it never prints the secret or
 puts it in a URL. Do not share or commit this file. An existing non-private token
 file is rejected; correct its ownership/permissions before restarting.
 
-The native app (`just native`) connects automatically, injecting its local owner
+The native app (`just run native`) connects automatically, injecting its local owner
 credential only at the exact local service origin. Remote HTTPS navigation
 receives no local credential. Ordinary browsers retain the entered owner token
 only for that browser session. In Settings → API keys, create separately scoped
@@ -62,7 +62,7 @@ keep the editor text, and never report success. Without account configuration, s
 until you load them. See [the alpha roadmap](docs/alpha.md) for limits.
 
 The Host stores accounts, drafts, labels, and Inbox/Sent snapshots in one
-embedded Turso database, `.colecto-demo/colecto.db`. This directory is ignored by
+embedded Turso database, `.colecto/colecto.db`. This directory is ignored by
 git. Drafts and mail snapshots are plain text on disk and are not encrypted; use
 sample content. Only one Host may open a data directory at a time. A corrupt or
 unsupported store stops startup without overwriting it. Preserve that directory
@@ -72,7 +72,7 @@ record format and one-time legacy JSON import.
 Optional environment variables:
 
 ```sh
-COLECTO_PORT=4180 COLECTO_DATA_DIR=/path/to/demo-data just demo
+COLECTO_PORT=4180 COLECTO_DATA_DIR=/path/to/other-data just run
 ```
 
 A relative data directory is relative to the command's working directory.
@@ -83,16 +83,16 @@ Keep this directory between runs to preserve drafts.
 ```sh
 just verify          # Rust fmt/check/Clippy/tests, Svelte/TypeScript, UI build
 just perf-check      # verification plus three recorded Linux resource runs
-just setup-browser   # install the test Chromium browser once
-just ui-test         # browser flows and actual Host restart persistence
+just install browsers # install the test browsers once
+just test browser     # browser flows and actual Host restart persistence
 ```
 
 The browser tests run a separate Host on port 4179 with temporary sample data.
-They do not use your `.colecto-demo` drafts. Playwright may require system browser
+They do not use your `.colecto` drafts. Playwright may require system browser
 libraries on some Linux installations. The tests cover a narrow viewport, but
 real phone touch/keyboard behavior has not been verified.
 
-Run `just` for all recipes. After editing UI source, `just demo` rebuilds it.
+Run `just` (or `just help`) for all recipes; `just build release` builds optimized binaries. After editing UI source, `just run` rebuilds it.
 
 ## Prototype boundaries
 
@@ -112,7 +112,7 @@ with no grants, and emit only declarative text/actions. Third-party JavaScript
 and HTML are not loaded. An optional Tauri desktop runner uses the same loopback
 Host and exposes no guest native IPC. Sync and tested mobile
 builds are not implemented. See [the extension contract](docs/extensions.md) for
-the exact security boundary and `just native` prerequisites.
+the exact security boundary and `just run native` prerequisites.
 
 The frontend build currently inherits a low-severity `deepmerge` advisory from
 `@sveltejs/vite-plugin-svelte`, with no upstream fix. The merge runs on trusted
@@ -134,7 +134,7 @@ variables, delivery semantics, and the credential vault.
 Bundled mail UI packages have TOML manifests in `extensions/`. The **Settings → Extensions**
 Host control shows metadata, enables/disables packages, and limits service
 capabilities per account, saved across restarts. It can install isolated
-third-party Wasm panels. `just native` starts the optional Tauri desktop runner. See
+third-party Wasm panels. `just run native` starts the optional Tauri desktop runner. See
 [the extension contract](docs/extensions.md) for setup and security limits.
 
 ## Bun troubleshooting
@@ -144,7 +144,7 @@ Run repository tasks with `just`, or run UI scripts from `ui/`, for example
 from the repository root fails with `Script not found "build"`.
 
 `bun run` is not a test runner: executing the restart test that way fails with
-`Cannot use test outside of the test runner`. `just ui-test` runs that test with
+`Cannot use test outside of the test runner`. `just test browser` runs that test with
 `bun test`, then runs Playwright separately. Playwright matches only `*.spec.ts`
 to avoid collecting Bun tests. `bun run --bun test` explicitly runs the Playwright
 package script; bare `bun test` invokes Bun's own runner instead.

@@ -19,8 +19,8 @@ names are self-reported metadata, not verified publisher identities.
 
 ## Install and run a third-party extension
 
-Run `just extension-example` to compile the example's readable WAT source into
-`target/extensions/connection-panel.wasm`. Start `just demo`, open **Extensions**,
+Run `just build extension` to compile the example's readable WAT source into
+`target/extensions/connection-panel.wasm`. Start `just run`, open **Extensions**,
 and select `extensions/examples/connection-panel/extension.toml` and that Wasm
 binary. Installation leaves the package disabled with no account grants. Enable
 it, select the account, and explicitly grant `account.read`. Its **Connection
@@ -122,7 +122,7 @@ JavaScript into the app origin.
 ## Tauri desktop
 
 Install the official [platform prerequisites](https://v2.tauri.app/start/prerequisites/),
-then run `just native`. `just native-check` compiles the optional adapter. `just native-test` builds
+then run `just run native`. `just check native` compiles the optional adapter. `just test native` builds
 and smoke-tests the Linux/X11 window and loopback registry under Xvfb (requires
 `xvfb` and `xwininfo`). The
 Tauri window loads the same loopback Host and confines navigation to that origin.

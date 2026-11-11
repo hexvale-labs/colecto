@@ -9,8 +9,8 @@ implemented.
 
 ## Local foreground service
 
-Use `just daemon` to build and run the service and UI. For a supervisor, build
-with `just build`, then run the executable directly:
+Use `just run daemon` to build and run the service and UI. For a supervisor, build
+with `just build rust`, then run the executable directly:
 
 ```sh
 COLECTO_DATA_DIR="$HOME/.local/state/colecto" ./target/debug/colecto-daemon
@@ -270,7 +270,7 @@ Nonbrowser MCP requests may omit Origin because every request requires an
 explicit bearer. All calls recheck current key policy, including revocation and
 expiry after initialization.
 
-For stdio clients, build `colecto-mcp` with `just build`, then configure the
+For stdio clients, build `colecto-mcp` with `just build rust`, then configure the
 executable with one argument, such as `https://mail.example.com/api/v1/mcp`
 (or `http://127.0.0.1:4173/api/v1/mcp` locally). Set `COLECTO_MCP_KEY_FILE` to a
 private `0600` file containing a scoped key. `COLECTO_MCP_KEY` is an alternative

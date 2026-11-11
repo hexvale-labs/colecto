@@ -3,7 +3,7 @@
 Run `just perf-check` for feature changes. It runs routine verification, builds the
 local host/UI, tests the recorder, and records three isolated resource runs.
 `just perf` repeats only the builds, recorder tests, and measurements. Install the
-browser once with `just setup-browser`. Python 3, Node, and Linux `/proc` are
+browser once with `just install browsers`. Python 3, Node, and Linux `/proc` are
 required; no additional Python packages are needed.
 
 The workload starts each Host with a fresh temporary data directory and strips
