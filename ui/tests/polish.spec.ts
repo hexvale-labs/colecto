@@ -24,6 +24,18 @@ async function expectNoOverscroll(page: Page, where: string) {
   expect(problems, where).toEqual([]);
 }
 
+/** Serve a fixed inbox, so tests do not depend on what earlier tests left in the shared Host. */
+async function inbox(page: Page, messages: { id: string; sender: string; address: string; subject: string; body: string; date: string }[]) {
+  await page.route('**/api/v1/messages**', route => {
+    const url = new URL(route.request().url());
+    if (/\/(cache|content)$/.test(url.pathname)) return route.fallback();
+    return route.fulfill({ json: url.pathname.endsWith('/refresh') ? messages : messages.find(message => url.pathname.endsWith(`/${message.id}`)) });
+  });
+}
+const pair = [
+  { id: 'alex', sender: 'Alex Rivera', address: 'alex@example.test', subject: 'Plain text', body: 'Hello there', date: 'Today' },
+  { id: 'maya', sender: 'Maya Chen', address: 'maya@example.test', subject: 'A small plan', body: 'Coffee?', date: 'Today' },
+];
 const long = { id: 'long', sender: 'Maya Chen', address: 'maya@example.test', subject: 'A long letter', body: 'Paragraph of text.\n'.repeat(120), date: 'Today' };
 
 for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
@@ -57,6 +69,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
 }
 
 test('feels like an app: chrome is not selectable, mail is, and images do not drag', async ({ page }) => {
+  await inbox(page, pair);
   await page.goto('/');
   await page.getByRole('button', { name: /Alex Rivera/ }).click();
   await expect(page.locator('.letter-body')).toBeVisible();
@@ -146,6 +159,7 @@ test('the accent colour can be chosen and is remembered', async ({ page }) => {
 });
 
 test('closes every message tab at once', async ({ page }) => {
+  await inbox(page, pair);
   await page.goto('/');
   for (const sender of [/Alex Rivera/, /Maya Chen/]) await page.getByRole('button', { name: sender }).click();
   const strip = page.getByRole('navigation', { name: 'Open messages' });

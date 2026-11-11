@@ -276,7 +276,6 @@ fn fetch_session<T: std::io::Read + std::io::Write>(
         .ok_or(Error::Missing)
 }
 
-#[cfg(test)]
 fn idle_session<T>(session: &mut imap::Session<T>, timeout: Duration) -> Result<bool, Error>
 where
     T: std::io::Read + std::io::Write + imap::extensions::idle::SetReadTimeout,
@@ -295,6 +294,7 @@ where
     Ok(outcome == imap::extensions::idle::WaitOutcome::MailboxChanged)
 }
 
+#[cfg(test)]
 fn query_session<T: std::io::Read + std::io::Write>(
     session: &mut imap::Session<T>,
     folder: &str,
