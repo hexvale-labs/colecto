@@ -1,6 +1,5 @@
 use colecto_core::MailStore;
 use colecto_extension_api::DraftInput;
-use std::fs;
 
 fn input(id: Option<String>, subject: &str) -> DraftInput {
     DraftInput {
@@ -66,23 +65,6 @@ fn unknown_ids_and_oversized_inputs_do_not_mutate_storage() {
             })
             .is_ok()
     );
-}
-
-#[test]
-fn corrupt_or_newer_stores_are_never_replaced() {
-    for content in [
-        "broken",
-        r#"{"version":99,"drafts":[]}"#,
-        r#"{"version":1,"drafts":[{"id":"draft-1","recipient":"","subject":"","body":""},{"id":"draft-1","recipient":"","subject":"","body":""}]}"#,
-    ] {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("drafts.json"), content).unwrap();
-        assert!(MailStore::open(dir.path()).is_err());
-        assert_eq!(
-            fs::read_to_string(dir.path().join("drafts.json")).unwrap(),
-            content
-        );
-    }
 }
 
 #[test]

@@ -117,18 +117,11 @@ impl Vault {
                     .ok_or_else(|| storage("Authoritative credential vault was removed"))?,
             )
         } else {
-            match fs::metadata(directory.join("accounts.json")) {
-                Ok(metadata) if metadata.len() > 32_000_000 => {
-                    return Err(storage("Account registry exceeds its size limit"));
-                }
-                Ok(_) => Some(fs::read(directory.join("accounts.json")).map_err(storage)?),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                Err(error) => return Err(storage(error)),
-            }
+            None
         };
         let state: State = match bytes {
             Some(bytes) => serde_json::from_slice(&bytes).map_err(|_| {
-                invalid("Invalid account registry; preserve accounts.json before recovery")
+                invalid("Invalid account registry; preserve colecto.db before recovery")
             })?,
             None => State {
                 version: 1,
@@ -165,7 +158,7 @@ impl Vault {
                 .any(|id| !valid_id(id) || Some(id.as_str()) == active || !cleanup_ids.insert(id))
         {
             return Err(invalid(
-                "Invalid credential cleanup journal; preserve accounts.json before recovery",
+                "Invalid credential cleanup journal; preserve colecto.db before recovery",
             ));
         }
         if matches!(&state.mode,Mode::System {entry:None,ciphertext,..} if !ciphertext.is_empty()) {

@@ -89,24 +89,11 @@ impl MailStore {
                 .get_record(&self.namespace, "labels", 1)?
                 .ok_or_else(|| storage("Authoritative labels were removed"))?
         } else {
-            let path = self.directory.join("labels.json");
-            let bytes = match fs::metadata(&path) {
-                Ok(meta) => {
-                    if meta.len() > 2_000_000 {
-                        return Err(storage("Label store exceeds its size limit"));
-                    }
-                    fs::read(path).map_err(storage)?
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    serde_json::to_vec(&SavedLabels {
-                        version: 1,
-                        labels: Labels::new(),
-                    })
-                    .map_err(storage)?
-                }
-                Err(error) => return Err(storage(error)),
-            };
-            validate_labels(&bytes)?;
+            let bytes = serde_json::to_vec(&SavedLabels {
+                version: 1,
+                labels: Labels::new(),
+            })
+            .map_err(storage)?;
             self.database
                 .initialize_record(&self.namespace, "labels", 1, &bytes)?
         };

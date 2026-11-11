@@ -51,14 +51,6 @@ struct SavedMail {
     drafts: Vec<Draft>,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MailCache {
-    version: u32,
-    account: String,
-    messages: Vec<Message>,
-}
-
 #[derive(Clone)]
 enum Account {
     Imap(MailAccount),
@@ -123,27 +115,15 @@ impl MailStore {
                 .get_record(&namespace, "drafts", 1)?
                 .ok_or_else(|| storage("Authoritative drafts were removed"))?
         } else {
-            let path = directory.join("drafts.json");
-            if fs::metadata(&path).is_ok_and(|metadata| metadata.len() > 32_000_000) {
-                return Err(storage("Draft store exceeds its size limit"));
-            }
-            let bytes = match fs::read(path) {
-                Ok(bytes) => bytes,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    serde_json::to_vec(&SavedMail {
-                        version: 1,
-                        drafts: vec![],
-                    })
-                    .map_err(storage)?
-                }
-                Err(error) => return Err(storage(error)),
-            };
-            validate_drafts(&bytes)?;
+            let bytes = serde_json::to_vec(&SavedMail {
+                version: 1,
+                drafts: vec![],
+            })
+            .map_err(storage)?;
             database.initialize_record(&namespace, "drafts", 1, &bytes)?
         };
         let drafts = validate_drafts(&bytes)?;
-        let mut cache = MailCacheStore::with_database(database.clone(), account)?;
-        cache.import_legacy(&directory)?;
+        let cache = MailCacheStore::with_database(database.clone(), account)?;
         let store = Self {
             cache,
             snapshot: std::sync::Arc::new(std::sync::RwLock::new(
@@ -207,7 +187,6 @@ impl MailStore {
             }
         }
         .map_err(storage)?;
-        self.cache.import_legacy(&self.directory)?;
         let snapshots = self.cache.snapshots(&key)?;
         let messages = snapshots
             .get("inbox")
@@ -679,39 +658,6 @@ mod cache_tests {
                 .unwrap(),
             before
         );
-    }
-    #[test]
-    fn legacy_import_is_one_time_and_source_is_preserved() {
-        let directory = tempfile::tempdir().unwrap();
-        let provider = account();
-        let key = serde_json::to_string(&(
-            "imap",
-            &provider.imap_host,
-            provider.imap_port,
-            &provider.username,
-            &provider.address,
-        ))
-        .unwrap();
-        let source = serde_json::to_vec(&MailCache {
-            version: 1,
-            account: key,
-            messages: sample_messages(),
-        })
-        .unwrap();
-        fs::write(directory.path().join("mail-cache.json"), &source).unwrap();
-        let mut store = MailStore::open(directory.path()).unwrap();
-        store.connect_account(account()).unwrap();
-        assert_eq!(store.messages().len(), 4);
-        assert!(directory.path().join("colecto.db").exists());
-        assert_eq!(
-            fs::read(directory.path().join("mail-cache.json")).unwrap(),
-            source
-        );
-        store.cache_inbox(&[]).unwrap();
-        drop(store);
-        let mut store = MailStore::open(directory.path()).unwrap();
-        store.connect_account(account()).unwrap();
-        assert!(store.messages().is_empty());
     }
     #[test]
     fn reader_cache_bounds_memory_across_many_searches() {
