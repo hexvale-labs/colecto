@@ -83,6 +83,14 @@ impl MailAccount {
         Ok(())
     }
 
+    pub fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+        self.validate()?;
+        let mut session = self.login()?;
+        let result = folders_session(&mut session);
+        let _ = session.logout();
+        result
+    }
+
     pub fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
         self.query_with_identity(folder, search)
             .map(|(messages, _)| messages)
@@ -561,6 +569,24 @@ mod tests {
         assert_eq!(message.subject, "Hello 世界");
         assert_eq!(message.body, "Hello");
     }
+    #[test]
+    fn folder_listing_skips_containers_and_reads_status_counts() {
+        use colecto_extension_api::FolderRole;
+        let server = mock_imap(vec![
+            ("LOGIN", String::new()),
+            ("LIST", "* LIST (\\Noselect) \"/\" \"[Gmail]\"\r\n* LIST (\\Sent) \"/\" \"Outbox\"\r\n* LIST () \"/\" \"INBOX\"\r\n".into()),
+            ("STATUS \"Outbox\" (MESSAGES UNSEEN)", "* STATUS \"Outbox\" (MESSAGES 12 UNSEEN 3)\r\n".into()),
+            ("STATUS \"INBOX\" (MESSAGES UNSEEN)", "* STATUS \"INBOX\" (MESSAGES 20 UNSEEN 7)\r\n".into()),
+        ]);
+        let folders = folders_session(&mut mock_session()).unwrap();
+        assert_eq!(folders.len(), 2);
+        assert_eq!(folders[0].role, FolderRole::Sent);
+        assert_eq!((folders[0].total, folders[0].unread), (12, 3));
+        assert_eq!(folders[1].role, FolderRole::Inbox);
+        assert_eq!((folders[1].total, folders[1].unread), (20, 7));
+        server.join().unwrap();
+    }
+
     fn mock_imap(steps: Vec<(&'static str, String)>) -> std::thread::JoinHandle<()> {
         use std::io::{BufRead, BufReader, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -782,4 +808,109 @@ mod tests {
             Err(Error::Invalid(_))
         ));
     }
+}
+
+#[cfg(test)]
+mod folder_tests {
+    use super::*;
+    use colecto_extension_api::FolderRole;
+    #[test]
+    fn roles_prefer_special_use_and_recognize_provider_names() {
+        for (name, attributes, expected) in [
+            ("Sent", vec![], FolderRole::Sent),
+            ("[Gmail]/Deleted Messages", vec![], FolderRole::Trash),
+            ("Spam", vec![], FolderRole::Junk),
+            ("INBOX", vec![], FolderRole::Inbox),
+            ("Projects/2026", vec![], FolderRole::Other),
+            ("Sent", vec!["\\Archive"], FolderRole::Archive),
+            ("Everything", vec!["\\All"], FolderRole::Archive),
+            ("Drafts", vec![], FolderRole::Drafts),
+        ] {
+            assert_eq!(folder_role(name, &attributes), expected);
+        }
+    }
+}
+
+fn folder_role(name: &str, attributes: &[&str]) -> colecto_extension_api::FolderRole {
+    use colecto_extension_api::FolderRole::*;
+    for (attribute, role) in [
+        ("\\Inbox", Inbox),
+        ("\\Sent", Sent),
+        ("\\Drafts", Drafts),
+        ("\\Archive", Archive),
+        ("\\Trash", Trash),
+        ("\\Junk", Junk),
+        ("\\All", Archive),
+    ] {
+        if attributes
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case(attribute))
+        {
+            return role;
+        }
+    }
+    match name
+        .trim_start_matches("[Gmail]/")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "inbox" => Inbox,
+        "sent" | "sent items" | "sent messages" | "sent mail" => Sent,
+        "drafts" => Drafts,
+        "archive" | "all mail" => Archive,
+        "trash" | "deleted items" | "deleted messages" => Trash,
+        "junk" | "spam" => Junk,
+        _ => Other,
+    }
+}
+
+fn folders_session<T: std::io::Read + std::io::Write>(
+    session: &mut imap::Session<T>,
+) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+    use imap::types::NameAttribute;
+    let names = session.list(Some(""), Some("*")).map_err(imap_error)?;
+    let mut folders = Vec::new();
+    for name in names.iter() {
+        if name.attributes().contains(&NameAttribute::NoSelect) {
+            continue;
+        }
+        let attributes: Vec<&str> = name
+            .attributes()
+            .iter()
+            .filter_map(|a| match a {
+                NameAttribute::Custom(value) => Some(value.as_ref()),
+                _ => None,
+            })
+            .collect();
+        session
+            .status(name.name(), "(MESSAGES UNSEEN)")
+            .map_err(imap_error)?;
+        // imap 2.x delivers STATUS data through its unsolicited response channel.
+        let mut total = None;
+        let mut unread = None;
+        while let Ok(response) = session.unsolicited_responses.try_recv() {
+            if let imap::types::UnsolicitedResponse::Status {
+                mailbox,
+                attributes,
+            } = response
+                && mailbox == name.name()
+            {
+                for attribute in attributes {
+                    match attribute {
+                        imap::types::StatusAttribute::Messages(value) => total = Some(value),
+                        imap::types::StatusAttribute::Unseen(value) => unread = Some(value),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        folders.push(colecto_extension_api::Folder {
+            id: name.name().into(),
+            name: name.name().into(),
+            role: folder_role(name.name(), &attributes),
+            unread: unread.ok_or_else(|| remote("Missing UNSEEN"))?,
+            total: total.ok_or_else(|| remote("Missing MESSAGES"))?,
+        });
+    }
+    Ok(folders)
 }
