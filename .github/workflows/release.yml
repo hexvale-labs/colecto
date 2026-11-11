@@ -297,7 +297,7 @@ jobs:
         with:
           context: .
           platforms: linux/${{ matrix.arch }}
-          outputs: ${{ startsWith(github.ref, 'refs/tags/') && format('type=image,name=ghcr.io/{0}-daemon,push-by-digest=true,name-canonical=true,push=true', github.repository) || 'type=cacheonly' }}
+          outputs: ${{ startsWith(github.ref, 'refs/tags/') && format('type=image,name=ghcr.io/{0}/colectod,push-by-digest=true,name-canonical=true,push=true', github.repository_owner) || 'type=cacheonly' }}
 
       - name: Record the digest
         if: startsWith(github.ref, 'refs/tags/')
@@ -320,6 +320,11 @@ jobs:
       contents: write
       packages: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/release-notes
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
@@ -333,20 +338,49 @@ jobs:
 
       - name: Publish the daemon image
         env:
-          IMAGE: ghcr.io/${{ github.repository }}-daemon
-          TAG: ${{ needs.version.outputs.tag }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/colectod
+          VERSION: ${{ needs.version.outputs.number }}
         run: |
           set -euo pipefail
           image=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          IFS=. read -r major minor _ <<< "$VERSION"
           digests=$(find dist -maxdepth 1 -type f -size 0 -printf "$image@sha256:%f ")
-          docker buildx imagetools create -t "$image:$TAG" -t "$image:latest" $digests
+          docker buildx imagetools create -t "$image:v$VERSION" -t "$image:v$major.$minor" -t "$image:v$major" \
+            -t "$image:latest" $digests
           find dist -maxdepth 1 -type f -size 0 -delete
 
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
+          NOTES: .github/release-notes/${{ needs.version.outputs.tag }}.md
         run: |
           (cd dist && sha256sum colecto-* > SHA256SUMS.txt)
-          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Colecto $TAG" --generate-notes \
-            --notes "Installers are not signed. See https://github.com/$GITHUB_REPOSITORY/blob/main/docs/install.md before installing."
+          footer="Installers are not signed. See https://github.com/$GITHUB_REPOSITORY/blob/main/docs/install.md before installing."
+          if [[ -f "$NOTES" ]]; then
+            notes=$(cat "$NOTES"; printf '\n\n%s\n' "$footer")
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Colecto $TAG" --notes "$notes"
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Colecto $TAG" --generate-notes --notes "$footer"
+          fi
+
+  aur:
+    # Pushes colecto, colecto-bin and colecto-git to the AUR. Skipped until the
+    # AUR_SSH_PRIVATE_KEY secret exists, so forks and first releases still publish.
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [version, publish]
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    env:
+      AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      VERSION: ${{ needs.version.outputs.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Update the AUR packages
+        if: env.AUR_KEY != ''
+        run: |
+          pacman -Syu --noconfirm --needed python
+          python3 scripts/python/aur_publish.py --version "$VERSION" --push

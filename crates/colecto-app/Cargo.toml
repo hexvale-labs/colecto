@@ -30,6 +30,10 @@ zeroize.workspace = true
 [build-dependencies]
 tauri-build.workspace = true
 
+# Already in the tree through Tauri's GTK stack; used to set the Wayland app_id.
+[target.'cfg(target_os = "linux")'.dependencies]
+glib = "0.18"
+
 # Android has no system OpenSSL for native-tls to link; build it from source there.
 [target.'cfg(target_os = "android")'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }

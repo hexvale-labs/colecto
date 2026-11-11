@@ -5,6 +5,11 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Wayland compositors find the window's icon through the desktop entry named after its
+    // app_id, which GTK takes from the program name. Every Linux package installs
+    // `Colecto.desktop`, so match it instead of the binary name `colecto`.
+    #[cfg(target_os = "linux")]
+    glib::set_prgname(Some("Colecto"));
     if let Err(error) = start() {
         colecto_host::logging::init();
         tracing::error!("Colecto could not start: {error}");

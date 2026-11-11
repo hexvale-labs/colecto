@@ -1,0 +1,48 @@
+# Maintainer: Hexvale Labs <https://github.com/hexvale-labs>
+# Release CI sets pkgver and the checksum before pushing this file to the AUR.
+pkgname=colecto
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='A fast, extensible email client (desktop app, mail daemon and MCP server)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/hexvale-labs/colecto'
+license=('MIT OR Apache-2.0')
+depends=('webkit2gtk-4.1' 'gtk3' 'openssl' 'dbus' 'hicolor-icon-theme')
+makedepends=('cargo' 'bun')
+optdepends=('org.freedesktop.secrets: keep account passwords in the system keyring')
+options=('!lto')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+  cd ui
+  bun install --frozen-lockfile
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  (cd ui && bun run --bun build)
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p colecto-app -p colecto-host
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/colecto target/release/colecto-daemon target/release/colecto-mcp -t "$pkgdir/usr/bin/"
+
+  install -Dm644 packaging/linux/Colecto.desktop -t "$pkgdir/usr/share/applications/"
+  install -Dm644 crates/colecto-app/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/colecto.png"
+  install -Dm644 crates/colecto-app/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/colecto.png"
+  install -Dm644 crates/colecto-app/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/colecto.png"
+  install -Dm644 crates/colecto-app/icons/icon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/colecto.svg"
+
+  for unit in packaging/systemd/*.service; do
+    sed 's|/usr/local/bin/|/usr/bin/|' "$unit" | install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/${unit##*/}"
+  done
+
+  install -Dm644 LICENSE-MIT LICENSE-APACHE -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
