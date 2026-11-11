@@ -198,7 +198,7 @@ fn build_app(host: Host, assets: Assets) -> Router {
         .route("/messages", get(messages))
         .route("/messages/cache", get(cached_messages))
         .route("/messages/refresh", axum::routing::post(messages))
-        .route("/messages/{id}", get(message))
+        .route("/messages/{id}", get(message).post(organize_messages))
         .route("/messages/{id}/content", get(message_content))
         .route(
             "/messages/{id}/attachments/{index}",
@@ -604,7 +604,9 @@ fn extension_service(
                 .map_err(|_| "Mail delivery failed")?;
             serde_json::to_value(true)
         }
-        AppNavigate | WindowOverlay => return Err("Capability not granted".into()),
+        MessagesOrganize | AppNavigate | WindowOverlay => {
+            return Err("Capability not granted".into());
+        }
     };
     result.map_err(|_| "Cannot serialize service response".into())
 }
@@ -647,6 +649,51 @@ struct MessageQuery {
 fn inbox_folder() -> String {
     "inbox".into()
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct OrganizeInput {
+    ids: Vec<String>,
+    seen: Option<bool>,
+    flagged: Option<bool>,
+    folder: Option<String>,
+}
+async fn organize_messages(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    axum::extract::Path(action): axum::extract::Path<String>,
+    input: Result<Json<OrganizeInput>, JsonRejection>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    let account = grant(&host, &principal, &headers, Capability::MessagesOrganize)?;
+    let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
+    if input.ids.is_empty() || input.ids.len() > 500 {
+        return Err(Failure(
+            StatusCode::BAD_REQUEST,
+            "Supply between 1 and 500 message ids".into(),
+        ));
+    }
+    with_store(host.clone(), account.clone(), move |store| {
+        match action.as_str() {
+            "flags" => store.set_flags(&input.ids, input.seen, input.flagged),
+            "move" => store.move_to(
+                &input.ids,
+                input
+                    .folder
+                    .as_deref()
+                    .ok_or_else(|| colecto_core::Error::Invalid("Folder required".into()))?,
+            ),
+            "archive" => store.archive(&input.ids),
+            "delete" => store.delete(&input.ids),
+            _ => Err(colecto_core::Error::Invalid("Unknown operation".into())),
+        }
+    })
+    .await?;
+    let _ = host
+        .events
+        .send(("mail", serde_json::json!({"account":account}).to_string()));
+    Ok(Json(serde_json::json!({"ok":true})))
+}
+
 async fn folders(
     State(host): State<Host>,
     axum::Extension(principal): axum::Extension<Principal>,

@@ -29,6 +29,10 @@ pub struct Folder {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Message {
+    #[serde(default)]
+    pub seen: bool,
+    #[serde(default)]
+    pub flagged: bool,
     pub id: String,
     pub sender: String,
     pub address: String,
@@ -217,6 +221,8 @@ pub enum Capability {
     MessagesSend,
     #[serde(rename = "messages.label")]
     MessagesLabel,
+    #[serde(rename = "messages.organize")]
+    MessagesOrganize,
     #[serde(rename = "window.overlay")]
     WindowOverlay,
     /// Lets an API key move the owner's open Colecto windows to a page. Never granted to extensions.

@@ -83,6 +83,22 @@ impl MailAccount {
         Ok(())
     }
 
+    pub(crate) fn organize(
+        &self,
+        ids: &[String],
+        seen: Option<bool>,
+        flagged: Option<bool>,
+        destination: Option<&str>,
+        trash: Option<&str>,
+        delete: bool,
+    ) -> Result<(), Error> {
+        self.validate()?;
+        let mut session = self.login()?;
+        let result = organize_session(&mut session, ids, seen, flagged, destination, trash, delete);
+        let _ = session.logout();
+        result
+    }
+
     pub fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
         self.validate()?;
         let mut session = self.login()?;
@@ -275,7 +291,7 @@ fn fetch_session<T: std::io::Read + std::io::Write>(
         ));
     }
     let fetched = session
-        .uid_fetch(uid.to_string(), "(UID BODY.PEEK[])")
+        .uid_fetch(uid.to_string(), "(UID FLAGS BODY.PEEK[])")
         .map_err(imap_error)?;
     fetched
         .iter()
@@ -368,9 +384,9 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
             .uid_fetch(
                 uid.to_string(),
                 if large {
-                    "(UID BODY.PEEK[HEADER])"
+                    "(UID FLAGS BODY.PEEK[HEADER])"
                 } else {
-                    "(UID BODY.PEEK[])"
+                    "(UID FLAGS BODY.PEEK[])"
                 },
             )
             .map_err(imap_error)?;
@@ -378,6 +394,8 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
             let raw = if large { item.header() } else { item.body() }
                 .ok_or_else(|| remote("Missing body"))?;
             let mut message = parse_message(raw, validity, uid)?;
+            message.seen = item.flags().contains(&imap::types::Flag::Seen);
+            message.flagged = item.flags().contains(&imap::types::Flag::Flagged);
             if large {
                 message.body =
                     "This message is larger than 2 MB. Open it to load everything.".into();
@@ -418,6 +436,8 @@ fn parse_message(raw: &[u8], validity: u32, uid: u32) -> Result<Message, Error> 
     let from = mail.headers.get_first_value("From").unwrap_or_default();
     let body = crate::bounded_body(crate::mime::text(&mail)?);
     Ok(Message {
+        seen: false,
+        flagged: false,
         id: format!("imap-{validity}-{uid}"),
         sender: from.clone(),
         address: from,
@@ -525,7 +545,7 @@ mod tests {
                     "* 1 FETCH (UID 42 RFC822.SIZE 80)\r\n".into(),
                 ),
                 (
-                    "UID FETCH 42 (UID BODY.PEEK[])",
+                    "UID FETCH 42 (UID FLAGS BODY.PEEK[])",
                     format!("* 1 FETCH (UID 42 BODY[] {{{}}}\r\n{})\r\n", raw.len(), raw),
                 ),
             ];
@@ -585,6 +605,74 @@ mod tests {
         assert_eq!(folders[1].role, FolderRole::Inbox);
         assert_eq!((folders[1].total, folders[1].unread), (20, 7));
         server.join().unwrap();
+    }
+
+    #[test]
+    fn organizes_with_move_and_copy_fallback_and_checks_validity() {
+        for (capabilities, operation) in [
+            ("MOVE UIDPLUS", "move"),
+            ("UIDPLUS", "copy"),
+            ("", "expunge"),
+            ("", "stale"),
+            ("", "flags"),
+            ("", "delete"),
+        ] {
+            let mut steps = vec![
+                ("LOGIN", String::new()),
+                (
+                    "CAPABILITY",
+                    format!(
+                        "* CAPABILITY {}\r\n",
+                        format!("IMAP4rev1 {capabilities}").trim_end()
+                    ),
+                ),
+                ("SELECT", "* OK [UIDVALIDITY 7] valid\r\n".into()),
+            ];
+            match operation {
+                "move" => steps.push(("UID MOVE 42", String::new())),
+                "copy" | "expunge" => {
+                    steps.push(("UID COPY 42", String::new()));
+                    steps.push(("UID STORE 42 +FLAGS.SILENT (\\Deleted)", String::new()));
+                    steps.push((
+                        if operation == "copy" {
+                            "UID EXPUNGE 42"
+                        } else {
+                            "EXPUNGE"
+                        },
+                        String::new(),
+                    ));
+                }
+                "flags" => {
+                    steps.push(("UID STORE 42 +FLAGS.SILENT (\\Seen)", String::new()));
+                    steps.push(("UID STORE 42 -FLAGS.SILENT (\\Flagged)", String::new()));
+                }
+                "delete" => {
+                    steps.push(("UID STORE 42 +FLAGS.SILENT (\\Deleted)", String::new()));
+                    steps.push(("EXPUNGE", String::new()));
+                }
+                _ => {}
+            }
+            let server = mock_imap(steps);
+            let mut session = mock_session();
+            let result = organize_session(
+                &mut session,
+                &[format!(
+                    "imap-{}-42",
+                    if operation == "stale" { 8 } else { 7 }
+                )],
+                (operation == "flags").then_some(true),
+                (operation == "flags").then_some(false),
+                (!matches!(operation, "flags" | "delete")).then_some("Archive"),
+                None,
+                operation == "delete",
+            );
+            assert_eq!(
+                result.is_err(),
+                operation == "stale",
+                "{operation}: {result:?}"
+            );
+            server.join().unwrap();
+        }
     }
 
     fn mock_imap(steps: Vec<(&'static str, String)>) -> std::thread::JoinHandle<()> {
@@ -686,9 +774,9 @@ mod tests {
                 "* 1 FETCH (UID 5 RFC822.SIZE 3000000)\r\n".into(),
             ),
             (
-                "UID FETCH 5 (UID BODY.PEEK[HEADER])",
+                "UID FETCH 5 (UID FLAGS BODY.PEEK[HEADER])",
                 format!(
-                    "* 1 FETCH (UID 5 BODY[HEADER] {{{}}}\r\n{header})\r\n",
+                    "* 1 FETCH (UID 5 FLAGS (\\Seen \\Flagged) BODY[HEADER] {{{}}}\r\n{header})\r\n",
                     header.len()
                 ),
             ),
@@ -705,13 +793,14 @@ mod tests {
                 "* 1 FETCH (UID 5 RFC822.SIZE 3000000)\r\n".into(),
             ),
             (
-                "UID FETCH 5 (UID BODY.PEEK[])",
+                "UID FETCH 5 (UID FLAGS BODY.PEEK[])",
                 format!("* 1 FETCH (UID 5 BODY[] {{{}}}\r\n{raw})\r\n", raw.len()),
             ),
         ]);
         let mut session = mock_session();
         let messages = query_session(&mut session, "inbox", "").unwrap();
         assert_eq!(messages[0].subject, "Big");
+        assert!(messages[0].seen && messages[0].flagged);
         assert!(messages[0].body.contains("larger than 2 MB"));
         let (name, validity, uid) = parse_id(&messages[0].id).unwrap();
         assert!(matches!(
@@ -913,4 +1002,64 @@ fn folders_session<T: std::io::Read + std::io::Write>(
         });
     }
     Ok(folders)
+}
+
+fn organize_session<T: std::io::Read + std::io::Write>(
+    session: &mut imap::Session<T>,
+    ids: &[String],
+    seen: Option<bool>,
+    flagged: Option<bool>,
+    destination: Option<&str>,
+    trash: Option<&str>,
+    delete: bool,
+) -> Result<(), Error> {
+    let parsed = ids
+        .iter()
+        .map(|id| parse_id(id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let capabilities = session.capabilities().map_err(imap_error)?;
+    let can_move = capabilities.has_str("MOVE");
+    let uidplus = capabilities.has_str("UIDPLUS");
+    for (name, validity, uid) in parsed {
+        if session.select(&name).map_err(imap_error)?.uid_validity != Some(validity) {
+            return Err(Error::Invalid("Mailbox UIDVALIDITY changed".into()));
+        }
+        let uid = uid.to_string();
+        for (value, flag) in [(seen, "\\Seen"), (flagged, "\\Flagged")] {
+            if let Some(value) = value {
+                session
+                    .uid_store(
+                        &uid,
+                        format!("{}FLAGS.SILENT ({flag})", if value { "+" } else { "-" }),
+                    )
+                    .map_err(imap_error)?;
+            }
+        }
+        let target = if delete {
+            trash.filter(|target| *target != name)
+        } else {
+            destination
+        };
+        if let Some(target) = target {
+            if target == name {
+                continue;
+            }
+            if can_move {
+                session.uid_mv(&uid, target).map_err(imap_error)?;
+                continue;
+            }
+            session.uid_copy(&uid, target).map_err(imap_error)?;
+        }
+        if target.is_some() || delete {
+            session
+                .uid_store(&uid, "+FLAGS.SILENT (\\Deleted)")
+                .map_err(imap_error)?;
+            if uidplus {
+                session.uid_expunge(&uid).map_err(imap_error)?;
+            } else {
+                session.expunge().map_err(imap_error)?;
+            }
+        }
+    }
+    Ok(())
 }
