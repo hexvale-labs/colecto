@@ -1,9 +1,10 @@
 <script lang="ts">
   import { flip } from 'svelte/animate';
-  import Icon from './Icon.svelte';
-  import { dismiss, toasts, type Toast } from './lib/toasts.svelte';
-  import type { Corner } from './lib/api';
-  let { position }: { position: Corner } = $props();
+  import Icon from '../../Icon.svelte';
+  import { dismiss, toasts, type Toast } from './toasts.svelte';
+  import type { Corner } from '../../lib/api';
+  import { notificationPosition } from './toasts.svelte';
+  let position = $derived(notificationPosition.value);
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Leave toward the edge the toast came from, quicker than it arrived.
   function leave(node: HTMLElement) {

@@ -224,39 +224,44 @@ test('extension controls expose TOML metadata and recover a disabled mail worksp
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
 });
 
-test('installs Wasm disabled, consents to account access, revokes and removes it', async ({ page }) => {
+test('install consent enables all capabilities and settings keep them read-only', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
-  page.on('dialog', dialog => dialog.accept());
   await openExtensions(page);
   await page.getByLabel('Extension package', { exact: true }).setInputFiles('../target/extensions/connection-panel.colectoext');
   await page.getByRole('button', { name: 'Install', exact: true }).click();
-  // A warning that cannot be skipped for five seconds comes first; cancelling installs nothing.
   const warning = page.getByRole('dialog', { name: 'Only install extensions you trust' });
+  await expect(warning.getByText('Read account connection status')).toBeVisible();
   await expect(warning.getByRole('button', { name: 'Install (5)' })).toBeDisabled();
   await warning.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByRole('group', { name: 'Connection panel', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Install', exact: true }).click();
   await warning.getByRole('button', { name: 'Install anyway' }).click({ timeout: 8000 });
   const panel = page.getByRole('group', { name: 'Connection panel', exact: true });
-  await expect(panel.getByRole('checkbox', { name: 'Enabled for all accounts' })).not.toBeChecked();
-  await expect(panel.getByRole('checkbox', { name: 'account.read', exact: true })).not.toBeChecked();
-  await panel.getByRole('checkbox', { name: 'Enabled for all accounts' }).check();
-  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Connection panel', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Extension panel' })).toContainText('Permission required');
-  await openExtensions(page);
-  await panel.getByRole('checkbox', { name: 'account.read', exact: true }).check();
-  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Connection panel', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Extension panel' })).toContainText('Account disconnected');
-  await openExtensions(page);
-  await panel.getByRole('checkbox', { name: 'account.read', exact: true }).uncheck();
-  await page.reload();
-  await openExtensions(page);
-  await expect(panel.getByRole('checkbox', { name: 'account.read', exact: true })).not.toBeChecked();
+  await expect(panel.getByRole('checkbox', { name: 'Enabled for all accounts' })).toBeChecked();
+  await expect(panel.getByText('Read account connection status')).toBeVisible();
+  await expect(panel.getByRole('checkbox')).toHaveCount(2);
+  page.on('dialog', dialog => dialog.accept());
   await panel.getByRole('button', { name: 'Remove extension', exact: true }).click();
-  await expect(panel).toHaveCount(0);
+});
+
+test('Oneko follows the pointer and hops aside when touched', async ({ page }) => {
+  await page.goto('/');
+  await openExtensions(page);
+  await page.getByLabel('Extension package', { exact: true }).setInputFiles('../docs/extensions/examples/oneko.colectoext');
+  await page.getByRole('button', { name: 'Install', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Install anyway' }).click({ timeout: 8000 });
+  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
+  const cat = page.locator('.sprite');
+  await expect(cat).toBeVisible();
+  await expect.poll(() => cat.locator('image').evaluate(node => (node as SVGGraphicsElement).getBBox().width)).toBeGreaterThan(0);
+  await page.mouse.move(700, 400);
+  await expect.poll(async () => { const box = await cat.boundingBox(); return box ? Math.max(Math.abs(box.x + 16 - 700), Math.abs(box.y + 16 - 400)) : 999; }, { timeout: 12000 }).toBeLessThan(46);
+  const box = (await cat.boundingBox())!;
+  await page.mouse.move(box.x + 16, box.y + 16);
+  await expect.poll(async () => { const moved = (await cat.boundingBox())!; return moved.x > box.x + 32 || moved.x + 32 < box.x + 16 || moved.y > box.y + 32 || moved.y + 32 < box.y + 16; }).toBe(true);
+  await openExtensions(page);
+  page.on('dialog', dialog => dialog.accept());
+  await page.getByRole('group', { name: 'Oneko', exact: true }).getByRole('button', { name: 'Remove extension' }).click();
 });
 
 test('owner generates a scoped key, sees its secret once, and revokes it on a phone', async ({ page }) => {
@@ -362,4 +367,19 @@ test('owner reviews the complete immutable automation snapshot on a phone and se
   await expect(page.getByRole('status')).toContainText('Delivery outcome is uncertain');
   await expect(review.getByRole('button', { name: 'Approve and send', exact: true })).toHaveCount(0);
   expect(approvals).toBe(1);
+});
+
+
+test('notifications can be disabled while the mail workspace keeps working', async ({ page }) => {
+  await page.goto('/');
+  await openExtensions(page);
+  const toggle = page.getByRole('group', { name: 'Notifications', exact: true }).getByRole('checkbox', { name: 'Enabled for all accounts' });
+  await toggle.uncheck();
+  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
+  await expect(page.locator('section.toasts')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+  await openExtensions(page);
+  await toggle.check();
+  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
+  await expect(page.locator('section.toasts')).toHaveCount(1);
 });

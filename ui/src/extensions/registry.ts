@@ -3,3 +3,5 @@ import Mailbox from './inbox/Mailbox.svelte';
 import Reader from './reader/Reader.svelte';
 import Composer from './composer/Composer.svelte';
 export const mailExtensions = { inbox: Mailbox, reader: Reader, composer: Composer };
+import Notifications from './notifications/Toasts.svelte';
+export const overlayExtensions = { notifications: Notifications };
