@@ -167,7 +167,10 @@ jobs:
         run: |
           echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
           export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
-          bunx "$TAURI_CLI" android init --ci
+          # Xcode and Gradle call back into the CLI as `bun tauri ...`, which needs a package script.
+          echo '{"private":true,"scripts":{"tauri":"tauri"},"devDependencies":{"@tauri-apps/cli":"'"${TAURI_CLI##*@}"'"}}' > package.json
+          bun install
+          bun tauri android init --ci
           # The app talks to its own service on http://127.0.0.1, which Android blocks by default.
           sed -i 's/"usesCleartextTraffic"\] = "false"/"usesCleartextTraffic"] = "true"/' gen/android/app/build.gradle.kts
           grep -q '"usesCleartextTraffic"\] = "true"' gen/android/app/build.gradle.kts
@@ -178,7 +181,7 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.number }}
         run: >
-          bunx "$TAURI_CLI" android build --ci --apk --split-per-abi
+          bun tauri android build --ci --apk --split-per-abi
           --target aarch64 armv7 i686 x86_64 --config "{\"version\":\"$VERSION\"}"
 
       # Android installs only signed APKs. A throwaway key costs nothing, but each release has a
@@ -240,7 +243,10 @@ jobs:
         working-directory: crates/colecto-app
         run: |
           brew install xcodegen
-          bunx "$TAURI_CLI" ios init --ci
+          # Xcode and Gradle call back into the CLI as `bun tauri ...`, which needs a package script.
+          echo '{"private":true,"scripts":{"tauri":"tauri"},"devDependencies":{"@tauri-apps/cli":"'"${TAURI_CLI##*@}"'"}}' > package.json
+          bun install
+          bun tauri ios init --ci
           bunx "$TAURI_CLI" icon icons/icon.svg -o icons
 
       # Without an Apple developer account the app cannot be signed, so build it unsigned and
@@ -255,7 +261,7 @@ jobs:
           project=$(ls -d gen/apple/*.xcodeproj)/project.pbxproj
           sed -i '' 's/buildSettings = {/buildSettings = { CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO; CODE_SIGN_IDENTITY = ""; DEVELOPMENT_TEAM = "";/' "$project"
           # The build succeeds; exporting a signed archive afterwards cannot, so look for the .app.
-          bunx "$TAURI_CLI" ios build --ci --target aarch64 --config "{\"version\":\"$VERSION\"}" || true
+          bun tauri ios build --ci --target aarch64 --config "{\"version\":\"$VERSION\"}" || true
           app=$(find gen/apple/build "$HOME/Library/Developer/Xcode/DerivedData" -name '*.app' -path '*-iphoneos*' -type d 2>/dev/null | head -1)
           [ -n "$app" ] || { echo "::error::No .app was built"; exit 1; }
           mkdir -p "$RUNNER_TEMP/ipa/Payload" "$GITHUB_WORKSPACE/dist"
