@@ -45,10 +45,8 @@ Rollback therefore requires deliberate restoration/export: running an older
 binary against preserved legacy files loses changes made after migration.
 Host extension policy and Wasm modules, API key verifiers, the send-approval journal
 and owner preferences are versioned records in the `host` namespace of the same
-database, reached through `Accounts::database()`. A valid legacy `extensions.json`,
-`api-keys.json` or `send-approvals.json` imports once, with the same size and
-owner-only permission checks as before; the file is then never read or written again.
-An invalid legacy file fails startup and stays untouched. Owner preferences hold the
+database, reached through `Accounts::database()`. The Host keeps these records only in
+`colecto.db` and ignores old JSON files. Owner preferences hold the
 workspace layout (a bounded JSON object the UI validates), the selected account and
 whether MCP is on. The browser keeps only the session's access token in
 `sessionStorage`. No device replication is introduced.

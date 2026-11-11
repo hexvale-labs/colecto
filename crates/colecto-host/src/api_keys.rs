@@ -3,7 +3,6 @@ use colecto_core::Database;
 use colecto_extension_api::Capability;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
 use subtle::ConstantTimeEq;
 
 #[derive(Clone, Debug)]
@@ -45,7 +44,6 @@ pub struct KeyInput {
 }
 pub struct ApiKeys {
     database: Database,
-    directory: PathBuf,
     policy: Policy,
 }
 pub fn now() -> u64 {
@@ -73,15 +71,10 @@ fn valid_metadata(key: &KeyMetadata) -> bool {
         && key.expires_at.is_none_or(|t| t > key.created_at)
 }
 impl ApiKeys {
-    pub fn open(database: Database, directory: &Path) -> Result<Self, String> {
+    pub fn open(database: Database) -> Result<Self, String> {
         let policy = crate::store::open(
             &database,
-            directory,
             "api-keys",
-            Some(crate::store::Legacy {
-                max_bytes: 2_000_000,
-                private: true,
-            }),
             || Policy {
                 version: 1,
                 keys: vec![],
@@ -103,18 +96,14 @@ impl ApiKeys {
                 Ok(policy)
             },
         )?;
-        Ok(Self {
-            database,
-            directory: directory.into(),
-            policy,
-        })
+        Ok(Self { database, policy })
     }
     fn reload(&mut self) -> Result<(), String> {
         self.policy = Policy {
             version: 1,
             keys: vec![],
         };
-        self.policy = Self::open(self.database.clone(), &self.directory)?.policy;
+        self.policy = Self::open(self.database.clone())?.policy;
         Ok(())
     }
     fn commit(&mut self, policy: Policy) -> Result<(), String> {

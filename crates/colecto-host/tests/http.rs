@@ -668,7 +668,7 @@ fn key_secrets_are_not_persisted_and_expiry_revocation_survive_restart() {
     use colecto_extension_api::Capability;
     use colecto_host::api_keys::{ApiKeys, KeyInput};
     let (dir, database) = key_store();
-    let open = || ApiKeys::open(database.clone(), dir.path());
+    let open = || ApiKeys::open(database.clone());
     let mut keys = open().unwrap();
     let (metadata, secret) = keys
         .mint(
@@ -706,44 +706,11 @@ fn key_secrets_are_not_persisted_and_expiry_revocation_survive_restart() {
 }
 
 #[test]
-fn legacy_key_file_imports_once_only_when_valid_and_private() {
-    use colecto_host::api_keys::ApiKeys;
-    let (dir, database) = key_store();
-    let legacy = dir.path().join("api-keys.json");
-    std::fs::write(&legacy, "{\"version\":99,\"keys\":[]}").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
-    assert!(ApiKeys::open(database.clone(), dir.path()).is_err());
-    std::fs::write(&legacy, "{\"version\":1,\"keys\":[]}").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(ApiKeys::open(database.clone(), dir.path()).is_err());
-        std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
-    assert!(
-        ApiKeys::open(database.clone(), dir.path())
-            .unwrap()
-            .list()
-            .is_empty()
-    );
-    std::fs::write(&legacy, "corrupt").unwrap();
-    assert!(
-        ApiKeys::open(database, dir.path()).is_ok(),
-        "imported state wins over the old file"
-    );
-}
-
-#[test]
 fn missing_and_corrupt_policy_reject_existing_key_and_recent_use_does_not_rewrite_policy() {
     use colecto_extension_api::Capability;
     use colecto_host::api_keys::{ApiKeys, KeyInput};
-    let (dir, database) = key_store();
-    let mut keys = ApiKeys::open(database.clone(), dir.path()).unwrap();
+    let (_dir, database) = key_store();
+    let mut keys = ApiKeys::open(database.clone()).unwrap();
     let (_, secret) = keys
         .mint(
             KeyInput {
@@ -775,14 +742,14 @@ fn missing_and_corrupt_policy_reject_existing_key_and_recent_use_does_not_rewrit
 fn stale_policy_instances_cannot_resurrect_a_revoked_key() {
     use colecto_extension_api::Capability;
     use colecto_host::api_keys::{ApiKeys, KeyInput};
-    let (dir, database) = key_store();
+    let (_dir, database) = key_store();
     let input = || KeyInput {
         name: "Assistant".into(),
         accounts: vec!["demo".into()],
         capabilities: vec![Capability::MessagesList],
         expires_at: None,
     };
-    let open = || ApiKeys::open(database.clone(), dir.path()).unwrap();
+    let open = || ApiKeys::open(database.clone()).unwrap();
     let mut first = open();
     let (key, secret) = first.mint(input(), 100).unwrap();
     let mut second = open();

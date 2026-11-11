@@ -1283,7 +1283,7 @@ mod extension_service_tests {
         )
         .unwrap();
         let database = accounts.database();
-        let mut extensions = extensions::Extensions::open(database.clone(), dir.path()).unwrap();
+        let mut extensions = extensions::Extensions::open(database.clone()).unwrap();
         extensions
             .install(
                 include_str!("../../../docs/extensions/examples/connection-panel/extension.toml"),
@@ -1293,14 +1293,12 @@ mod extension_service_tests {
         extensions.update("connection-panel", true).unwrap();
         let host = Host {
             events: tokio::sync::broadcast::channel(1).0,
-            keys: Arc::new(Mutex::new(
-                ApiKeys::open(database.clone(), dir.path()).unwrap(),
-            )),
+            keys: Arc::new(Mutex::new(ApiKeys::open(database.clone()).unwrap())),
             preferences: Arc::new(Mutex::new(
-                preferences::PreferenceStore::open(database.clone(), dir.path()).unwrap(),
+                preferences::PreferenceStore::open(database.clone()).unwrap(),
             )),
             approvals: Arc::new(Mutex::new(
-                approvals::Approvals::open(database, dir.path(), api_keys::now()).unwrap(),
+                approvals::Approvals::open(database, api_keys::now()).unwrap(),
             )),
             status_polls: Arc::default(),
             accounts: Arc::new(Mutex::new(accounts)),

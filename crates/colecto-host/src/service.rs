@@ -192,12 +192,10 @@ impl MailService {
             )));
         }
         let database = accounts.database();
-        let directory = accounts.data_directory();
-        let extensions = crate::extensions::Extensions::open(database.clone(), directory)?;
-        let keys = Arc::new(Mutex::new(ApiKeys::open(database.clone(), directory)?));
+        let extensions = crate::extensions::Extensions::open(database.clone())?;
+        let keys = Arc::new(Mutex::new(ApiKeys::open(database.clone())?));
         let preferences = Arc::new(Mutex::new(crate::preferences::PreferenceStore::open(
             database.clone(),
-            directory,
         )?));
         let auth = Authentication {
             policy: policy.clone(),
@@ -205,7 +203,6 @@ impl MailService {
         };
         let approvals = Arc::new(Mutex::new(crate::approvals::Approvals::open(
             database,
-            directory,
             api_keys::now(),
         )?));
         let (events, _) = tokio::sync::broadcast::channel(64);

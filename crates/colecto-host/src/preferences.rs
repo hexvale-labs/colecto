@@ -3,7 +3,6 @@
 //! The UI owns the layout's shape; the Host only bounds it, because it never acts on it.
 use colecto_core::Database;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 const MAX_WORKSPACE_BYTES: usize = 64 * 1024;
 
@@ -99,25 +98,18 @@ pub struct PreferenceStore {
     value: Preferences,
 }
 impl PreferenceStore {
-    pub fn open(database: Database, directory: &Path) -> Result<Self, String> {
-        let value = crate::store::open(
-            &database,
-            directory,
-            "preferences",
-            None,
-            Preferences::default,
-            |bytes| {
-                let mut value: Preferences =
-                    serde_json::from_slice(bytes).map_err(|_| "Invalid preferences")?;
-                if !value.notification_position_chosen
-                    && value.notifications.position == Corner::BottomRight
-                {
-                    value.notifications.position = Corner::Top;
-                }
-                validate(&value)?;
-                Ok(value)
-            },
-        )?;
+    pub fn open(database: Database) -> Result<Self, String> {
+        let value = crate::store::open(&database, "preferences", Preferences::default, |bytes| {
+            let mut value: Preferences =
+                serde_json::from_slice(bytes).map_err(|_| "Invalid preferences")?;
+            if !value.notification_position_chosen
+                && value.notifications.position == Corner::BottomRight
+            {
+                value.notifications.position = Corner::Top;
+            }
+            validate(&value)?;
+            Ok(value)
+        })?;
         Ok(Self { database, value })
     }
     pub fn get(&self) -> &Preferences {
@@ -166,7 +158,7 @@ mod tests {
             &serde_json::json!({"notifications":{"position":"bottom-right"}}),
         )
         .unwrap();
-        let mut store = PreferenceStore::open(database.clone(), dir.path()).unwrap();
+        let mut store = PreferenceStore::open(database.clone()).unwrap();
         assert_eq!(store.get().notifications.position, Corner::Top);
         store
             .update(
@@ -177,7 +169,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            PreferenceStore::open(database, dir.path())
+            PreferenceStore::open(database)
                 .unwrap()
                 .get()
                 .notifications
@@ -189,7 +181,7 @@ mod tests {
     fn mcp_starts_off_and_preferences_survive_restart_within_bounds() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
-        let mut store = PreferenceStore::open(database.clone(), dir.path()).unwrap();
+        let mut store = PreferenceStore::open(database.clone()).unwrap();
         assert!(!store.get().mcp);
         let input = |workspace: serde_json::Value| PreferencesInput {
             mcp: Some(true),
@@ -206,7 +198,7 @@ mod tests {
         assert!(store.update(input(serde_json::json!([1]))).is_err());
         let big = serde_json::json!({"x": "a".repeat(MAX_WORKSPACE_BYTES)});
         assert!(store.update(input(big)).is_err());
-        let store = PreferenceStore::open(database, dir.path()).unwrap();
+        let store = PreferenceStore::open(database).unwrap();
         assert!(store.get().mcp);
         assert_eq!(store.get().account.as_deref(), Some("work"));
         assert_eq!(store.get().workspace, Some(serde_json::json!({"root": {}})));
@@ -217,7 +209,7 @@ mod tests {
     fn accent_and_notifications_are_validated_and_kept() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
-        let mut store = PreferenceStore::open(database.clone(), dir.path()).unwrap();
+        let mut store = PreferenceStore::open(database.clone()).unwrap();
         assert_eq!(store.get().notifications, Notifications::default());
         let accent = |value: &str| PreferencesInput {
             mcp: None,
@@ -245,7 +237,7 @@ mod tests {
             serde_json::from_value::<Notifications>(serde_json::json!({"position": "middle"}))
                 .is_err()
         );
-        let mut store = PreferenceStore::open(database, dir.path()).unwrap();
+        let mut store = PreferenceStore::open(database).unwrap();
         assert_eq!(store.get().accent.as_deref(), Some("#7aa2f7"));
         assert_eq!(store.get().notifications, notifications);
         store.update(accent("")).unwrap();
