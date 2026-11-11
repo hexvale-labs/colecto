@@ -7,6 +7,8 @@ name: Release
 # tag, so only main saves them. Main rebuilds when dependencies or this workflow change, and
 # twice a week so a new stable toolchain is cached before the next release and GitHub does
 # not evict caches unused for 7 days. CI's prune-caches job deletes superseded entries.
+# Each Rust cache key includes a hash of the root Cargo.toml, so a [profile.*] change gets
+# new caches (rust-cache itself only notices dependency and lockfile changes).
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -93,7 +95,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: release-${{ matrix.target }}
+          shared-key: release-${{ matrix.target }}-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -169,7 +171,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: release-${{ matrix.triple }}
+          shared-key: release-${{ matrix.triple }}-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The Gradle version and Android plugins come from the Tauri CLI's project template.
@@ -273,7 +275,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: release-aarch64-apple-ios
+          shared-key: release-aarch64-apple-ios-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
