@@ -158,7 +158,11 @@ That file sets the public origin and absolute token-file path.
 headers and an explicit owner bearer. Cookie-only streaming is rejected; use
 a streaming HTTP client that can attach Authorization, not a cookie-dependent
 browser EventSource or a token in the URL. It starts with `ready`, then emits `mail` with `{account, ids}` for
-newly observed inbox IDs, and `resync` if a slow subscriber misses events. The
+newly observed inbox IDs, `approval` with `{id, account, from, subject}` when automation
+requests a send, `navigate` with `{target, account}` from MCP `app.navigate`, and `resync`
+if a slow subscriber misses events. Mail events follow polling and, where the provider
+supports it, IMAP IDLE or JMAP push, so new mail usually appears within seconds. The
+web client subscribes with `fetch` and shows these as in-app notifications. The
 stream is bounded and has no historical replay. Desktop notifications may be
 missed during disconnection; opening the client fetches the current mail state.
 The agent deliberately ignores initial `ready` and does not notify for old mail.
@@ -281,9 +285,16 @@ Input lines are limited to 512000 bytes and responses to 1000000 bytes; oversize
 messages fail rather than truncate. Redirects are disabled.
 
 Tools expose `account.read`, `messages.list`, `messages.read`, `drafts.list`,
-`drafts.read`, `drafts.write`, `labels.list`, `messages.label`, `messages.send` and `send.status`.
-Each takes `account`; reads/status also take `id`, writes/send take `draft`, and
-label updates take `label`. Message lists accept `folder` and `q`. Discovery
+`drafts.read`, `drafts.write`, `labels.list`, `messages.label`, `messages.send`, `send.status`
+and `app.navigate`. Each takes `account`; reads/status also take `id`, writes/send take
+`draft`, label updates take `label`, and navigation takes `target`. Message lists accept
+`folder` and `q`; `q` searches the provider by sender, subject and text.
+
+`app.navigate` needs the `app.navigate` capability, which only API keys can hold. It
+opens one of `NAVIGATION_TARGETS` (`inbox`, `drafts`, `sent`, `compose` or
+`settings/<section>`) in every connected Colecto window by broadcasting a `navigate`
+event; mail pages also switch those windows to the key's `account`. The result reports
+how many windows were listening. Discovery
 confers no grants. Invalid inputs and operation failures return structured tool
 errors; authentication failures use HTTP 401. No approval tool exists.
 

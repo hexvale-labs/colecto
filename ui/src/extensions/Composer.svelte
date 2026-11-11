@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import type { Draft, ComposerService, OutgoingAttachment } from '../lib/api';
   import Icon from '../Icon.svelte';
+  import { copyText } from '../lib/copy';
   let { connected, sender, draft, service, onback, ondirty, onbusy, onsaved }: {
     connected: boolean; sender: string; draft: Draft | null; service: ComposerService; onback: () => void;
     ondirty: (dirty: boolean) => void; onbusy: (busy: boolean) => void; onsaved: (draft: Draft) => void;
@@ -32,6 +33,12 @@
       reader.onerror = () => { error = `Could not read ${file.name}.`; };
       reader.readAsDataURL(file);
     }
+  }
+  let copied = $state<boolean | null>(null);
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+  async function copy() {
+    copied = await copyText(body);
+    clearTimeout(copiedTimer); copiedTimer = setTimeout(() => copied = null, 1600);
   }
   let saving = $state(false);
   let saved = $state(false);
@@ -83,6 +90,7 @@
     {#if error}<p class="error-box" role="alert">{error}</p>{/if}
     <footer class="compose-footer">
       {#if connected}<label class="tool attach-button" class:disabled={saving || sent}><Icon name="attach" /><span>Attach files</span><input class="sr-only" type="file" multiple disabled={saving || sent} onchange={attach} /></label>{/if}
+      <button class="tool" type="button" aria-label="Copy message text" title="Copy message text" disabled={!body} onclick={copy}><Icon name={copied ? 'check' : 'copy'} /><span>{copied === null ? 'Copy' : copied ? 'Copied' : 'Copy failed'}</span></button>
       <span class="save-state" class:pending={dirty && !saving && !sent} role="status">{sent ? 'Accepted by mail server' : sending ? 'Sending…' : saving ? 'Saving draft…' : dirty ? 'Unsaved changes' : saved ? 'Draft saved' : id ? 'Saved by your mail service' : connected ? 'Not saved yet' : 'Sending is unavailable for this account'}</span>
       <button class="secondary" data-command="save" type="submit" disabled={saving || sent || (!!id && !dirty)}>{saving && !sending ? 'Saving…' : 'Save draft'}</button>
       {#if connected}<button class="primary" type="button" disabled={saving || sent} data-command="send" onclick={send}>{sent ? 'Sent' : sending ? 'Sending…' : 'Send'}<Icon name="sent" size={14} /></button>{/if}

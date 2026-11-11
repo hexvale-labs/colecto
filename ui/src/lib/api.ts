@@ -71,10 +71,14 @@ export function createServices(account: string) {
 export type ReaderService = ReturnType<typeof createServices>['reader'];
 export type ComposerService = ReturnType<typeof createServices>['composer'];
 /** Owner preferences, stored by the Host in Turso. `workspace` is the dock layout. */
-export interface Preferences { mcp: boolean; account: string | null; workspace: unknown }
+export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right' | 'bottom' | 'bottom-left' | 'left';
+export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner }
+export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; notifications: NotificationPreferences }
+/** An empty accent restores the default. */
+export type PreferencesInput = Partial<Omit<Preferences, 'accent'>> & { accent?: string };
 export const hostService = {
   preferences: () => request<Preferences>('host', 'demo', '/preferences'),
-  savePreferences: (input: Partial<Preferences>) => request<Preferences>('host', 'demo', '/preferences', input),
+  savePreferences: (input: PreferencesInput) => request<Preferences>('host', 'demo', '/preferences', input),
   sendRequests: () => request<PendingSend[]>('host', 'demo', '/send-requests'),
   decideSend: (id: string, decision: 'approve' | 'reject') => request<PendingSend>('host', 'demo', `/send-requests/${encodeURIComponent(id)}/${decision}`, {}),
   apiKeys: () => request<ApiKey[]>('host', 'demo', '/api-keys'),
@@ -87,7 +91,7 @@ export const hostService = {
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 
-export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.label';
+export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.label' | 'app.navigate';
 export interface ExtensionState {
   manifest: { id: string; name: string; description: string; author: string; api_version: number; slot: string; capabilities: Capability[] };
   bundled: boolean;
@@ -96,7 +100,8 @@ export interface ExtensionState {
 }
 export interface ExtensionView { title: string; text: string; actions: string[] }
 export const extensionHost = {
-  install: (manifest: string, module: number[]) => request<boolean>('host', 'demo', '/extensions', { manifest, module }),
+  /** `pkg` is a .colectoext file: a zip with manifest.toml and module.wasm. */
+  install: (pkg: number[]) => request<boolean>('host', 'demo', '/extensions', { package: pkg }),
   remove: (id: string) => request<boolean>('host', 'demo', `/extensions/${encodeURIComponent(id)}`, {}, 'DELETE'),
   run: (account: string, id: string, action: string) => request<ExtensionView>('host', account, `/extensions/${encodeURIComponent(id)}/run`, { action }),
   list: (account: string) => request<ExtensionState[]>('host', account, '/extensions'),
@@ -108,3 +113,43 @@ export interface ApiKeyInput { name: string; accounts: string[]; capabilities: C
 export interface ApiKey extends ApiKeyInput { id: string; created_at: number; last_used_at: number | null; revoked_at: number | null }
 
 export interface PendingSend { id: string; requester: string; account: string; from: string; snapshot: DraftInput | null; created_at: number; expires_at: number; status: 'pending' | 'rejected' | 'expired' | 'submitting' | 'sent' | 'uncertain' }
+
+/**
+ * Follow the Host's server-sent events (`mail`, `approval`, `navigate`), reconnecting with backoff.
+ * Uses fetch rather than EventSource so the owner token can travel in a header. Returns a stop function.
+ */
+export function subscribeEvents(onevent: (name: string, data: unknown) => void): () => void {
+  const controller = new AbortController();
+  let delay = 1000;
+  void (async () => {
+    while (!controller.signal.aborted) {
+      try {
+        const response = await fetch('/api/v1/events', { credentials: 'omit', headers: headers('host', 'demo'), signal: controller.signal });
+        if (!response.ok || !response.body) throw new Error();
+        delay = 1000;
+        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += value;
+          if (buffer.length > 262_144) throw new Error('Event too large');
+          let end: number;
+          while ((end = buffer.search(/\r?\n\r?\n/)) >= 0) {
+            const block = buffer.slice(0, end); buffer = buffer.slice(end).replace(/^\r?\n\r?\n/, '');
+            let name = 'message'; const data: string[] = [];
+            for (const line of block.split(/\r?\n/)) {
+              if (line.startsWith('event:')) name = line.slice(6).trim();
+              else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+            }
+            try { onevent(name, JSON.parse(data.join('\n') || 'null')); } catch { /* Ignore malformed events. */ }
+          }
+        }
+      } catch { /* Reconnect below. */ }
+      if (controller.signal.aborted) return;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay = Math.min(delay * 2, 30_000);
+    }
+  })();
+  return () => controller.abort();
+}

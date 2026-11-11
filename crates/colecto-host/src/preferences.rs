@@ -1,4 +1,5 @@
-//! Owner preferences: the workspace layout, the selected account and whether MCP is on.
+//! Owner preferences: the workspace layout, the selected account, whether MCP is on,
+//! the accent colour and notification choices.
 //! The UI owns the layout's shape; the Host only bounds it, because it never acts on it.
 use colecto_core::Database;
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,44 @@ pub struct Preferences {
     pub mcp: bool,
     pub account: Option<String>,
     pub workspace: Option<serde_json::Value>,
+    /// `#rrggbb`; absent means the default mint.
+    pub accent: Option<String>,
+    pub notifications: Notifications,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "kebab-case")]
+pub enum Corner {
+    TopLeft,
+    Top,
+    TopRight,
+    Right,
+    BottomRight,
+    Bottom,
+    BottomLeft,
+    Left,
+}
+
+/// In-app notifications; `system` also uses the desktop's notifications while Colecto is unfocused.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct Notifications {
+    pub enabled: bool,
+    pub mail: bool,
+    pub approvals: bool,
+    pub system: bool,
+    pub position: Corner,
+}
+impl Default for Notifications {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mail: true,
+            approvals: true,
+            system: false,
+            position: Corner::BottomRight,
+        }
+    }
 }
 
 /// Fields that are present replace the stored ones.
@@ -22,6 +61,9 @@ pub struct PreferencesInput {
     pub mcp: Option<bool>,
     pub account: Option<String>,
     pub workspace: Option<serde_json::Value>,
+    /// An empty string restores the default accent.
+    pub accent: Option<String>,
+    pub notifications: Option<Notifications>,
 }
 
 fn validate(preferences: &Preferences) -> Result<(), String> {
@@ -37,6 +79,13 @@ fn validate(preferences: &Preferences) -> Result<(), String> {
             || serde_json::to_vec(workspace).map_or(true, |b| b.len() > MAX_WORKSPACE_BYTES))
     {
         return Err("Workspace layout must be an object of at most 64 KiB".into());
+    }
+    if preferences.accent.as_ref().is_some_and(|accent| {
+        accent.len() != 7
+            || !accent.starts_with('#')
+            || !accent[1..].bytes().all(|b| b.is_ascii_hexdigit())
+    }) {
+        return Err("Accent must be a #rrggbb colour".into());
     }
     Ok(())
 }
@@ -76,6 +125,12 @@ impl PreferenceStore {
         if let Some(workspace) = input.workspace {
             next.workspace = Some(workspace);
         }
+        if let Some(accent) = input.accent {
+            next.accent = (!accent.is_empty()).then_some(accent.to_ascii_lowercase());
+        }
+        if let Some(notifications) = input.notifications {
+            next.notifications = notifications;
+        }
         validate(&next)?;
         crate::store::save(&self.database, "preferences", &next)?;
         self.value = next;
@@ -97,6 +152,8 @@ mod tests {
             mcp: Some(true),
             account: Some("work".into()),
             workspace: Some(workspace),
+            accent: None,
+            notifications: None,
         };
         store
             .update(input(serde_json::json!({"root": {}})))
@@ -108,5 +165,43 @@ mod tests {
         assert!(store.get().mcp);
         assert_eq!(store.get().account.as_deref(), Some("work"));
         assert_eq!(store.get().workspace, Some(serde_json::json!({"root": {}})));
+    }
+
+    #[test]
+    fn accent_and_notifications_are_validated_and_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        let mut store = PreferenceStore::open(database.clone(), dir.path()).unwrap();
+        assert_eq!(store.get().notifications, Notifications::default());
+        let accent = |value: &str| PreferencesInput {
+            mcp: None,
+            account: None,
+            workspace: None,
+            accent: Some(value.into()),
+            notifications: None,
+        };
+        for invalid in ["red", "#12345", "#1234567", "#12345g", "url(#a)"] {
+            assert!(store.update(accent(invalid)).is_err(), "{invalid}");
+        }
+        store.update(accent("#7AA2F7")).unwrap();
+        let notifications: Notifications = serde_json::from_value(serde_json::json!({
+            "enabled": true, "mail": false, "approvals": true, "system": true, "position": "top-left"
+        }))
+        .unwrap();
+        store
+            .update(PreferencesInput {
+                notifications: Some(notifications.clone()),
+                ..accent("#7aa2f7")
+            })
+            .unwrap();
+        assert!(
+            serde_json::from_value::<Notifications>(serde_json::json!({"position": "middle"}))
+                .is_err()
+        );
+        let mut store = PreferenceStore::open(database, dir.path()).unwrap();
+        assert_eq!(store.get().accent.as_deref(), Some("#7aa2f7"));
+        assert_eq!(store.get().notifications, notifications);
+        store.update(accent("")).unwrap();
+        assert_eq!(store.get().accent, None);
     }
 }

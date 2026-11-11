@@ -132,11 +132,10 @@ test('command runner opens by keyboard, filters actions and searches drafts', as
   await page.getByRole('combobox', { name: 'Search commands' }).fill('drafts');
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog', { name: 'Commands' })).not.toBeVisible();
+  // Search follows typing; there is nothing to submit.
   await page.getByRole('searchbox').fill('absent words');
-  await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByText('No matching messages')).toBeVisible();
   await page.getByRole('searchbox').fill('local note');
-  await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.getByRole('button', { name: /Find this local note/ })).toBeVisible();
 });
 
@@ -296,7 +295,7 @@ test('docks panes by dragging onto edges and tab strips, keeps an open draft, an
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Extensions', exact: true }).click();
   await page.getByRole('group', { name: 'Account switcher' }).getByLabel('Show in the workspace').check();
-  await page.getByRole('button', { name: 'Back to mail', exact: true }).click();
+  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Accounts', exact: true })).toBeVisible();
   await page.keyboard.press('Control+k');
   await page.keyboard.type('layout reset');

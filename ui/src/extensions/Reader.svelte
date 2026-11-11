@@ -6,6 +6,7 @@
   import { onMount } from 'svelte';
   import type { Draft, Message, MessageContent, ReaderService, AttachmentInfo } from '../lib/api';
   import { replyDraft, type ReplyMode } from '../lib/reply';
+  import { copyText } from '../lib/copy';
   let { id, service, self = '', folder = 'Inbox', labels, labeling, labelError = '', onlabel, onback, onreply }: { labelError?: string; labels: Labels; labeling: boolean; onlabel: (name: string, remove: boolean) => void; id: string; folder?: string; self?: string; service: ReaderService; onback: () => void; onreply?: (draft: Draft) => void } = $props();
   let message = $state<Message | null>(null);
   let content = $state<MessageContent | null>(null);
@@ -43,6 +44,13 @@
       finally { contentLoading = false; }
     }
   }
+  let copied = $state<boolean | null>(null);
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+  async function copy() {
+    if (!message) return;
+    copied = await copyText(content?.text || message.body);
+    clearTimeout(copiedTimer); copiedTimer = setTimeout(() => copied = null, 1600);
+  }
   function reply(mode: ReplyMode) { if (message) onreply?.(replyDraft(mode, message, content, self)); }
   async function save(file: AttachmentInfo) {
     downloading = file.index; contentError = '';
@@ -66,6 +74,7 @@
       <button class="tool" aria-label="Reply all" title="Reply all" onclick={() => reply('all')}><Icon name="replyAll" /><span>Reply all</span></button>
       <button class="tool" aria-label="Forward" title="Forward" onclick={() => reply('forward')}><Icon name="forward" /><span>Forward</span></button>
     </div>{/if}
+    {#if message}<button class="tool copy-tool" class:push={!onreply} aria-label="Copy message text" title="Copy message text" onclick={copy}><Icon name={copied ? 'check' : 'copy'} /><span aria-live="polite">{copied === null ? 'Copy' : copied ? 'Copied' : 'Copy failed'}</span></button>{/if}
   </header>
   {#if loading}<div class="detail-state" role="status">Opening message…</div>
   {:else if error}<div class="detail-state"><p role="alert">{error}</p><button class="secondary" onclick={load}>Try again</button></div>

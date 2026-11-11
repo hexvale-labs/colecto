@@ -11,7 +11,7 @@
   let error = $state('');
   let status = $state('');
   let busy = $state(false);
-  const operations: Capability[] = ['account.read', 'messages.list', 'messages.read', 'messages.label', 'drafts.list', 'drafts.read', 'drafts.write', 'messages.send'];
+  const operations: Capability[] = ['account.read', 'messages.list', 'messages.read', 'messages.label', 'drafts.list', 'drafts.read', 'drafts.write', 'messages.send', 'app.navigate'];
   let mcp = $state<boolean | null>(null);
   async function reload() { keys = await hostService.apiKeys(); }
   onMount(() => {

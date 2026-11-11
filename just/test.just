@@ -11,7 +11,7 @@ rust:
 
 # Run UI unit tests without starting a browser or mail service.
 ui:
-    bun test ./ui/tests/api.test.mjs ./ui/tests/reply.test.mjs ./ui/tests/when.test.mjs ./ui/tests/layout.test.mjs
+    bun test ./ui/tests/api.test.mjs ./ui/tests/reply.test.mjs ./ui/tests/when.test.mjs ./ui/tests/layout.test.mjs ./ui/tests/navigation.test.mjs
 
 # Verify UI flows and restart persistence in browsers, with an isolated temporary data directory.
 browser:

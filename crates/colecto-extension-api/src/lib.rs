@@ -195,7 +195,25 @@ pub enum Capability {
     MessagesSend,
     #[serde(rename = "messages.label")]
     MessagesLabel,
+    /// Lets an API key move the owner's open Colecto windows to a page. Never granted to extensions.
+    #[serde(rename = "app.navigate")]
+    AppNavigate,
 }
+
+/// Pages that automation may open with `app.navigate`. The UI's navigator mirrors this list.
+pub const NAVIGATION_TARGETS: &[&str] = &[
+    "inbox",
+    "drafts",
+    "sent",
+    "compose",
+    "settings/accounts",
+    "settings/appearance",
+    "settings/notifications",
+    "settings/servers",
+    "settings/extensions",
+    "settings/api-keys",
+    "settings/send-approvals",
+];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -228,8 +246,8 @@ pub struct ExtensionPolicyInput {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtensionInstallInput {
-    pub manifest: String,
-    pub module: Vec<u8>,
+    /// A `.colectoext` package: a zip holding `manifest.toml` and `module.wasm`.
+    pub package: Vec<u8>,
 }
 
 #[derive(Deserialize)]

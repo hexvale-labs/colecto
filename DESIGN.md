@@ -55,8 +55,14 @@ Settings → Extensions. The layout is an owner preference in the Host's databas
 it follows you between devices. Panes stay mounted while they move or sit behind
 another tab, so rearranging never loses a draft.
 
-Settings replace the workspace with a section list and the section. Under 800 px the
-app shows one pane at a time, and folders become a bottom tab bar.
+Settings open as a card over the workspace, which stays mounted (and inert) behind a
+dimmed backdrop, so an open message or draft is still there when Settings close. The
+card has a section list, a breadcrumb and a close button; Escape or a click on the
+backdrop closes it. On phones the card fills the screen. Under 800 px the app shows one
+pane at a time, and folders become a bottom tab bar.
+
+Reordering groups that share a row or column keeps every group's size; only a drop that
+creates a new split divides space in half.
 
 Every pane must work tall, wide and in between. The mailbox, reader, composer and
 settings content size themselves with container queries (`mailbox`, `detail`,
@@ -85,8 +91,13 @@ Near-black and neutral, with just a breath of the brand's green; the mint accent
 | `--select` | Selected rows, active chips, notices |
 | `--line`, `--line-soft` | Hairlines; one elevation per element, border or shadow |
 | `--ink`, `--ink-2`, `--ink-3` | Primary, secondary and tertiary text (all at least 4.5:1) |
-| `--mint`, `--mint-hi` | Brand mint: primary actions, focus, selection node |
+| `--mint`, `--mint-hi` | The accent (brand mint by default): primary actions, focus, selection node |
 | `--danger`, `--danger-bg` | Errors only |
+
+The accent is the one colour the owner may change (Settings → Appearance). `--mint-hi`,
+`--mint-ink` and `--select` derive from it with `color-mix`, so a new accent recolours
+selection, notices and buttons consistently. Presets are light, low-chroma tones that read
+both as text and as a fill on the dark ground.
 
 Sender avatars take a stable hue from the address (`hue()` in `lib/initial.ts`), so
 the same correspondent is recognisable at a glance.
@@ -112,12 +123,33 @@ later, show it with weight, not another dot.
 ## Motion
 
 Follows Emil Kowalski's rules. Presses scale to 0.97. Listboxes grow from their
-trigger in 160 ms with a strong ease-out (`--ease-out`). The command palette opens
+trigger in about 200 ms with a strong ease-out (`--ease-out`), a 2 px blur that clears
+as they arrive, and leave in 120 ms back toward the trigger; the chosen option's check
+pops in. Typing a letter jumps to a matching option. The Settings card rises 6 px and
+scales from 0.97 in 220 ms. Notifications enter from the edge they are docked to,
+leave the same way, and the stack slides (FLIP) when one goes. The command palette opens
 instantly, because it is used hundreds of times a day. Docking previews slide
 between zones in 160 ms; resizing and tab switches do not animate. The palette closes
 on Escape or a click outside it. HTML mail fades
 in once its frame has painted, after a skeleton, instead of flashing an empty sheet. List and folder changes do
 not animate. `prefers-reduced-motion` removes every transition.
+
+## Feels native
+
+Colecto is an app window, not a page. The document never scrolls; every scroll area ends
+at its content (a browser test checks each pane and Settings section). Interface text is
+not selectable: only message text, inputs, identifiers in `code`, errors and anything
+marked `.selectable` are. Images, icons and links cannot be dragged around the window.
+Copy buttons sit in the reader toolbar and the composer footer.
+
+## Notifications
+
+In-app notifications cover new mail and automation waiting for send approval. Each has
+a close button; approvals carry Approve, Reject and Review and stay until acted on, while
+others leave after six seconds unless hovered or focused. Owners can turn them off
+entirely or by type, choose one of eight positions on a drawn window (corners and edge
+midpoints, never a screenshot), and opt into desktop notifications, which only fire while
+Colecto is in the background. Notifications stay above Settings.
 
 ## Controls
 

@@ -11,6 +11,8 @@ workspace = true
 [dependencies]
 rmcp.workspace = true
 toml.workspace = true
+zip.workspace = true
+flate2.workspace = true
 serde.workspace = true
 wasmi.workspace = true
 tauri = { workspace = true, optional = true }

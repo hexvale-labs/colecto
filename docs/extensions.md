@@ -19,10 +19,19 @@ names are self-reported metadata, not verified publisher identities.
 
 ## Install and run a third-party extension
 
-Run `just build extension` to compile the example's readable WAT source into
-`target/extensions/connection-panel.wasm`. Start `just run`, open **Extensions**,
-and select `extensions/examples/connection-panel/extension.toml` and that Wasm
-binary. Installation leaves the package disabled with no account grants. Enable
+Third-party extensions ship as one `.colectoext` file: a zip archive holding exactly
+`manifest.toml` (the manifest above, at most 8 KiB) and `module.wasm` (at most 64 KiB),
+with Stored or Deflate entries and at most 96 KiB in all. Anything else, including extra
+entries, paths, or entries that decompress past their limit, is rejected before the
+manifest is parsed. `colecto_host::package::write` builds one.
+
+Run `just build extension` to compile the example's readable WAT source and package it
+as `target/extensions/connection-panel.colectoext`. Start `just run`, open **Settings →
+Extensions**, pick that package and press **Install**. A warning explains that the
+permission system cannot stop an extension from lying about its purpose or misusing data
+it is allowed to read, and recommends open-source extensions from known authors; its
+Install button unlocks after five seconds. Installation leaves the package disabled with
+no account grants. Enable
 it, select the account, and explicitly grant `account.read`. Its **Connection
 panel** entry appears in mail navigation. Without that grant, the example shows a
 permission message; with the grant, it shows connection state. Revoke access or
@@ -103,7 +112,7 @@ fuel, one memory of at most 2 MiB, one table of at most 1,024 elements, eight
 service requests, 32 KiB per bridge input/output, 16 KiB view text, 256-byte
 title, sixteen actions of at most 128 bytes each. Traps and exhausted limits
 return an extension error without removing Host controls or saved mail. At most
-two invocations execute concurrently; each package is at most 64 KiB, each
+two invocations execute concurrently; each module is at most 64 KiB, each
 manifest at most 8 KiB, and at most sixteen third-party packages are installed.
 
 This is an in-process Wasm language/runtime sandbox, not OS process isolation or

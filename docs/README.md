@@ -142,7 +142,8 @@ Core accounts, the encrypted credential vault, drafts, local labels, and Inbox/S
 snapshots persist in one owner-local embedded Turso database, `colecto.db`.
 Account identifiers namespace records and snapshots inside that file; child mail
 stores share its connection handle. Host extension policy, API keys, send approvals and
-owner preferences (workspace layout, selected account, MCP switch) live in the same
+owner preferences (workspace layout, selected account, MCP switch, accent colour and
+notification choices) live in the same
 database; no application configuration is written as JSON files. The OS keyring, password-derived keys and process locks
 retain their roles outside Turso. Credential AAD and cleanup journals are preserved.
 
@@ -164,12 +165,16 @@ Cached lists and retained message reads use independent snapshots during network
 refresh. Provider searches remain online and do not replace full-folder snapshots. They are not encrypted. Provider-backed Inbox/Sent search and a bounded
 reader cache preserve open-message access when changing views. A successful IMAP
 UIDVALIDITY change invalidates the affected mailbox snapshot and retained reader
-data, including empty/search responses; failed provider queries preserve data. This is polling
-and caching, not a complete incremental sync engine. Provider flags, labels,
+data, including empty/search responses; failed provider queries preserve data. The Host polls
+every connected account and also keeps one push watcher per account whose last refresh
+succeeded: IMAP IDLE on a read-only Inbox, or JMAP push through the session's
+`eventSourceUrl`. A reported change refreshes that account at once and emits a `mail`
+event; servers without IDLE or push stay on polling. This is not a complete incremental
+sync engine. Provider flags, labels,
 full-history pagination, and offline mutations still need explicit contracts.
 
 The client uses a dark-only workspace of dockable panes that split like a game engine's
-editor (see `DESIGN.md`), one Settings screen,
+editor (see `DESIGN.md`), Settings as a card over the workspace,
 optional account profile names, and account-bound open-message tabs. Mobile layout is checked
 in browser tests; Android-native lifecycle, FCM, UnifiedPush, battery use, and
 physical-device keyboard behavior remain separate platform validation work.
@@ -178,7 +183,13 @@ Apple is outside the initial platform scope. Resource regression work uses
 
 ## Client productivity
 
-The desktop workspace exposes a searchable **Ctrl/Cmd+K** command runner. Local
+The desktop workspace exposes a searchable **Ctrl/Cmd+K** command runner. Pages the runner
+can open (folders, compose, every Settings section) come from one navigator,
+`ui/src/lib/navigation.ts`, which MCP `app.navigate` shares through
+`NAVIGATION_TARGETS` in the extension API. Search follows typing after a short pause
+and never refreshes the whole folder; clearing it restores the saved snapshot. In-app
+and desktop notifications for new mail and send approvals follow the owner's
+notification settings. Local
 account labels support create, assign, unassign, delete and filtering of current
 mail results. Inbox/Sent queries use the provider; drafts search recipient,
 subject and body locally. Labels do not synchronize with IMAP/JMAP. See
