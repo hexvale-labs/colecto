@@ -71,6 +71,8 @@ pub struct MailStore {
     drafts: Vec<Draft>,
     messages: Vec<Message>,
     reader_cache: Vec<Message>,
+    demo_folders: std::collections::BTreeMap<String, String>,
+    demo_mail: Vec<Message>,
     _lock: File,
     cache: MailCacheStore,
     snapshot: SnapshotHandle,
@@ -142,6 +144,8 @@ impl MailStore {
             drafts,
             messages: sample_messages(),
             reader_cache: Vec::new(),
+            demo_folders: std::collections::BTreeMap::new(),
+            demo_mail: sample_messages(),
             _lock: lock,
             account: None,
             account_key: None,
@@ -235,17 +239,181 @@ impl MailStore {
             key: self.account_key.clone()?,
         })
     }
+    pub fn set_flags(
+        &mut self,
+        ids: &[String],
+        seen: Option<bool>,
+        flagged: Option<bool>,
+    ) -> Result<(), Error> {
+        self.organize(ids, seen, flagged, None, false, None)
+    }
+    pub fn move_to(&mut self, ids: &[String], folder_id: &str) -> Result<(), Error> {
+        let folder = self
+            .folders()?
+            .into_iter()
+            .find(|folder| folder.id == folder_id)
+            .ok_or_else(|| Error::Invalid("Unknown folder".into()))?;
+        let preserve = match folder.role {
+            colecto_extension_api::FolderRole::Inbox => Some("inbox"),
+            colecto_extension_api::FolderRole::Sent => Some("sent"),
+            _ => None,
+        };
+        self.organize(ids, None, None, Some(folder_id), false, preserve)
+    }
+    pub fn archive(&mut self, ids: &[String]) -> Result<(), Error> {
+        let folder = self
+            .folders()?
+            .into_iter()
+            .find(|folder| folder.role == colecto_extension_api::FolderRole::Archive)
+            .ok_or_else(|| Error::Invalid("This account has no Archive folder".into()))?;
+        self.organize(ids, None, None, Some(&folder.id), false, None)
+    }
+    pub fn delete(&mut self, ids: &[String]) -> Result<(), Error> {
+        self.organize(ids, None, None, None, true, None)
+    }
+    fn organize(
+        &mut self,
+        ids: &[String],
+        seen: Option<bool>,
+        flagged: Option<bool>,
+        destination: Option<&str>,
+        delete: bool,
+        preserve_folder: Option<&str>,
+    ) -> Result<(), Error> {
+        if ids.is_empty() || ids.len() > 500 {
+            return Err(Error::Invalid(
+                "Supply between 1 and 500 message ids".into(),
+            ));
+        }
+        let unique: std::collections::BTreeSet<_> = ids.iter().cloned().collect();
+        let unique: Vec<_> = unique.into_iter().collect();
+        let ids = &unique;
+        let trash = if delete {
+            self.folders()?
+                .into_iter()
+                .find(|folder| folder.role == colecto_extension_api::FolderRole::Trash)
+                .map(|folder| folder.id)
+        } else {
+            None
+        };
+        match &self.account {
+            Some(Account::Imap(account)) => {
+                account.organize(ids, seen, flagged, destination, trash.as_deref(), delete)?
+            }
+            Some(Account::Jmap(account)) => {
+                account.organize(ids, seen, flagged, destination, trash.as_deref(), delete)?
+            }
+            None => {
+                if ids
+                    .iter()
+                    .any(|id| !self.demo_mail.iter().any(|message| &message.id == id))
+                {
+                    return Err(Error::Missing);
+                }
+                for id in ids {
+                    if delete
+                        && self
+                            .demo_folders
+                            .get(id)
+                            .is_some_and(|folder| folder == "trash")
+                    {
+                        self.demo_mail.retain(|message| &message.id != id);
+                    } else if let Some(target) = if delete { Some("trash") } else { destination } {
+                        self.demo_folders.insert(id.clone(), target.into());
+                    }
+                }
+                for message in self
+                    .demo_mail
+                    .iter_mut()
+                    .filter(|message| ids.contains(&message.id))
+                {
+                    if let Some(seen) = seen {
+                        message.seen = seen;
+                    }
+                    if let Some(flagged) = flagged {
+                        message.flagged = flagged;
+                    }
+                }
+            }
+        }
+        let change = |messages: &mut Vec<Message>, folder: &str| {
+            if (destination.is_some() && preserve_folder != Some(folder)) || delete {
+                messages.retain(|message| !ids.contains(&message.id));
+            } else {
+                for message in messages
+                    .iter_mut()
+                    .filter(|message| ids.contains(&message.id))
+                {
+                    if let Some(seen) = seen {
+                        message.seen = seen;
+                    }
+                    if let Some(flagged) = flagged {
+                        message.flagged = flagged;
+                    }
+                }
+            }
+        };
+        change(&mut self.messages, "inbox");
+        if self.account.is_none() {
+            self.messages = self
+                .demo_mail
+                .iter()
+                .filter(|message| {
+                    self.demo_folders
+                        .get(&message.id)
+                        .map(String::as_str)
+                        .unwrap_or("inbox")
+                        == "inbox"
+                })
+                .cloned()
+                .collect();
+        }
+
+        change(&mut self.reader_cache, "");
+        let mut snapshots = self.snapshot.write().map_err(storage)?;
+        for (folder, snapshot) in snapshots.iter_mut() {
+            change(&mut snapshot.messages, folder);
+            if self.account.is_none() && folder == "inbox" {
+                snapshot.messages = self.messages.clone();
+            }
+            if let Some(key) = &self.account_key {
+                self.cache.store(key, folder, &snapshot.messages)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Returns the last discovered folders when the provider is temporarily unavailable.
     pub fn folders(&mut self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
         use colecto_extension_api::{Folder, FolderRole};
         let Some(account) = &self.account else {
-            return Ok(vec![Folder {
-                id: "inbox".into(),
-                name: "Inbox".into(),
-                role: FolderRole::Inbox,
-                unread: self.messages.len() as u32,
-                total: self.messages.len() as u32,
-            }]);
+            return Ok([
+                ("inbox", "Inbox", FolderRole::Inbox),
+                ("archive", "Archive", FolderRole::Archive),
+                ("trash", "Trash", FolderRole::Trash),
+            ]
+            .into_iter()
+            .map(|(id, name, role)| {
+                let messages: Vec<_> = self
+                    .demo_mail
+                    .iter()
+                    .filter(|message| {
+                        self.demo_folders
+                            .get(&message.id)
+                            .map(String::as_str)
+                            .unwrap_or("inbox")
+                            == id
+                    })
+                    .collect();
+                Folder {
+                    id: id.into(),
+                    name: name.into(),
+                    role,
+                    unread: messages.iter().filter(|message| !message.seen).count() as u32,
+                    total: messages.len() as u32,
+                }
+            })
+            .collect());
         };
         let key = self.account_key.as_ref().ok_or(Error::Missing)?;
         let result = match account {
@@ -616,12 +784,35 @@ fn sample_messages() -> Vec<Message> {
         ("weekend", "Maya Chen", "maya@example.test", "A small plan for the weekend", "Hey,\n\nI found a little bookshop by the river. Coffee, a walk, and no particular agenda?\n\nLet me know what you think.\n\nMaya", "Nov 6"),
         ("notes", "Studio North", "studio@example.test", "Notes from our last conversation", "A few things to keep close:\n\n• Make room for the work that matters.\n• Keep the defaults simple.\n• Leave things better than you found them.\n\nSee you next week.", "Nov 5"),
         ("plaintext", "Alex Rivera", "alex@example.test", "Plain text, with a little character", "Hello 世界 👋\n\nMail should be readable, whatever language you write in.\n\nThis is text, not a button: <button>Do not click</button>\nAnd this is just text too: <script>alert('hello')</script>\n\nAlex", "Nov 4"),
-    ].into_iter().map(|(id,sender,address,subject,body,date)| Message { id:id.into(), sender:sender.into(), address:address.into(), subject:subject.into(), body:body.into(), date:date.into() }).collect()
+    ].into_iter().map(|(id,sender,address,subject,body,date)| Message { seen: id != "welcome", flagged: id == "weekend", id:id.into(), sender:sender.into(), address:address.into(), subject:subject.into(), body:body.into(), date:date.into() }).collect()
 }
 
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+    #[test]
+    fn demo_organizing_updates_lists_and_flags() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = MailStore::open(dir.path()).unwrap();
+        let ids = vec!["welcome".into()];
+        store.set_flags(&ids, Some(true), Some(true)).unwrap();
+        assert!(store.message("welcome").unwrap().seen);
+        assert!(store.message("welcome").unwrap().flagged);
+        store.archive(&ids).unwrap();
+        assert!(
+            !store
+                .query("inbox", "")
+                .unwrap()
+                .iter()
+                .any(|message| message.id == "welcome")
+        );
+        store.move_to(&ids, "inbox").unwrap();
+        store.delete(&[ids[0].clone(), ids[0].clone()]).unwrap();
+        store.delete(&ids).unwrap();
+        assert!(store.delete(&ids).is_err());
+        assert!(store.set_flags(&[], None, None).is_err());
+    }
+
     fn account() -> MailAccount {
         MailAccount {
             imap_host: "imap.example.test".into(),

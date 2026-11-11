@@ -34,15 +34,21 @@ pub(crate) fn http(host: Host) -> StreamableHttpService<MailMcp, LocalSessionMan
 struct Input {
     account: String,
     id: Option<String>,
+    ids: Option<Vec<String>>,
+    seen: Option<bool>,
+    flagged: Option<bool>,
     draft: Option<colecto_extension_api::DraftInput>,
     label: Option<colecto_extension_api::LabelInput>,
-    #[serde(default = "crate::inbox_folder")]
-    folder: String,
+    folder: Option<String>,
     #[serde(default)]
     q: String,
     target: Option<String>,
 }
 const TOOLS: &[&str] = &[
+    "messages.flags",
+    "messages.move",
+    "messages.archive",
+    "messages.delete",
     "account.read",
     "messages.list",
     "folders.list",
@@ -80,6 +86,11 @@ fn tool(name: &str) -> Tool {
         "drafts.write" | "messages.send" => required.push("draft"),
         "app.navigate" => required.push("target"),
         "messages.label" => required.push("label"),
+        "messages.flags" | "messages.archive" | "messages.delete" => required.push("ids"),
+        "messages.move" => {
+            required.push("ids");
+            required.push("folder");
+        }
         _ => {}
     }
     let schema = json!({
@@ -87,8 +98,11 @@ fn tool(name: &str) -> Tool {
         "properties":{
             "account":{"type":"string","minLength":1,"maxLength":128},
             "id":{"type":"string","minLength":1,"maxLength":256},
-            "folder":{"type":"string","enum":["inbox","sent"]},
+            "folder":{"type":"string"},
             "q":{"type":"string","maxLength":1024},
+            "ids":{"type":"array","minItems":1,"maxItems":500,"items":{"type":"string"}},
+            "seen":{"type":"boolean"},
+            "flagged":{"type":"boolean"},
             "target":{"type":"string","enum":colecto_extension_api::NAVIGATION_TARGETS},
             "draft":{
                 "type":"object", "additionalProperties":false,
@@ -141,6 +155,20 @@ impl MailMcp {
             };
         }
         match name {
+            "messages.flags" | "messages.move" | "messages.archive" | "messages.delete" => {
+                value!(crate::organize_messages(
+                    state,
+                    identity,
+                    headers,
+                    axum::extract::Path(name.trim_start_matches("messages.").to_owned()),
+                    Ok(axum::Json(crate::OrganizeInput {
+                        ids: input.ids.unwrap_or_default(),
+                        seen: input.seen,
+                        flagged: input.flagged,
+                        folder: input.folder
+                    }))
+                ))
+            }
             "account.read" => value!(crate::account(state, identity, headers)),
             "folders.list" => value!(crate::folders(state, identity, headers)),
             "messages.list" | "messages.refresh" => value!(crate::messages(
@@ -148,7 +176,7 @@ impl MailMcp {
                 identity,
                 headers,
                 axum::extract::Query(crate::MessageQuery {
-                    folder: input.folder,
+                    folder: input.folder.unwrap_or_else(crate::inbox_folder),
                     q: input.q
                 })
             )),
@@ -157,7 +185,7 @@ impl MailMcp {
                 identity,
                 headers,
                 axum::extract::Query(crate::MessageQuery {
-                    folder: input.folder,
+                    folder: input.folder.unwrap_or_else(crate::inbox_folder),
                     q: input.q
                 })
             )),

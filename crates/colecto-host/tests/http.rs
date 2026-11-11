@@ -1187,3 +1187,47 @@ async fn folders_require_message_list_permission() {
         }
     }
 }
+
+#[tokio::test]
+async fn organize_requires_permission_and_bounded_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = authenticated(app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    ))
+    .await;
+    for action in ["flags", "move", "archive", "delete"] {
+        let path = format!("/api/v1/messages/{action}");
+        for (extension, body, expected) in [
+            (
+                "composer",
+                serde_json::json!({"ids":["welcome"]}),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "inbox",
+                serde_json::json!({"ids":[]}),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "inbox",
+                serde_json::json!({"ids":vec!["welcome";501]}),
+                StatusCode::BAD_REQUEST,
+            ),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(request(
+                    "POST",
+                    &path,
+                    extension,
+                    "http://127.0.0.1:4173",
+                    &body.to_string(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected, "{action}: {extension}");
+        }
+    }
+}

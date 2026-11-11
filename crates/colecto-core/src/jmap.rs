@@ -236,6 +236,71 @@ impl JmapAccount {
             }
         }
     }
+    pub(crate) fn organize(
+        &self,
+        ids: &[String],
+        seen: Option<bool>,
+        flagged: Option<bool>,
+        destination: Option<&str>,
+        trash: Option<&str>,
+        delete: bool,
+    ) -> Result<(), Error> {
+        let session = self.session()?;
+        let mut update = serde_json::Map::new();
+        let mut destroy = Vec::new();
+        for id in ids {
+            let id = id
+                .strip_prefix("jmap-")
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| Error::Invalid("Invalid JMAP message id".into()))?;
+            let mut patch = json!({});
+            for (value, key) in [(seen, "keywords/$seen"), (flagged, "keywords/$flagged")] {
+                if let Some(value) = value {
+                    patch[key] = if value { json!(true) } else { Value::Null };
+                }
+            }
+            let mut target = destination;
+            if delete {
+                let data = session.call(
+                    "Email/get",
+                    json!({"ids":[id],"properties":["id","mailboxIds"]}),
+                )?;
+                let email = list(&data)?.first().ok_or(Error::Missing)?;
+                target = trash.filter(|trash| email["mailboxIds"][*trash] != true);
+                if target.is_none() {
+                    destroy.push(id);
+                    continue;
+                }
+            }
+            if let Some(target) = target {
+                patch["mailboxIds"] = json!({target:true});
+            }
+            update.insert(id.into(), patch);
+        }
+        let result = session.call("Email/set", json!({"update":update,"destroy":destroy}))?;
+        if result["notUpdated"]
+            .as_object()
+            .is_some_and(|v| !v.is_empty())
+            || result["notDestroyed"]
+                .as_object()
+                .is_some_and(|v| !v.is_empty())
+        {
+            return Err(failed());
+        }
+        if update.keys().any(|id| {
+            !result["updated"]
+                .as_object()
+                .is_some_and(|updated| updated.contains_key(id))
+        }) || destroy.iter().any(|id| {
+            !result["destroyed"]
+                .as_array()
+                .is_some_and(|destroyed| destroyed.iter().any(|value| value.as_str() == Some(id)))
+        }) {
+            return Err(failed());
+        }
+        Ok(())
+    }
+
     pub fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
         self.session()?.folders()
     }
@@ -411,7 +476,7 @@ impl Session<'_> {
             (
                 "Email/get",
                 json!({"#ids":{"resultOf":"0","name":"Email/query","path":"/ids"},
-                "properties":["id","from","subject","receivedAt","textBody","bodyValues"],
+                "properties":["id","from","subject","receivedAt","textBody","bodyValues","keywords"],
                 "fetchTextBodyValues":true,"maxBodyValueBytes":100000}),
             ),
         ])?;
@@ -572,6 +637,8 @@ fn parse_message(value: &Value) -> Result<Message, Error> {
         }
     }
     Ok(Message {
+        seen: value["keywords"]["$seen"].as_bool().unwrap_or(false),
+        flagged: value["keywords"]["$flagged"].as_bool().unwrap_or(false),
         id: format!("jmap-{}", field(value, "id")?),
         sender: from["name"]
             .as_str()
@@ -599,6 +666,14 @@ impl Drop for JmapAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn parses_seen_and_flagged_keywords() {
+        let message =
+            parse_message(&json!({"id":"a","keywords":{"$seen":true,"$flagged":true}})).unwrap();
+        assert!(message.seen && message.flagged);
+        let message = parse_message(&json!({"id":"a"})).unwrap();
+        assert!(!message.seen && !message.flagged);
+    }
     #[test]
     fn queries_provider_sent_mail_and_text_filter_in_requested_order() {
         use std::io::{BufRead, BufReader, Write};

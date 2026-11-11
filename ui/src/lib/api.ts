@@ -1,6 +1,6 @@
 // Version 1 wire contracts mirror colecto-extension-api. Rust validates all input.
 export type Labels = Record<string, string[]>;
-export interface Message { id: string; sender: string; address: string; subject: string; body: string; date: string }
+export interface Message { seen: boolean; flagged: boolean; id: string; sender: string; address: string; subject: string; body: string; date: string }
 export interface MailSnapshot { folder: string; messages: Message[]; fetched_at: number | null }
 export class ServiceError extends Error { constructor(message: string, readonly category: string, readonly status?: number) { super(message); this.name = 'ServiceError'; } }
 export interface Draft { id: string; recipient: string; cc?: string; subject: string; body: string; in_reply_to?: string; references?: string; forward_of?: string }
@@ -52,13 +52,21 @@ async function request<T>(extension: string, account: string, path: string, inpu
 export function createServices(account: string) {
   return {
     inbox: {
+      setFlags: (ids: string[], seen?: boolean, flagged?: boolean) => request<{ ok: true }>('inbox', account, '/messages/flags', { ids, seen, flagged }),
+      moveTo: (ids: string[], folder: string) => request<{ ok: true }>('inbox', account, '/messages/move', { ids, folder }),
+      archive: (ids: string[]) => request<{ ok: true }>('inbox', account, '/messages/archive', { ids }),
+      delete: (ids: string[]) => request<{ ok: true }>('inbox', account, '/messages/delete', { ids }),
       cached: (folder: 'inbox' | 'sent' = 'inbox') => request<MailSnapshot>('inbox', account, `/messages/cache?folder=${folder}`),
       labels: () => request<Labels>('inbox', account, '/labels'),
       connected: () => request<boolean>('inbox', account, '/account'),
       messages: (folder: 'inbox' | 'sent' = 'inbox', query = '') => { const params = new URLSearchParams(); if (folder !== 'inbox') params.set('folder', folder); if (query) params.set('q', query); return request<Message[]>('inbox', account, `/messages/refresh${params.size ? `?${params}` : ''}`, {}); },
       drafts: () => request<Draft[]>('inbox', account, '/drafts'),
     },
-    reader: { label: (name: string, message_id?: string, remove = false) => request<Labels>('reader', account, '/labels', { name, message_id, remove }), read: (id: string) => request<Message>('reader', account, `/messages/${encodeURIComponent(id)}`),
+    reader: {
+      setFlags: (ids: string[], seen?: boolean, flagged?: boolean) => request<{ ok: true }>('reader', account, '/messages/flags', { ids, seen, flagged }),
+      moveTo: (ids: string[], folder: string) => request<{ ok: true }>('reader', account, '/messages/move', { ids, folder }),
+      archive: (ids: string[]) => request<{ ok: true }>('reader', account, '/messages/archive', { ids }),
+      delete: (ids: string[]) => request<{ ok: true }>('reader', account, '/messages/delete', { ids }), label: (name: string, message_id?: string, remove = false) => request<Labels>('reader', account, '/labels', { name, message_id, remove }), read: (id: string) => request<Message>('reader', account, `/messages/${encodeURIComponent(id)}`),
       content: (id: string) => request<MessageContent>('reader', account, `/messages/${encodeURIComponent(id)}/content`),
       attachment: (id: string, index: number) => download('reader', account, `/messages/${encodeURIComponent(id)}/attachments/${index}`) },
     composer: {
@@ -68,7 +76,7 @@ export function createServices(account: string) {
     },
   };
 }
-export type ReaderService = ReturnType<typeof createServices>['reader'];
+export type ReaderService = Pick<ReturnType<typeof createServices>['reader'], 'read' | 'label' | 'content' | 'attachment'>;
 export type ComposerService = ReturnType<typeof createServices>['composer'];
 /** Owner preferences, stored by the Host in Turso. `workspace` is the dock layout. */
 export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right' | 'bottom' | 'bottom-left' | 'left';
@@ -91,7 +99,7 @@ export const hostService = {
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 
-export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.label' | 'app.navigate' | 'window.overlay';
+export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate' | 'window.overlay';
 export interface ExtensionState {
   manifest: { id: string; name: string; description: string; author: string; api_version: number; slot: string; z_index?: number; capabilities: Capability[] };
   bundled: boolean;

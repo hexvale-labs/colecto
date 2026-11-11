@@ -2,6 +2,6 @@ id = "reader"
 name = "Message reader"
 api_version = 1
 slot = "reader"
-capabilities = ["messages.read", "messages.label"]
+capabilities = ["messages.organize", "messages.read", "messages.label"]
 description = "Read messages, including sandboxed HTML and attachments."
 author = "Colecto"

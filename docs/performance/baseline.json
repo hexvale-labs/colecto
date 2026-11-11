@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "timestamp": "2026-11-11T11:01:11Z",
-  "commit": "0fcd85f16a8162bd2d8de1fac230722059c1f1cc",
-  "dirty": false,
-  "binary_sha256": "275f92af64eec03487933baeff8edca466e704cdb10292e8be149153c2071671",
-  "ui_sha256": "81f45ebe74e34ea451d161a1a7564a93fa6dfd63a3752f434292fe329a70759b",
+  "timestamp": "2026-11-11T15:50:49Z",
+  "commit": "ddb8b129a79aa2c048e9385a3b2683d03fa77427",
+  "dirty": true,
+  "binary_sha256": "776dcc0fbd0763e22f96adfa9a304cf717077b434de5ad8d98b5bba4283372fd",
+  "ui_sha256": "ff28fd06b86af6dcb3d548af7ac41ae1b68e086059ceaaf0de552a05592a6867",
   "machine": {
     "host": "armchair-vnic",
     "cpu": "aarch64",
@@ -20,63 +20,63 @@
     "binary": "colecto-host",
     "browser_driver": "1.65.0",
     "cpu_count": 2,
-    "worker_sha256": "c297c35185c20151bf367a88f1d0b321760c5bd8db47a39ea45f43421166b7d1",
+    "worker_sha256": "db338172b2a48f010df4749de61809bcf9314d43df01ca85385ca0951001e96a",
     "node": "v22.22.1"
   },
   "samples": [
     {
-      "elapsed_seconds": 10.392748662998201,
-      "daemon_cpu_seconds": 0.17,
+      "elapsed_seconds": 9.856546242997865,
+      "daemon_cpu_seconds": 0.26,
       "daemon_idle_cpu_seconds": 0.0,
-      "daemon_idle_rss_bytes": 51810304,
-      "daemon_retained_rss_bytes": 52158464,
-      "daemon_peak_rss_bytes": 52158464,
-      "daemon_rss_growth_bytes": 348160,
-      "browser_cpu_seconds": 6.54,
-      "browser_idle_cpu_seconds": 0.0,
-      "browser_idle_rss_bytes": 629661696,
-      "browser_retained_rss_bytes": 705835008,
-      "browser_peak_sampled_rss_bytes": 705835008,
-      "browser_rss_growth_bytes": 76173312
+      "daemon_idle_rss_bytes": 51978240,
+      "daemon_retained_rss_bytes": 52387840,
+      "daemon_peak_rss_bytes": 52387840,
+      "daemon_rss_growth_bytes": 409600,
+      "browser_cpu_seconds": 6.72,
+      "browser_idle_cpu_seconds": 0.019999999999999796,
+      "browser_idle_rss_bytes": 628899840,
+      "browser_retained_rss_bytes": 704409600,
+      "browser_peak_sampled_rss_bytes": 704409600,
+      "browser_rss_growth_bytes": 75509760
     },
     {
-      "elapsed_seconds": 7.7470148950014845,
-      "daemon_cpu_seconds": 0.16,
-      "daemon_idle_cpu_seconds": 0.0,
-      "daemon_idle_rss_bytes": 53075968,
-      "daemon_retained_rss_bytes": 54243328,
-      "daemon_peak_rss_bytes": 54243328,
-      "daemon_rss_growth_bytes": 1167360,
-      "browser_cpu_seconds": 6.13,
-      "browser_idle_cpu_seconds": 0.0,
-      "browser_idle_rss_bytes": 626876416,
-      "browser_retained_rss_bytes": 703938560,
-      "browser_peak_sampled_rss_bytes": 703938560,
-      "browser_rss_growth_bytes": 77062144
-    },
-    {
-      "elapsed_seconds": 7.550791449000826,
+      "elapsed_seconds": 7.5039154999976745,
       "daemon_cpu_seconds": 0.17,
       "daemon_idle_cpu_seconds": 0.0,
-      "daemon_idle_rss_bytes": 51650560,
-      "daemon_retained_rss_bytes": 51998720,
-      "daemon_peak_rss_bytes": 51998720,
-      "daemon_rss_growth_bytes": 348160,
-      "browser_cpu_seconds": 6.1899999999999995,
+      "daemon_idle_rss_bytes": 56225792,
+      "daemon_retained_rss_bytes": 56922112,
+      "daemon_peak_rss_bytes": 56922112,
+      "daemon_rss_growth_bytes": 696320,
+      "browser_cpu_seconds": 6.09,
       "browser_idle_cpu_seconds": 0.0,
-      "browser_idle_rss_bytes": 626053120,
-      "browser_retained_rss_bytes": 702984192,
-      "browser_peak_sampled_rss_bytes": 702984192,
-      "browser_rss_growth_bytes": 76931072
+      "browser_idle_rss_bytes": 629710848,
+      "browser_retained_rss_bytes": 705916928,
+      "browser_peak_sampled_rss_bytes": 705916928,
+      "browser_rss_growth_bytes": 76206080
+    },
+    {
+      "elapsed_seconds": 7.507900846001576,
+      "daemon_cpu_seconds": 0.17,
+      "daemon_idle_cpu_seconds": 0.0,
+      "daemon_idle_rss_bytes": 54202368,
+      "daemon_retained_rss_bytes": 54980608,
+      "daemon_peak_rss_bytes": 54980608,
+      "daemon_rss_growth_bytes": 778240,
+      "browser_cpu_seconds": 6.18,
+      "browser_idle_cpu_seconds": 0.010000000000000009,
+      "browser_idle_rss_bytes": 627523584,
+      "browser_retained_rss_bytes": 706265088,
+      "browser_peak_sampled_rss_bytes": 706265088,
+      "browser_rss_growth_bytes": 78741504
     }
   ],
   "summary": {
     "elapsed_seconds": {
-      "mean": 8.563518335666837,
-      "median": 7.7470148950014845
+      "mean": 8.289454196332372,
+      "median": 7.507900846001576
     },
     "daemon_cpu_seconds": {
-      "mean": 0.16666666666666669,
+      "mean": 0.2,
       "median": 0.17
     },
     "daemon_idle_cpu_seconds": {
@@ -84,44 +84,44 @@
       "median": 0.0
     },
     "daemon_idle_rss_bytes": {
-      "mean": 52178944,
-      "median": 51810304
+      "mean": 54135466.666666664,
+      "median": 54202368
     },
     "daemon_retained_rss_bytes": {
-      "mean": 52800170.666666664,
-      "median": 52158464
+      "mean": 54763520,
+      "median": 54980608
     },
     "daemon_peak_rss_bytes": {
-      "mean": 52800170.666666664,
-      "median": 52158464
+      "mean": 54763520,
+      "median": 54980608
     },
     "daemon_rss_growth_bytes": {
-      "mean": 621226.6666666666,
-      "median": 348160
+      "mean": 628053.3333333334,
+      "median": 696320
     },
     "browser_cpu_seconds": {
-      "mean": 6.286666666666666,
-      "median": 6.1899999999999995
+      "mean": 6.33,
+      "median": 6.18
     },
     "browser_idle_cpu_seconds": {
-      "mean": 0.0,
-      "median": 0.0
+      "mean": 0.009999999999999934,
+      "median": 0.010000000000000009
     },
     "browser_idle_rss_bytes": {
-      "mean": 627530410.6666666,
-      "median": 626876416
+      "mean": 628711424,
+      "median": 628899840
     },
     "browser_retained_rss_bytes": {
-      "mean": 704252586.6666666,
-      "median": 703938560
+      "mean": 705530538.6666666,
+      "median": 705916928
     },
     "browser_peak_sampled_rss_bytes": {
-      "mean": 704252586.6666666,
-      "median": 703938560
+      "mean": 705530538.6666666,
+      "median": 705916928
     },
     "browser_rss_growth_bytes": {
-      "mean": 76722176,
-      "median": 76931072
+      "mean": 76819114.66666667,
+      "median": 76206080
     }
   }
 }
