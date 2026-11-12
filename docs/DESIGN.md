@@ -32,7 +32,9 @@ In practical terms:
 ## Layout
 
 A slim top bar, then the workspace, flush to the window edges. Nothing floats on the
-ground: panes meet at 1px separators, like the panels of a game engine's editor.
+ground: draw each boundary once; prefer spacing and tone over lines. Dock splitters
+provide the single divider between adjacent panes. Pane headers and list footers
+use spacing rather than additional rules.
 
 - **Top bar**: brand on the left, the command palette trigger (`Ctrl K`) centred, and
   Settings on the right. These are host controls and do not move. Compose joins them
@@ -159,3 +161,19 @@ more than a few options, and a segmented control for two or three. Checkboxes,
 switches, file pickers (`FilePick.svelte`: a labelled drop zone over the native
 input) and scrollbars are themed from the palette. Icons come from
 `Icon.svelte` (Lucide paths, one stroke weight).
+
+## Connection status and startup
+
+`--status-online` is a calm green independent of the configurable accent. Connected
+account dots use it with a subtle 2400 ms expanding ring (scale 1 to 2.4, opacity
+0.5 to 0). Disconnected dots stay neutral. Reduced motion disables the ring.
+
+Desktop message tabs share the dock header with the Reader tab; its drag handle,
+arrange menu and pane semantics remain available. Compact mode keeps message tabs
+inside the reader because it has no dock header. Tab strips scroll horizontally.
+
+The static `index.html` startup overlay paints before mounting, with a two-frame
+paint checkpoint. It stays for at least 800 ms after that checkpoint and until a
+usable app surface exists, then fades over 200 ms with ease-out without moving the
+layout. Reduced motion removes the fade. Automated browsers can set sessionStorage
+`colecto.fastStartup` to `1` to skip timing; normal browsers ignore that hook.
