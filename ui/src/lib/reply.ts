@@ -7,13 +7,15 @@ const bare = (entry: string) => (entry.match(/<([^>]+)>/)?.[1] ?? entry).trim().
 const split = (list: string) => (list.match(/(?:"[^"]*"|[^,])+/g) ?? []).map(entry => entry.trim()).filter(Boolean);
 const prefixed = (prefix: string, subject: string) => new RegExp(`^${prefix}:`, 'i').test(subject.trim()) ? subject : `${prefix}: ${subject}`;
 const encoder = new TextEncoder();
+// The server accepts 100,000 UTF-8 bytes per body; keep 20,000 free for the owner's own text.
+const PREFILL_BYTES = 80_000;
 function limitedBody(header: string, text: string, quoted = false): string {
   let result = '';
   let bytes = 0;
   // Iterate code points so truncation never separates an emoji's surrogate pair.
   for (const point of header + (quoted ? '> ' : '') + text.replace(/\n/g, quoted ? '\n> ' : '\n')) {
     const size = encoder.encode(point).length;
-    if (bytes + size > 100_000) break;
+    if (bytes + size > PREFILL_BYTES) break;
     result += point; bytes += size;
   }
   return result;

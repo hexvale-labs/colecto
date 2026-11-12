@@ -26,7 +26,8 @@ for (const mode of ['reply', 'forward']) {
   for (const text of ['界'.repeat(33_333), '😀'.repeat(30_000), '界\n😀\n'.repeat(20_000)]) {
     test(`${mode} budgets UTF-8 headers and quote prefixes (${text.slice(0, 2)})`, () => {
       const body = replyDraft(mode, message, { ...content, text }, 'me@example.test').body;
-      expect(new TextEncoder().encode(body).length).toBeLessThanOrEqual(100_000);
+      // 80,000 bytes of prefill leaves room under the 100,000-byte server limit for the reply itself.
+      expect(new TextEncoder().encode(body).length).toBeLessThanOrEqual(80_000);
       expect(body).not.toMatch(/[\uD800-\uDBFF]$/u);
       expect(body).not.toContain('�');
       expect(body).toContain(mode === 'reply' ? '> 界'.replace('界', [...text][0]) : 'Forwarded message');
