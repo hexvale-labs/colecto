@@ -126,8 +126,9 @@ is only for real identifiers such as extension capabilities.
 
 The selected message carries a small, softly glowing mint dot, the same
 incoming-message node as in the logo. It means "this is the one you are reading".
-The same mint marks the active pane tab's icon and underline, a connected account's
-status dot (its glow is never clipped) and the drop preview while docking. The welcome
+The same mint marks the active pane tab's icon and underline and the drop preview
+while docking. A connected account's status dot is the one exception: it is always
+green (see below), whatever the accent. The welcome
 mark sits plainly in the empty reader, without a glow. Empty states may be a little warm (a time-of-day
 greeting, a dry line when there are no API keys) but stay short. If unread state is added
 later, show it with weight, not another dot.
@@ -182,7 +183,8 @@ Desktop message tabs share the dock header with the Reader tab; its drag handle,
 arrange menu and pane semantics remain available. Compact mode keeps message tabs
 inside the reader because it has no dock header. Tab strips scroll horizontally.
 
-The static `index.html` startup overlay paints before mounting, with a two-frame
+The static `index.html` startup splash (the full logo on `--ground`; the wordmark is
+vector, so it needs no web font) paints before mounting, with a two-frame
 paint checkpoint. It stays for at least 800 ms after that checkpoint and until a
 usable app surface exists, then fades over 200 ms with ease-out without moving the
 layout. Reduced motion removes the fade. Automated browsers can set sessionStorage
