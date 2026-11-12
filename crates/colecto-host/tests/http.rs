@@ -1233,3 +1233,97 @@ async fn organize_requires_permission_and_bounded_ids() {
         }
     }
 }
+
+#[tokio::test]
+async fn removal_is_host_only_and_clears_selected_account() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = authenticated(app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    ))
+    .await;
+    let call = |method: &str, path: &str, extension: &str, body: &str| {
+        request(method, path, extension, "http://127.0.0.1:4173", body)
+    };
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(call(
+                "POST",
+                "/api/v1/security",
+                "host",
+                r#"{"action":"protect","password":"a strong master password"}"#
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let response = router.clone().oneshot(call("POST", "/api/v1/accounts", "host", r#"{"name":"Work","address":"work@example.test","protocol":"imap","imap_host":"imap.example.test","smtp_host":"smtp.example.test","username":"work","secret":"secret"}"#)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let info: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 200000).await.unwrap()).unwrap();
+    let id = info["id"].as_str().unwrap();
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(call(
+                "POST",
+                "/api/v1/preferences",
+                "host",
+                &format!(r#"{{"account":"{id}"}}"#)
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let path = format!("/api/v1/accounts/{id}");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(call("DELETE", &path, "inbox", ""))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    let response = router
+        .clone()
+        .oneshot(call("DELETE", &path, "host", ""))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(response.into_body(), 200000)
+            .await
+            .unwrap()
+            .as_ref(),
+        b"true"
+    );
+    let response = router
+        .clone()
+        .oneshot(call("GET", "/api/v1/accounts", "host", ""))
+        .await
+        .unwrap();
+    let accounts: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 200000).await.unwrap()).unwrap();
+    assert!(!accounts.as_array().unwrap().iter().any(|a| a["id"] == id));
+    let response = router
+        .clone()
+        .oneshot(call("GET", "/api/v1/preferences", "host", ""))
+        .await
+        .unwrap();
+    let prefs: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 200000).await.unwrap()).unwrap();
+    assert!(prefs["account"].is_null());
+    assert_eq!(
+        router
+            .oneshot(call("DELETE", "/api/v1/accounts/demo", "host", ""))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+}

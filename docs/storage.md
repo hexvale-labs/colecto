@@ -58,3 +58,10 @@ accounts or provider settings cannot expose a previous provider's folders.
 `MailStore::folders()` falls back to that list when discovery fails; a failed
 discovery never overwrites it. Counts describe the last successful discovery,
 not necessarily the current server state.
+
+Account removal commits the registry and secret deletion before cleaning local
+storage. It deletes `snapshots` and `mailbox_identity` rows for that account and
+tombstones all records in `account:{id}` (drafts, labels and folders), retaining
+initialization markers to prevent legacy reimport. Cleanup is transactional and
+retry-safe through `Database::remove_account_data`; a cleanup failure does not
+restore the removed account. Other accounts and mail-server data are untouched.

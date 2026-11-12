@@ -115,6 +115,18 @@ JMAP server, the Cyrus test server in Docker, then receives it, searches for it,
 downloads the attachment and finds it in Sent. Push is covered by unit tests, because
 that server does not emit push events.
 
+## Remove an account
+
+The owner-only `DELETE /api/v1/accounts/{id}` removes the saved account and its
+credentials, cached mail, local drafts, labels and folder catalog on this device.
+It does not change anything on the mail server. Unlock credentials first; the
+sample account cannot be removed. The selected-account preference is cleared if
+it points to this account. Removal is not exposed through MCP.
+
+Disconnect (`POST /api/v1/accounts/{id}/disconnect`) forgets credentials but keeps
+the account record and local data for reconnecting later. The current settings
+Remove icon still performs this disconnect operation.
+
 ## Optional master password
 
 In **Settings → Accounts → Credential protection**, enable password protection with a
@@ -192,7 +204,7 @@ below the root and 1000 total parts. Messages exceeding either limit fail decodi
 including during background refresh. Body and attachment readers share this check.
 Malformed non-ASCII IMAP folder IDs return a missing-message error.
 
-Disconnect, vault lock/reset and account reconfiguration revoke push watcher
+Removal, disconnect, vault lock/reset and account reconfiguration revoke push watcher
 credentials without waiting, and revoked watchers cannot start another wait. A push
 wait already in progress (IMAP IDLE or a JMAP event stream, up to ten minutes) cannot
 be interrupted, so it keeps its own credential copy until it returns; the copy is then

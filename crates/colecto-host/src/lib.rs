@@ -182,6 +182,7 @@ fn build_app(host: Host, assets: Assets) -> Router {
         .route("/bus/replies/{id}", axum::routing::post(bus::reply_http))
         .route("/extensions/{id}/run", axum::routing::post(run_extension))
         .route("/accounts", get(list_accounts).post(upsert_account))
+        .route("/accounts/{id}", axum::routing::delete(remove_account))
         .route(
             "/accounts/{id}/disconnect",
             axum::routing::post(disconnect_account),
@@ -1019,6 +1020,24 @@ async fn upsert_account(
     with_accounts(host, move |a| a.upsert(input))
         .await
         .map(Json)
+}
+async fn remove_account(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<bool>, Failure> {
+    host_grant(&headers)?;
+    tokio::task::spawn_blocking(move || {
+        host.accounts.lock().map_err(|_| forbidden())?.remove(&id)?;
+        host.preferences
+            .lock()
+            .map_err(|_| forbidden())?
+            .clear_account(&id)
+            .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+        Ok(Json(true))
+    })
+    .await
+    .map_err(|_| forbidden())?
 }
 async fn disconnect_account(
     State(host): State<Host>,

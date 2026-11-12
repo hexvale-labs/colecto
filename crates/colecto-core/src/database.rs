@@ -155,6 +155,29 @@ impl Database {
         validate(namespace, name, version, &[])?;
         self.write_record(namespace, name, version, None)
     }
+    /// Delete local account data. Safe to retry after a partial removal.
+    pub fn remove_account_data(&self, account: &str) -> Result<(), Error> {
+        let namespace = format!("account:{account}");
+        let mut connection = self.connection()?;
+        futures_executor::block_on(async {
+            let transaction = connection.transaction().await.map_err(storage)?;
+            for sql in [
+                "DELETE FROM snapshots WHERE account=?1",
+                "DELETE FROM mailbox_identity WHERE account=?1",
+            ] {
+                transaction.execute(sql, [account]).await.map_err(storage)?;
+            }
+            // Keep initialization markers so legacy files cannot resurrect deleted data.
+            transaction
+                .execute(
+                    "UPDATE records SET value=NULL WHERE namespace=?1",
+                    [namespace.as_str()],
+                )
+                .await
+                .map_err(storage)?;
+            transaction.commit().await.map_err(storage)
+        })
+    }
     fn write_record(
         &self,
         namespace: &str,
