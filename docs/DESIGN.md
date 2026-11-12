@@ -55,6 +55,13 @@ Settings → Extensions. The layout is an owner preference in the Host's databas
 it follows you between devices. Panes stay mounted while they move or sit behind
 another tab, so rearranging never loses a draft.
 
+Settings controls follow the value's shape: a switch for on/off, a segmented control
+for two to four choices, a list for more, and a slider (`.slider`, accent-filled up to
+the thumb) for a bounded number, with the current value beside its label and the ends
+underneath. Settings save as they change; there is no Save button. An extension's own
+settings page (`ExtensionSettings.svelte`) renders its manifest's `[[settings]]` with
+these same controls.
+
 Settings open as a card over the workspace, which stays mounted (and inert) behind a
 dimmed backdrop, so an open message or draft is still there when Settings close. The
 card has a section list, a breadcrumb and a close button; Escape or a click on the
@@ -107,7 +114,10 @@ the same correspondent is recognisable at a glance.
 Mona Sans (variable weight and width, bundled through Fontsource so the desktop app
 works offline). UI text is 13 to 14 px; message bodies are 15.5 px with 1.68 line
 height and a 68ch measure. Headings use a slightly wider width (`font-stretch`
-106 to 108 %) rather than a second typeface. No all-caps eyebrow labels. Monospace
+106 to 108 %) rather than a second typeface. No all-caps eyebrow labels, with one
+exception: the Settings section list groups its pages under small uppercase *Built-in*
+and *Extensions* labels (written in normal case, uppercased with CSS so screen readers
+read words). Monospace
 is only for real identifiers such as extension capabilities.
 
 ## Signature

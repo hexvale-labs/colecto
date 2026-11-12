@@ -418,6 +418,25 @@ input[type='checkbox']:checked { border-color: var(--mint); background: var(--mi
 .switch input[type='checkbox']::before { content: ''; position: absolute; left: 3px; top: 3px; width: 15px; height: 15px; border-radius: 50%; background: var(--ink-2); transition: transform 180ms var(--ease-out), background-color 180ms ease; }
 .switch input[type='checkbox']:checked { background: var(--mint); }
 .switch input[type='checkbox']:checked::before { transform: translateX(15px); background: var(--mint-ink); }
+/* Sliders: a thin track filled with the accent up to the thumb (`--fill`, set inline). */
+.slider { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 20px; margin: 0; background: transparent; cursor: pointer; }
+.slider::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: linear-gradient(to right, var(--mint) var(--fill, 0%), var(--control) var(--fill, 0%)); }
+.slider::-moz-range-track { height: 4px; border-radius: 999px; background: var(--control); }
+.slider::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--mint); }
+.slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: var(--ink); box-shadow: 0 1px 3px oklch(0 0 0 / 0.5); transition: transform 140ms var(--ease-out); }
+.slider::-moz-range-thumb { width: 16px; height: 16px; border: 0; border-radius: 50%; background: var(--ink); box-shadow: 0 1px 3px oklch(0 0 0 / 0.5); transition: transform 140ms var(--ease-out); }
+.slider:active::-webkit-slider-thumb { transform: scale(1.12); }
+.slider:active::-moz-range-thumb { transform: scale(1.12); }
+.slider:focus-visible { outline: none; }
+.slider:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--mint); outline-offset: 2px; }
+.slider:focus-visible::-moz-range-thumb { outline: 2px solid var(--mint); outline-offset: 2px; }
+/* Settings sections list: Built-in pages, then third-party extensions. */
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-group + .nav-group { margin-top: 14px; }
+.nav-group-label { padding: 4px 10px 6px; color: var(--ink-3); font-size: 11px; font-weight: 620; letter-spacing: 0.08em; text-transform: uppercase; }
+.nav-badge { display: grid; place-items: center; width: 18px; height: 18px; flex-shrink: 0; border-radius: 5px; background: var(--control); color: var(--ink-2); font-size: 10.5px; font-weight: 680; }
+.nav-item.active .nav-badge { background: var(--select); color: var(--mint-hi); }
+.nav-item .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .extension-panel .settings-body { padding: 8px 32px 64px; }
 @container settings (max-width: 600px) {
   .settings-page { padding: 24px 18px 80px; }
@@ -521,6 +540,9 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
   .settings-window { display: flex; flex-direction: column; width: 100%; height: 100%; border: 0; border-radius: 0; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
   .settings-nav { flex-direction: row; flex: none; order: 2; gap: 4px; padding: 6px 8px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line-soft); scrollbar-width: none; }
   .settings-nav h1 { display: none; }
+  .nav-group { flex-direction: row; gap: 4px; }
+  .nav-group + .nav-group { margin: 0; padding-left: 4px; border-left: 1px solid var(--line-soft); }
+  .nav-group-label { display: none; }
   .settings-main { display: contents; }
   .settings-head { order: 1; height: 54px; padding-left: 16px; }
   .settings-page { order: 3; padding: 20px 16px calc(32px + env(safe-area-inset-bottom)); }

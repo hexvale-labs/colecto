@@ -313,37 +313,51 @@ pub struct SettingOption {
     pub value: String,
     pub label: String,
 }
+/// The control an owner uses for one extension setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SettingKind {
+    Toggle,
+    Range,
+    Choice,
+    Text,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtensionSetting {
     pub key: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(rename = "type")]
-    pub kind: String,
+    pub kind: SettingKind,
     pub default: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<Vec<SettingOption>>,
 }
 impl ExtensionSetting {
     pub fn accepts(&self, value: &serde_json::Value) -> bool {
-        match self.kind.as_str() {
-            "toggle" => value.is_boolean(),
-            "text" => value.is_string(),
-            "choice" => value.as_str().is_some_and(|v| {
+        match self.kind {
+            SettingKind::Toggle => value.is_boolean(),
+            SettingKind::Text => value.is_string(),
+            SettingKind::Choice => value.as_str().is_some_and(|v| {
                 self.options
                     .as_ref()
                     .is_some_and(|o| o.iter().any(|o| o.value == v))
             }),
-            "range" => value.as_f64().is_some_and(|v| {
+            SettingKind::Range => value.as_f64().is_some_and(|v| {
                 v.is_finite()
                     && self.min.is_some_and(|min| v >= min)
                     && self.max.is_some_and(|max| v <= max)
             }),
-            _ => false,
         }
     }
 }
@@ -353,7 +367,7 @@ pub fn validate_settings(settings: &[ExtensionSetting]) -> Result<(), String> {
         return Err("At most 16 settings allowed".into());
     }
     for s in settings {
-        let range = s.kind == "range";
+        let range = s.kind == SettingKind::Range;
         if s.key.is_empty()
             || s.key.len() > 32
             || !s
@@ -372,8 +386,8 @@ pub fn validate_settings(settings: &[ExtensionSetting]) -> Result<(), String> {
                     || !s.max.is_some_and(f64::is_finite)
                     || s.min > s.max
                     || s.step.is_some_and(|n| !n.is_finite() || n <= 0.0)))
-            || (s.kind != "choice" && s.options.is_some())
-            || (s.kind == "choice"
+            || (s.kind != SettingKind::Choice && s.options.is_some())
+            || (s.kind == SettingKind::Choice
                 && !s.options.as_ref().is_some_and(|o| {
                     let mut values = std::collections::HashSet::new();
                     (2..=8).contains(&o.len())

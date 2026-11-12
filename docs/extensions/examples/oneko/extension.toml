@@ -10,12 +10,13 @@ z_index = 10000
 [[settings]]
 key = "speed"
 label = "Running speed"
+description = "How far the cat moves with each step."
 type = "range"
 default = 10
 min = 2
 max = 30
 step = 1
-unit = "px/frame"
+unit = "px"
 
 [[settings]]
 key = "opacity"
@@ -30,6 +31,7 @@ unit = "%"
 [[settings]]
 key = "stop_distance"
 label = "Stop distance"
+description = "How close the cat gets to your pointer before it sits down."
 type = "range"
 default = 44
 min = 24
