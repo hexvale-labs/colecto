@@ -467,6 +467,8 @@ impl Accounts {
 mod storage_tests {
     use super::*;
     #[test]
+    // The fixture writes rows on a single-threaded block_on; nothing else contends for the lock.
+    #[allow(clippy::await_holding_lock)]
     fn removal_deletes_only_the_selected_accounts_data() {
         struct NoKeys;
         impl SecretStore for NoKeys {

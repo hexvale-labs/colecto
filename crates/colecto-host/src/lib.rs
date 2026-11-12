@@ -1377,6 +1377,41 @@ async fn approve_send(
     .map_err(|_| approval_failure("Delivery outcome uncertain; do not retry".into()))?
 }
 
+async fn get_extension_settings(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    host.extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .settings(&id)
+        .map(Json)
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))
+}
+async fn put_extension_settings(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    input: Result<Json<serde_json::Map<String, serde_json::Value>>, JsonRejection>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    let Json(values) =
+        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid settings".into()))?;
+    let result = host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .update_settings(&id, values)
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+    let _ = host.events.send((
+        "extension.settings",
+        serde_json::json!({"id":id}).to_string(),
+    ));
+    Ok(Json(result))
+}
+
 #[cfg(test)]
 mod extension_service_tests {
     use super::*;
@@ -1548,39 +1583,4 @@ mod extension_service_tests {
         release_tx.send(()).unwrap();
         busy.join().unwrap();
     }
-}
-
-async fn get_extension_settings(
-    State(host): State<Host>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, Failure> {
-    host_grant(&headers)?;
-    host.extensions
-        .lock()
-        .map_err(|_| forbidden())?
-        .settings(&id)
-        .map(Json)
-        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))
-}
-async fn put_extension_settings(
-    State(host): State<Host>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-    input: Result<Json<serde_json::Map<String, serde_json::Value>>, JsonRejection>,
-) -> Result<Json<serde_json::Value>, Failure> {
-    host_grant(&headers)?;
-    let Json(values) =
-        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid settings".into()))?;
-    let result = host
-        .extensions
-        .lock()
-        .map_err(|_| forbidden())?
-        .update_settings(&id, values)
-        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
-    let _ = host.events.send((
-        "extension.settings",
-        serde_json::json!({"id":id}).to_string(),
-    ));
-    Ok(Json(result))
 }
