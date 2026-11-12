@@ -159,3 +159,22 @@ more than a few options, and a segmented control for two or three. Checkboxes,
 switches, file pickers (`FilePick.svelte`: a labelled drop zone over the native
 input) and scrollbars are themed from the palette. Icons come from
 `Icon.svelte` (Lucide paths, one stroke weight).
+
+## Typography and settings controls
+
+Appearance offers bundled Mona Sans (default), Inter, Geist, IBM Plex Sans and
+Atkinson Hyperlegible Next. Non-default CSS and font assets load when selected.
+The font menu groups Bundled and System families and previews each option in that
+family when loaded. System detection probes common installed families; **Find
+system fonts** requests local-font access only on a user gesture where supported.
+System choices depend on fonts installed on each device.
+
+Owner preferences persist `font` (bundled id or system family, at most 64 characters)
+and `font_size` (13–18px). S/M/L/XL choose 13/14/16/18px for predictable one-click
+changes without slider precision. The root font size and settings copy scale;
+fixed workspace geometry remains compact.
+
+Keep switches for booleans, radio segments for small exclusive choices, accent
+swatches for colours and the corner picker for notification placement. Native
+account dialogs trap focus, support Escape, scroll within the viewport and keep
+destructive actions behind a confirmation.

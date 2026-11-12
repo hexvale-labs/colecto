@@ -213,3 +213,18 @@ Read failures block sending until attachments are cleared and selected again.
 Reply and forward prefills, including headers and quote prefixes, are cut to 80,000
 UTF-8 bytes between Unicode code points, leaving 20,000 bytes of the 100,000-byte body
 limit for the owner's own text.
+
+## Account settings dialog
+
+In Settings → Accounts, select **Add account** beneath the compact account list.
+The dialog groups email and optional account name under Identity, protocol and
+hosts under Server, and username and password under Sign in. Username starts from
+the email address; JMAP API-token sign-in can leave it empty. Show password reveals
+the credential only in the dialog. Cancel and Escape ask before discarding edits.
+
+Each saved account has Reconnect, Edit and Remove icon buttons. Reconnect and Edit
+open the same prefilled dialog; leave the credential blank to keep it. Remove asks
+before disconnecting and forgetting the saved credential. The account record,
+local mail and drafts remain. Protocol tags expose server hosts on hover. Connected
+means the Host reports a live connection; the page does not invent a last-check time.
+Credential protection and master-password recovery remain below the account list.

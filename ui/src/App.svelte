@@ -4,6 +4,7 @@
   const bundledPanes: Record<string, string> = { inbox: 'mailbox', reader: 'reader', accounts: 'accounts' };
 </script>
 <script lang="ts">
+  import { applyTypography } from './lib/typography';
   import { onMount } from 'svelte';
   import MailShell from './extensions/mail-shell/MailShell.svelte';
   import OverlayLayer from './OverlayLayer.svelte';
@@ -31,6 +32,8 @@
     error = '';
     try {
       accounts = await hostService.accounts();
+      const preferences = await hostService.preferences();
+      await applyTypography(preferences.font ?? 'mona', preferences.font_size ?? 14);
       if (!accounts.some(a => a.id === account)) account = accounts[0]?.id ?? 'demo';
       extensions = await extensionHost.list(account);
     } catch (e) { error = (e as Error).message; }
@@ -74,6 +77,7 @@
   }
   onMount(() => {
     const requireToken = () => authRequired = true; window.addEventListener('colecto-auth-required', requireToken);
+    void hostService.preferences().then(p => applyTypography(p.font ?? 'mona', p.font_size ?? 14)).catch(e => error = (e as Error).message);
     void extensionHost.list('demo').then(value => extensions = value)
       .catch(e => error = (e as Error).message).finally(() => loading = false);
     return () => window.removeEventListener('colecto-auth-required', requireToken);

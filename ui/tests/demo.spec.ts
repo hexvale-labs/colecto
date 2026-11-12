@@ -125,6 +125,8 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
   await page.getByLabel('Confirm master password').fill('correct horse battery staple');
   await page.getByRole('button', { name: 'Enable password protection' }).click();
   await expect(page.getByText('Password protection enabled', { exact: true })).toBeVisible({ timeout: 20000 });
+  await expect(page.getByLabel('Account name (optional)')).not.toBeVisible();
+  await page.getByRole('button', { name: 'Add account', exact: true }).click();
   await page.getByLabel('Account name (optional)').fill('Work');
   await page.getByLabel('Email address', { exact: true }).fill('work@example.test');
   await page.getByLabel('IMAP host').fill('imap.example.test');

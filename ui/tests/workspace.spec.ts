@@ -87,12 +87,12 @@ test('account action labels use email when the optional profile name is empty', 
   await page.route('**/api/v1/security', route => route.fulfill({ json: { protected: false, locked: false, cleanup_pending: false } }));
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Edit / reconnect unnamed@example.test', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Disconnect unnamed@example.test', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
   let question = '';
   page.once('dialog', async dialog => { question = dialog.message(); await dialog.dismiss(); });
-  await page.getByRole('button', { name: 'Disconnect unnamed@example.test', exact: true }).click();
-  expect(question).toContain('Disconnect unnamed@example.test?');
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  expect(question).toContain('Remove saved credentials for unnamed@example.test?');
 });
 
 test('mobile controls stay reachable and mail text stays selectable on narrow screens', async ({ page }) => {
@@ -351,4 +351,54 @@ test('command runner closes on Escape and outside clicks, finds mail, sorts and 
   await page.keyboard.type('go drafts');
   await page.keyboard.press('Enter');
   await expect(page.getByRole('navigation', { name: 'Mail folders' }).getByRole('button', { name: /Drafts/ })).toHaveAttribute('aria-current', 'page');
+});
+
+test('account dialog and long identities remain usable at 360px', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.route('**/api/v1/accounts', route => route.fulfill({ json: Array.from({ length: 30 }, (_, index) => ({
+    id: 'stress-' + index, configured: true, connected: index === 0,
+    settings: { name: index ? 'Jo' : 'Aleksandra Wiśniewska-Kowalczyk', address: 'bartholomew.fitzgerald@northwind-industries-holdings.example.com', protocol: 'imap', imap_host: 'imap.example.test', imap_port: 993, smtp_host: 'smtp.example.test', smtp_port: 587, username: 'user', session_url: '' },
+  })) }));
+  await page.route('**/api/v1/security', route => route.fulfill({ json: { protected: false, locked: false, cleanup_pending: false } }));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const edit = page.getByRole('button', { name: 'Edit', exact: true }).first();
+  await edit.click();
+  await expect(page.locator('dialog.account-dialog')).toBeVisible();
+  await expect(page.getByLabel('Account name (optional)')).toHaveValue('Aleksandra Wiśniewska-Kowalczyk');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('dialog.account-dialog')).not.toBeVisible();
+  await page.getByRole('button', { name: 'Add account', exact: true }).click();
+  await page.getByLabel('Email address', { exact: true }).fill('jo@example.test');
+  await expect(page.getByLabel('Username', { exact: true })).toHaveValue('jo@example.test');
+  await page.getByRole('radio', { name: 'JMAP', exact: true }).focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByLabel('IMAP host')).not.toBeVisible();
+  await expect(page.getByLabel('JMAP server or session URL')).toBeVisible();
+  const dialog = page.locator('dialog.account-dialog');
+  expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  page.once('dialog', prompt => prompt.accept());
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+});
+
+test('appearance applies and restores typography preferences', async ({ page }) => {
+  let typography = { font: 'mona', font_size: 14 };
+  await page.route('**/api/v1/preferences', async route => {
+    if (route.request().method() !== 'GET') typography = { ...typography, ...route.request().postDataJSON() };
+    await route.fulfill({ json: { mcp: false, account: null, workspace: null, accent: null, remote_images: false, notifications: { enabled: true, mail: true, approvals: true, system: false, position: 'top' }, ...typography } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+  await page.getByRole('button', { name: 'Interface font' }).click();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--font'))).toContain('Inter Variable');
+  await page.getByRole('radio', { name: /XL/ }).focus();
+  await page.keyboard.press('Space');
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.fontSize)).toBe('18px');
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.fontSize)).toBe('18px');
 });

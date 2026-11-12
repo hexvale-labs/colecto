@@ -1,12 +1,12 @@
 <script lang="ts" module>
-  export interface Option<V> { value: V; label: string; hint?: string }
+  export interface Option<V> { value: V; label: string; hint?: string; group?: string; family?: string }
 </script>
 <script lang="ts" generics="T extends string">
   import { tick, type Snippet } from 'svelte';
   import Icon from './Icon.svelte';
-  let { label, value, options, onchange, disabled = false, placement = 'below', trigger }: {
+  let { label, value, options, onchange, disabled = false, placement = 'below', trigger, onopen }: {
     label: string; value: T; options: Option<T>[]; onchange: (value: T) => void;
-    disabled?: boolean; placement?: 'below' | 'above'; trigger?: Snippet<[Option<T> | undefined]>;
+    onopen?: () => void; disabled?: boolean; placement?: 'below' | 'above'; trigger?: Snippet<[Option<T> | undefined]>;
   } = $props();
   const id = `listbox-${Math.random().toString(36).slice(2)}`;
   let open = $state(false);
@@ -22,6 +22,7 @@
   }
   async function show() {
     if (disabled || !options.length) return;
+    onopen?.();
     active = Math.max(0, options.findIndex(option => option.value === value));
     open = true; await tick(); list?.focus();
     document.getElementById(`${id}-${active}`)?.scrollIntoView({ block: 'nearest' });
@@ -58,9 +59,10 @@
     <div class="select-scrim" aria-hidden="true" onpointerdown={() => hide(false)}></div>
     <ul bind:this={list} {id} class="select-menu {placement}" out:leave role="listbox" tabindex="-1" aria-label={label} aria-activedescendant={`${id}-${active}`} onkeydown={keydown}>
       {#each options as option, index (option.value)}
+        {#if option.group && (index === 0 || options[index - 1].group !== option.group)}<li role="presentation" class="select-group">{option.group}</li>{/if}
         <!-- svelte-ignore a11y_click_events_have_key_events (the listbox handles keys) -->
         <li id={`${id}-${index}`} role="option" aria-label={option.label} aria-selected={option.value === value} class:active={index === active} onpointermove={() => active = index} onclick={() => choose(index)}>
-          <span class="option-text"><span>{option.label}</span>{#if option.hint}<small>{option.hint}</small>{/if}</span>
+          <span class="option-text" style:font-family={option.family}><span>{option.label}</span>{#if option.hint}<small>{option.hint}</small>{/if}</span>
           {#if option.value === value}<Icon name="check" size={14} />{/if}
         </li>
       {/each}
