@@ -86,3 +86,9 @@ When a task is done and its checks pass, commit, push and merge it yourself: bra
 off `main` if needed, open a pull request, and merge it once the required checks pass.
 Wait for a human only when something truly needs one: failing checks you cannot fix,
 merge conflicts with unclear intent, missing access, or destructive history changes.
+
+Never tag or publish a release yourself. Instead, remind the maintainer that a release
+might be worth cutting (see "Releases" in [docs/development.md](docs/development.md)),
+in plain words and twice: once when you open the pull request, before waiting on CI,
+and again in your final message after the merge. CI takes a while, so the first
+reminder may be the one they see.

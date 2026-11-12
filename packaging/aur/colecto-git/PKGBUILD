@@ -40,6 +40,8 @@ build() {
   (cd ui && bun run --bun build)
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
+  COLECTO_COMMIT=$(git rev-parse HEAD)
+  export COLECTO_COMMIT
   cargo build --frozen --release -p colecto-app -p colecto-host
 }
 

@@ -112,6 +112,14 @@ from the same file.
 
 ## Releases
 
+The version lives in one place: `[workspace.package] version` in the root
+`Cargo.toml`. Every crate inherits it and the binaries compile it in (reported by
+`GET /api/v1/version` and `colecto-daemon --version`). To release, bump it (and
+`ui/package.json`) on `main`, then tag; a tag that does not match `Cargo.toml` fails
+the release before anything builds. Release CI, the Docker image (build argument
+`COLECTO_COMMIT`) and the `colecto-git` AUR package also compile in the Git commit
+through the `COLECTO_COMMIT` environment variable.
+
 Pushing a semver tag such as `v1.2.3` runs `.github/workflows/release.yml` and
 publishes. Pushes to `main` that change `Cargo.lock`, a `Cargo.toml`, the workflow or
 `.github/actions/` also run it, as does a schedule on Mondays and Thursdays; those runs

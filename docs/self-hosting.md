@@ -283,6 +283,30 @@ stream is bounded and has no historical replay. Desktop notifications may be
 missed during disconnection; opening the client fetches the current mail state.
 The agent deliberately ignores initial `ready` and does not notify for old mail.
 
+### Version
+
+`GET /api/v1/version` reports which build is running. It needs no bearer, so a
+client or health check can test compatibility before it holds a token, but the
+configured `Host` is still required. It works over TCP and the Unix socket alike:
+
+```sh
+curl -H 'Host: localhost' http://127.0.0.1:4173/api/v1/version
+curl --unix-socket "$HOME/.local/run/colecto/mail.sock" -H 'Host: localhost' \
+  http://localhost/api/v1/version
+```
+
+```json
+{"name":"colecto","version":"0.2.0","commit":"32962cd…","api":"v1"}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `version` | `[workspace.package] version` in the root `Cargo.toml`, compiled in |
+| `commit` | Full Git commit from `COLECTO_COMMIT` at build time; `null` when the build did not set it (local `cargo build`) |
+| `api` | HTTP API version, matching the `/api/v1` prefix |
+
+`colecto-daemon --version` prints the same version and commit.
+
 ### Owner bearers and scoped API keys
 
 Every API call requires an explicit `Authorization: Bearer <token>` header with
