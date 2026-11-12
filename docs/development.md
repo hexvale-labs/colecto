@@ -86,6 +86,17 @@ just perf-check       # verification plus three recorded resource runs
 The browser tests run a separate Host on port 4179 with temporary sample data and do
 not touch your `.colecto` directory. Playwright may need system browser libraries.
 
+`ui/tests/html-mail.spec.ts` opens five published company email templates
+(`ui/tests/fixtures/html-mail/`, sources and licences in its `README.md`) in Chromium
+and WebKit, the engine behind the Linux and macOS apps. After one untimed open that
+warms the test browser, each is opened three times from a freshly loaded app. The
+median time from the click to the first frame painted after the mail frame's `load`
+(text and inline images decoded) must be under 400 ms, and no single open may take a
+second. The time is measured inside the page so Playwright's own overhead is
+excluded. Each template must also keep remote images blocked and open its button link
+outside the app. The fixtures inline their images as `data:` URIs and the test
+intercepts every remote request, so nothing goes to the network.
+
 `just perf-check` records CPU and memory samples with build and environment details
 under `docs/performance/results/`. See [performance](performance/README.md).
 

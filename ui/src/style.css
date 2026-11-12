@@ -270,9 +270,8 @@ button.attachment:hover:not(:disabled) { background: var(--control); }
 .body-controls .push { margin-left: auto; color: var(--ink-2); }
 .body-controls .push:hover { color: var(--ink); }
 .letter-body { max-width: 68ch; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15.5px; line-height: 1.68; color: oklch(0.9 0.01 155); }
-.html-body { display: block; width: 100%; height: max(320px, calc(100cqh - 64px)); border: 0; background: transparent; color-scheme: dark; opacity: 0; transition: opacity 180ms var(--ease-out); }
+.html-body { display: block; width: 100%; height: max(320px, calc(100cqh - 64px)); border: 0; background: transparent; color-scheme: dark; }
 .html-body.designed { color-scheme: light; background: #fff; border-radius: 6px; }
-.html-body.painted { opacity: 1; }
 .body-skeleton { display: grid; gap: 12px; max-width: 68ch; padding-top: 6px; }
 .body-skeleton span { height: 12px; border-radius: 6px; background: var(--raise); animation: pulse 1.4s ease-in-out infinite; }
 .body-skeleton span:nth-child(2) { width: 86%; animation-delay: 120ms; }

@@ -28,7 +28,6 @@
   // Rename the media feature so those rules never match, whatever colour scheme the webview reports.
   let html = $derived(content?.html ? designed ? content.html.replace(/prefers-color-scheme\s*:\s*dark/gi, 'prefers-color-scheme: colecto-light') : content.html : '');
   let frameDoc = $derived(html ? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:${remoteImages ? ' https:' : ''}"><base target="_blank"><style>${frameStyle}img{max-width:100%;height:auto}</style>${html}` : '');
-  let painted = $state(false);
   let contentLoading = $state(true);
   let date = $derived(message ? when(message.date) : null);
   async function load() {
@@ -96,7 +95,7 @@
         <button class="text-button push" aria-pressed={!showHtml} onclick={() => showHtml = !showHtml}><Icon name="text" />{showHtml ? 'Show plain text' : 'Show formatted'}</button>
       </div>{/if}
       {#if contentLoading}<div class="body-skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
-      {:else if content?.html && showHtml}<iframe class="html-body" class:designed class:painted title="Message content" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc={frameDoc} onload={() => painted = true}></iframe>
+      {:else if content?.html && showHtml}<iframe class="html-body" class:designed title="Message content" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc={frameDoc}></iframe>
       {:else}<div class="letter-body">{content?.text || message.body}</div>{/if}
     </article>
   {/if}

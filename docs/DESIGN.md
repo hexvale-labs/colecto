@@ -130,8 +130,9 @@ scales from 0.97 in 220 ms. Notifications enter from the edge they are docked to
 leave the same way, and the stack slides (FLIP) when one goes. The command palette opens
 instantly, because it is used hundreds of times a day. Docking previews slide
 between zones in 160 ms; resizing and tab switches do not animate. The palette closes
-on Escape or a click outside it. HTML mail fades
-in once its frame has painted, after a skeleton, instead of flashing an empty sheet. List and folder changes do
+on Escape or a click outside it. HTML mail appears
+as soon as its body arrives, after a skeleton; it never waits for the frame's `load`
+event, which waits for every remote image and can hang on a slow server. List and folder changes do
 not animate. `prefers-reduced-motion` removes every transition.
 
 ## Feels native

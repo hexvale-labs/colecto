@@ -312,9 +312,40 @@ pub fn native_navigation_allowed(authority: &str, destination: &reqwest::Url) ->
             && destination.password().is_none())
 }
 
+/// Whether a link that mail opens in a new window may be handed to the system browser.
+/// The native app never opens its own windows for mail links: WebKitGTK and WebView2
+/// drop new-window requests unless the shell handles them.
+pub fn external_link_allowed(destination: &reqwest::Url) -> bool {
+    matches!(destination.scheme(), "https" | "http" | "mailto")
+        && destination.username().is_empty()
+        && destination.password().is_none()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::native_navigation_allowed;
+    use super::{external_link_allowed, native_navigation_allowed};
+
+    #[test]
+    fn external_links_are_web_and_mail_addresses_only() {
+        let allowed = |url: &str| external_link_allowed(&url.parse().unwrap());
+        for url in [
+            "https://example.com/confirm?token=1",
+            "http://example.com/",
+            "mailto:billing@example.com",
+        ] {
+            assert!(allowed(url), "{url}");
+        }
+        for url in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "about:blank",
+            "data:text/html,hi",
+            "https://user:pass@example.com/",
+            "smb://server/share",
+        ] {
+            assert!(!allowed(url), "{url}");
+        }
+    }
 
     #[test]
     fn native_navigation_allows_the_service_mail_frames_and_plain_https_only() {
