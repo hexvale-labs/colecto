@@ -123,3 +123,38 @@ concurrency cap. Disable and removal drop the compiled entry; reinstall gets a n
 generation. Policy contains metadata only; compressed package bytes live in separate
 database records. Listing extensions never reads module bodies or recompiles them.
 The UI uploads binary bodies; legacy JSON byte-array uploads are still accepted.
+
+### Add owner settings
+
+Add a table to `extension.toml`, then read it through `settings.read` at runtime:
+
+```toml
+[[settings]]
+key = "speed"
+label = "Running speed"
+type = "range"
+default = 10
+min = 2
+max = 30
+step = 1
+unit = "px"
+```
+
+The owner edits this in Settings. See Oneko's `src/lib.rs` for a no_std guest
+that reads speed, opacity and stopping distance once per frame using one bridge
+call. The [contract](README.md#extension-settings) lists validation and routes.
+
+## Talk to another extension
+
+Declare `extensions.bus` and subscribe to `reader/v1/message_opened` under `[bus]`
+when you need message-open events. A guest can ask the composer for its current draft:
+
+```json
+{"operation":"bus.request","bus":"composer","name":"v1/get_draft","payload":null}
+```
+
+Read `data` from the service response; null also means no answer. To answer a request
+on your own bus, inspect the `bus.request` action and emit
+`{"bus":{"response":{"example":true}}}`. Each delivery starts a fresh instance,
+so keep needed context in the payload. Use versioned names such as `v1/example`.
+See the [bus contract](README.md#extension-bus) for limits and bundled surfaces.

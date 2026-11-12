@@ -7,8 +7,8 @@
   import Icon from './Icon.svelte';
   import Select from './Select.svelte';
   import { HEAD, MIN, dock, dockEdge, leaves, measure, preview, resize, setVisible, zoneIn, type Edge, type Gutter, type Layout, type Rect, type Zone } from './lib/layout';
-  let { layout, panes, focus, compact, content, onactivate, onchange }: {
-    layout: Layout; panes: PaneInfo[]; focus: string; compact: boolean; content: Snippet<[string]>;
+  let { layout, panes, focus, compact, content, header, onactivate, onchange }: {
+    layout: Layout; panes: PaneInfo[]; focus: string; compact: boolean; content: Snippet<[string]>; header?: Snippet<[string]>;
     onactivate: (pane: string) => void; onchange: (layout: Layout) => void;
   } = $props();
   type MenuAction = Edge | 'hide';
@@ -128,6 +128,7 @@
               {#if meta}<button role="tab" id={`dock-tab-${pane}`} class="dock-tab" aria-selected={group.active === pane} aria-controls={`pane-${pane}`} title="Drag onto another pane to dock it there" onpointerdown={(event) => startDrag(event, pane)} onclick={() => onactivate(pane)}><Icon name={meta.icon} size={14} /><span>{meta.title}</span></button>{/if}
             {/each}
           </div>
+          {#if header}{@render header(group.active)}{/if}
           {#if current}<div class="dock-move"><Select label={`Arrange ${current.title}`} value={'' as MenuAction} options={menu} onchange={(action) => menuAction(current.id, action)}>{#snippet trigger()}<Icon name="layout" size={15} />{/snippet}</Select></div>{/if}
         </header>
       </section>

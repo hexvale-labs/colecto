@@ -403,3 +403,40 @@ JSON escaping inside MCP text content, plus envelope and metadata space. Scoped
 keys with `messages.list` can use `GET /api/v1/folders` for their allowed accounts.
 Approval returns HTTP 429 when its account store is busy, without waiting while
 holding the account registry lock; retry after the mail operation finishes.
+
+## Install background services from the app
+
+Settings → Connection offers Mail service and Desktop notifications on Linux when
+`systemctl --user` is available. Install starts a user unit; Start on login enables
+it. Stop leaves the unit installed; Uninstall disables, stops and removes it.
+Generated units live in `$XDG_CONFIG_HOME/systemd/user` (default
+`~/.config/systemd/user`). Colecto refuses to modify units without the exact
+`# Managed by Colecto` marker, including distribution-installed units without it.
+Commands run without a shell with a ten-second timeout; errors leave the current
+unit available for inspection and retry.
+
+The executable is `$APPIMAGE` when set, otherwise the running executable. The app
+supports `colecto daemon` and `colecto notify`, so installation does not require a
+separate daemon binary. Keep that executable at its installed location. Units use
+optional environment files `~/.config/colecto/daemon.env` and `notifications.env`.
+The daemon uses `%t/colecto/mail.sock`, a private runtime directory, and
+`%h/.local/state/colecto`. The notifier connects to that socket and reads its
+`owner-token` file directly; no token is copied into a unit or passed as an argument.
+The notifier follows `graphical-session.target`; desktop notifications also require
+`notify-send` and a desktop notification bus. If `daemon.env` overrides the data
+directory, set the corresponding `COLECTO_TOKEN_FILE` in `notifications.env` too.
+
+After installing the mail service, Settings → Connection fills in its address
+(`unix:/absolute/socket/path`) and waits for you to open it, because accounts and drafts
+on the background service are separate from the app's store.
+The local Host still serves UI assets and authenticates requests, then streams API
+bodies and SSE over the Unix socket with `Host: localhost` and the daemon's private
+owner bearer. Scoped keys cannot use this owner proxy. The bearer is read from its
+private token file and never returned to the browser. The choice persists in
+`upstream.json` in the app's data directory. `GET/PUT /api/v1/upstream` stays local and
+answers `{"upstream": {address, token_file} | null}`; PUT accepts `null` to restore the built-in service, or `{address, token_file}` with
+an absolute `unix:` socket path and an absolute token path passing private-file
+checks. Service controls also stay local so a stopped daemon can be restarted.
+Both local control APIs require the owner bearer (never an API key). Remote Hosts and
+socket daemons refuse them; web clients cannot
+install units on a remote daemon. The Connection page hides unavailable controls.

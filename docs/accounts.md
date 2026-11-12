@@ -115,6 +115,18 @@ JMAP server, the Cyrus test server in Docker, then receives it, searches for it,
 downloads the attachment and finds it in Sent. Push is covered by unit tests, because
 that server does not emit push events.
 
+## Remove an account
+
+The owner-only `DELETE /api/v1/accounts/{id}` removes the saved account and its
+credentials, cached mail, local drafts, labels and folder catalog on this device.
+It does not change anything on the mail server. Unlock credentials first; the
+sample account cannot be removed. The selected-account preference is cleared if
+it points to this account. Removal is not exposed through MCP.
+
+Disconnect (`POST /api/v1/accounts/{id}/disconnect`) forgets credentials but keeps
+the account record and local data for reconnecting later. The current settings
+Remove icon still performs this disconnect operation.
+
 ## Optional master password
 
 In **Settings → Accounts → Credential protection**, enable password protection with a
@@ -192,7 +204,7 @@ below the root and 1000 total parts. Messages exceeding either limit fail decodi
 including during background refresh. Body and attachment readers share this check.
 Malformed non-ASCII IMAP folder IDs return a missing-message error.
 
-Disconnect, vault lock/reset and account reconfiguration revoke push watcher
+Removal, disconnect, vault lock/reset and account reconfiguration revoke push watcher
 credentials without waiting, and revoked watchers cannot start another wait. A push
 wait already in progress (IMAP IDLE or a JMAP event stream, up to ten minutes) cannot
 be interrupted, so it keeps its own credential copy until it returns; the copy is then
@@ -213,3 +225,18 @@ Read failures block sending until attachments are cleared and selected again.
 Reply and forward prefills, including headers and quote prefixes, are cut to 80,000
 UTF-8 bytes between Unicode code points, leaving 20,000 bytes of the 100,000-byte body
 limit for the owner's own text.
+
+## Account settings dialog
+
+In Settings → Accounts, select **Add account** beneath the compact account list.
+The dialog groups email and optional account name under Identity, protocol and
+hosts under Server, and username and password under Sign in. Username starts from
+the email address; JMAP API-token sign-in can leave it empty. Show password reveals
+the credential only in the dialog. Cancel and Escape ask before discarding edits.
+
+Each saved account has Reconnect, Edit and Remove icon buttons. Reconnect and Edit
+open the same prefilled dialog; leave the credential blank to keep it. Remove asks
+before disconnecting and forgetting the saved credential. The account record,
+local mail and drafts remain. Protocol tags expose server hosts on hover. Connected
+means the Host reports a live connection; the page does not invent a last-check time.
+Credential protection and master-password recovery remain below the account list.

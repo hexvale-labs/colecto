@@ -21,6 +21,17 @@ Start with [docs/README.md](docs/README.md) (index, technologies, where files li
   in the current session. Write chat updates, comments and docs in plain, natural
   language.
 
+## Interface work goes into extensions
+
+- Write every UI feature as a bundled extension under `ui/src/extensions/<id>/`, unless
+  it truly cannot be one (bootstrapping, permission prompts, credential controls and
+  recovery stay in the shell). "It is quicker in the shell" is not a reason.
+- Extensions never reach into each other: no imports between extension folders, no
+  shared mutable stores, no reading another extension's state. When one extension
+  should be usable by others, expose a versioned interface on its bus (the
+  `extensions.bus` capability, see [docs/extensions/README.md](docs/extensions/README.md)),
+  for example the request `v1/add_button` rather than `add_button`.
+
 ## How to work
 
 - Make the smallest complete change. Reuse existing patterns. No speculative

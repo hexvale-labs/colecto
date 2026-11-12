@@ -11,6 +11,8 @@ export interface MessageContent { text: string; html: string | null; attachments
 export interface MailItem { id: string; name: string; subject: string; preview: string; date: string }
 export interface AccountSettings { name: string; address: string; protocol: 'imap' | 'jmap'; imap_host: string; imap_port: number; smtp_host: string; smtp_port: number; username: string; session_url: string }
 export interface AccountInfo { id: string; settings: AccountSettings | null; connected: boolean; configured: boolean }
+export interface BackgroundService { installed: boolean; enabled: boolean; active: boolean; supported: boolean; reason?: string | null; socket?: string | null; token_file?: string | null }
+export interface Upstream { address: string; token_file: string }
 export interface SecurityInfo { cleanup_pending: boolean; protected: boolean; locked: boolean }
 
 let transientToken = '';
@@ -27,7 +29,7 @@ async function download(extension: string, account: string, path: string): Promi
   if (!response.ok) { const data = await response.json().catch(() => null); throw new ServiceError(typeof data?.error === 'string' ? data.error : `Download failed (HTTP ${response.status}).`, typeof data?.category === 'string' ? data.category : 'server', response.status); }
   return response.blob();
 }
-async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE'): Promise<T> {
+export async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE' | 'PUT'): Promise<T> {
   const delivery = path === '/send' || (path.startsWith('/send-requests/') && path.endsWith('/approve'));
   const deliveryWarning = 'Delivery status is unknown. Check Sent and delivery requests before sending again.';
   let response: Response;
@@ -81,7 +83,7 @@ export type ComposerService = ReturnType<typeof createServices>['composer'];
 /** Owner preferences, stored by the Host in Turso. `workspace` is the dock layout. */
 export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right' | 'bottom' | 'bottom-left' | 'left';
 export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner }
-export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; notifications: NotificationPreferences; remote_images: boolean }
+export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; notifications: NotificationPreferences; remote_images: boolean }
 /** An empty accent restores the default. */
 export type PreferencesInput = Partial<Omit<Preferences, 'accent'>> & { accent?: string };
 export const hostService = {
@@ -94,14 +96,21 @@ export const hostService = {
   revokeApiKey: (id: string) => request<boolean>('host', 'demo', `/api-keys/${encodeURIComponent(id)}`, {}, 'DELETE'),
   accounts: () => request<AccountInfo[]>('host', 'demo', '/accounts'),
   save: (input: AccountSettings & { id?: string; secret: string }) => request<AccountInfo>('host', 'demo', '/accounts', input),
+  remove: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}`, {}, 'DELETE'),
   disconnect: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}/disconnect`, {}),
   security: () => request<SecurityInfo>('host', 'demo', '/security'),
+  /** Linux user services this app can install (local service only). */
+  services: () => request<Record<'daemon' | 'notifications', BackgroundService>>('host', 'demo', '/services'),
+  serviceAction: (name: 'daemon' | 'notifications', input: { action: 'install'; autostart: boolean } | { action: 'autostart'; enabled: boolean } | { action: 'start' | 'stop' | 'uninstall' }) => request<boolean>('host', 'demo', `/services/${name}`, input),
+  /** The daemon socket this app forwards to, or null for its built-in service. */
+  upstream: async () => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream')).upstream,
+  setUpstream: async (value: Upstream | null) => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream', value, 'PUT')).upstream,
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 
-export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate' | 'window.overlay';
+export type Capability = 'extensions.bus' | 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate' | 'window.overlay';
 export interface ExtensionState {
-  manifest: { id: string; name: string; description: string; author: string; api_version: number; slot: string; z_index?: number; capabilities: Capability[] };
+  manifest: { settings?: ExtensionSetting[]; id: string; name: string; description: string; author: string; api_version: number; slot: string; z_index?: number; capabilities: Capability[] };
   bundled: boolean;
   enabled: boolean;
 }
@@ -116,6 +125,8 @@ async function uploadExtension<T>(path: string, pkg: Uint8Array): Promise<T> {
   return data as T;
 }
 export const extensionHost = {
+  settings: (id: string) => request<ExtensionSettings>("host", "demo", `/extensions/${encodeURIComponent(id)}/settings`),
+  saveSettings: (id: string, values: ExtensionSettings["values"]) => request<ExtensionSettings>("host", "demo", `/extensions/${encodeURIComponent(id)}/settings`, values, "PUT"),
   /** `pkg` is a .colectoext file: a zip with manifest.toml and module.wasm. */
   install: (pkg: Uint8Array) => uploadExtension<boolean>('', pkg),
   review: (pkg: Uint8Array) => uploadExtension<ExtensionState['manifest']>('/review', pkg),
@@ -137,7 +148,7 @@ export interface PendingSend { id: string; requester: string; account: string; f
  * Follow the Host's server-sent events (`mail`, `approval`, `navigate`), reconnecting with backoff.
  * Uses fetch rather than EventSource so the owner token can travel in a header. Returns a stop function.
  */
-export function subscribeEvents(onevent: (name: string, data: unknown) => void): () => void {
+function openEvents(onevent: (name: string, data: unknown) => void): () => void {
   const controller = new AbortController();
   let delay = 1000;
   void (async () => {
@@ -173,4 +184,21 @@ export function subscribeEvents(onevent: (name: string, data: unknown) => void):
   return () => controller.abort();
 }
 
-export interface OverlayOutput { overlay: { items: { image: string; x: number; y: number; width: number; height: number; frame: { x: number; y: number; width: number; height: number } }[] }; state: string }
+type EventListener = (name: string, data: unknown) => void;
+const eventListeners = new Set<EventListener>();
+let closeEvents: (() => void) | undefined;
+/** Listen to the Host's event stream. All listeners share one connection: browsers allow only
+ *  six per origin, and a stream per extension would starve ordinary requests. */
+export function subscribeEvents(onevent: EventListener): () => void {
+  eventListeners.add(onevent);
+  closeEvents ??= openEvents((name, data) => { for (const listener of [...eventListeners]) listener(name, data); });
+  return () => {
+    eventListeners.delete(onevent);
+    if (!eventListeners.size) { closeEvents?.(); closeEvents = undefined; }
+  };
+}
+
+export interface OverlayOutput { overlay: { items: { opacity?: number; image: string; x: number; y: number; width: number; height: number; frame: { x: number; y: number; width: number; height: number } }[] }; state: string }
+
+export interface ExtensionSetting { key: string; label: string; description?: string; type: "toggle" | "range" | "choice" | "text"; default: boolean | number | string; min?: number; max?: number; step?: number; unit?: string; options?: {value: string; label: string}[] }
+export interface ExtensionSettings { schema: ExtensionSetting[]; values: Record<string, boolean | number | string> }

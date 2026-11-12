@@ -1,12 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Icon from './Icon.svelte';
   import { hostService, type AccountInfo, type ApiKey, type Capability } from './lib/api';
+  import { capabilityLabel } from './lib/capabilities';
   let { accounts }: { accounts: AccountInfo[] } = $props();
   let keys = $state<ApiKey[]>([]);
   let name = $state('');
   let selectedAccounts = $state<string[]>([]);
   let capabilities = $state<Capability[]>([]);
-  let expiry = $state('');
+  // Expiry in days from now; 0 never expires.
+  let expiry = $state(0);
+  const lifetimes = [{ days: 0, label: 'Never' }, { days: 1, label: '1 day' }, { days: 7, label: '1 week' }, { days: 30, label: '30 days' }, { days: 90, label: '90 days' }];
+  const readOnly: Capability[] = ['account.read', 'messages.list', 'messages.read', 'drafts.list', 'drafts.read'];
   let secret = $state('');
   let error = $state('');
   let status = $state('');
@@ -26,8 +31,8 @@
   async function create(event: SubmitEvent) {
     event.preventDefault(); busy = true; error = ''; status = ''; secret = '';
     try {
-      const result = await hostService.mintApiKey({ name, accounts: selectedAccounts, capabilities, ...(expiry ? { expires_at: Math.floor(new Date(expiry).getTime() / 1000) } : {}) });
-      secret = result.secret; name = ''; selectedAccounts = []; capabilities = []; expiry = '';
+      const result = await hostService.mintApiKey({ name, accounts: selectedAccounts, capabilities, ...(expiry ? { expires_at: Math.floor(Date.now() / 1000) + expiry * 86_400 } : {}) });
+      secret = result.secret; name = ''; selectedAccounts = []; capabilities = []; expiry = 0;
       await reload();
     } catch (e) { error = (e as Error).message; } finally { busy = false; }
   }
@@ -56,31 +61,49 @@
   <form class="settings-card" onsubmit={create}>
     <h3>New key</h3>
     <label class="field">Key name<input bind:value={name} maxlength="80" required placeholder="Desktop assistant" autocomplete="off" /></label>
-    <fieldset class="check-group" disabled={busy}><legend>Accounts</legend>{#each accounts as account}<label class="choice"><input type="checkbox" bind:group={selectedAccounts} value={account.id} />{account.settings?.name || account.settings?.address || 'Demo account'}</label>{/each}</fieldset>
-    <fieldset class="check-group" disabled={busy}><legend>Operations</legend>{#each operations as operation}<label class="choice"><input type="checkbox" bind:group={capabilities} value={operation} /><code>{operation}</code></label>{/each}</fieldset>
-    <label class="field">Expires at (optional)<input type="datetime-local" bind:value={expiry} /></label>
+    <fieldset class="check-group" disabled={busy}><legend>Accounts</legend>
+      <div class="chips">{#each accounts as account (account.id)}<label class="chip toggle"><input type="checkbox" bind:group={selectedAccounts} value={account.id} /><Icon name="check" size={12} />{account.settings?.name || account.settings?.address || 'Demo account'}</label>{/each}</div>
+    </fieldset>
+    <fieldset class="check-group" disabled={busy}>
+      <legend>Operations</legend>
+      <div class="quick"><button type="button" class="text-button" onclick={() => capabilities = [...readOnly]}>Read only</button><button type="button" class="text-button" onclick={() => capabilities = [...operations]}>Everything</button>{#if capabilities.length}<button type="button" class="text-button muted" onclick={() => capabilities = []}>Clear</button>{/if}</div>
+      <div class="chips">{#each operations as operation (operation)}<label class="chip toggle" title={operation}><input type="checkbox" bind:group={capabilities} value={operation} /><Icon name="check" size={12} />{capabilityLabel(operation)}</label>{/each}</div>
+      {#if capabilities.includes('messages.send')}<p class="hint">Sending always waits for your approval in Settings → Send approvals.</p>{/if}
+    </fieldset>
+    <fieldset class="segmented-field check-group" disabled={busy}>
+      <legend>Expires</legend>
+      <div class="segmented">{#each lifetimes as lifetime (lifetime.days)}<label><input type="radio" name="key-expiry" value={lifetime.days} bind:group={expiry} />{lifetime.label}</label>{/each}</div>
+    </fieldset>
     <button class="primary" disabled={busy || !name.trim() || !selectedAccounts.length || !capabilities.length}>{busy ? 'Saving…' : 'Generate API key'}</button>
   </form>
   <h3 class="list-title">Issued keys</h3>
   {#if !keys.length}<p class="empty-note">No API keys yet. Your mail is keeping to itself.</p>{/if}
-  {#each keys as key (key.id)}<article class="settings-card issued-key"><h4>{key.name}</h4><p>{key.accounts.map(id => accounts.find(a => a.id === id)?.settings?.name || accounts.find(a => a.id === id)?.settings?.address || id).join(', ')}</p><p class="caps">{#each key.capabilities as capability}<code>{capability}</code>{/each}</p><p class="meta">Created {date(key.created_at)} · Last used {date(key.last_used_at)}<br />Expires {key.expires_at ? date(key.expires_at) : 'Never'}</p>{#if key.revoked_at}<p>Revoked {date(key.revoked_at)}</p>{:else}<button class="secondary" disabled={busy} onclick={() => revoke(key.id)} aria-label={`Revoke ${key.name}`}>Revoke key</button>{/if}</article>{/each}
+  {#each keys as key (key.id)}<article class="settings-card issued-key"><h4>{key.name}</h4><p>{key.accounts.map(id => accounts.find(a => a.id === id)?.settings?.name || accounts.find(a => a.id === id)?.settings?.address || id).join(', ')}</p><p class="caps">{#each key.capabilities as capability}<code title={capabilityLabel(capability)}>{capability}</code>{/each}</p><p class="meta">Created {date(key.created_at)} · Last used {date(key.last_used_at)}<br />Expires {key.expires_at ? date(key.expires_at) : 'Never'}</p>{#if key.revoked_at}<p>Revoked {date(key.revoked_at)}</p>{:else}<button class="secondary" disabled={busy} onclick={() => revoke(key.id)} aria-label={`Revoke ${key.name}`}>Revoke key</button>{/if}</article>{/each}
 </section>
 
 <style>
-  .check-group { display: flex; flex-wrap: wrap; gap: 2px 18px; margin-top: 18px; }
-  .check-group legend { width: 100%; margin-bottom: 6px; padding: 0; color: var(--ink-2); font-size: 12.5px; font-weight: 560; }
+  .check-group { margin-top: 18px; }
+  /* Legends float in settings cards (style.css); start the controls below them. */
+  .check-group > :is(.chips, .quick, .segmented, .hint) { clear: both; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip.toggle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .quick { display: flex; gap: 14px; margin: -2px 0 8px; }
+  .quick .text-button { min-height: 24px; font-size: calc(12.5px * var(--text-scale)); }
+  .quick .muted { color: var(--ink-3); }
+  .hint { margin-top: 8px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
+  .check-group legend { width: 100%; margin-bottom: 6px; padding: 0; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); font-weight: 560; }
   .settings-card > .primary { margin-top: 20px; }
-  .list-title { margin: 28px 0 10px; font-size: 15px; }
+  .list-title { margin: 28px 0 10px; font-size: calc(15px * var(--text-scale)); }
   .issued-key { display: grid; gap: 6px; margin-bottom: 10px; overflow-wrap: anywhere; }
-  .issued-key p { color: var(--ink-2); font-size: 13px; }
-  .issued-key .meta { color: var(--ink-3); font-size: 12.5px; }
+  .issued-key p { color: var(--ink-2); font-size: calc(13px * var(--text-scale)); }
+  .issued-key .meta { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
   .issued-key .secondary { justify-self: start; margin-top: 6px; }
   .caps { display: flex; flex-wrap: wrap; gap: 6px; }
   .caps code { padding: 2px 7px; border-radius: 6px; background: var(--sunk); }
-  h4 { margin: 0; font-size: 14px; }
+  h4 { margin: 0; font-size: calc(14px * var(--text-scale)); }
   .secret { display: grid; gap: 10px; margin: 16px 0; padding: 18px; border-radius: 12px; background: var(--select); }
   .secret h3 { margin: 0; color: var(--mint-hi); }
   .secret p { color: var(--ink-2); }
   .secret div { display: flex; gap: 12px; }
-  textarea { width: 100%; min-height: 84px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunk); resize: vertical; word-break: break-all; font: 13px/1.5 ui-monospace, monospace; }
+  textarea { width: 100%; min-height: 84px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunk); resize: vertical; word-break: break-all; font: calc(13px * var(--text-scale))/1.5 ui-monospace, monospace; }
 </style>

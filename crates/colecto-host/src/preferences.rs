@@ -15,6 +15,8 @@ pub struct Preferences {
     pub workspace: Option<serde_json::Value>,
     /// `#rrggbb`; absent means the default mint.
     pub accent: Option<String>,
+    pub font: Option<String>,
+    pub font_size: Option<u8>,
     pub notifications: Notifications,
     notification_position_chosen: bool,
     /// Load remote images in HTML mail without asking. Off by default: they can track opens.
@@ -65,6 +67,8 @@ pub struct PreferencesInput {
     pub workspace: Option<serde_json::Value>,
     /// An empty string restores the default accent.
     pub accent: Option<String>,
+    pub font: Option<String>,
+    pub font_size: Option<u8>,
     pub notifications: Option<Notifications>,
     pub remote_images: Option<bool>,
 }
@@ -89,6 +93,21 @@ fn validate(preferences: &Preferences) -> Result<(), String> {
             || !accent[1..].bytes().all(|b| b.is_ascii_hexdigit())
     }) {
         return Err("Accent must be a #rrggbb colour".into());
+    }
+    if preferences.font.as_ref().is_some_and(|font| {
+        font.trim().is_empty()
+            || font.chars().count() > 64
+            || !font
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
+    }) {
+        return Err("Font must be a bundled id or system family of at most 64 characters".into());
+    }
+    if preferences
+        .font_size
+        .is_some_and(|size| !(13..=18).contains(&size))
+    {
+        return Err("Font size must be between 13 and 18".into());
     }
     Ok(())
 }
@@ -115,6 +134,15 @@ impl PreferenceStore {
     pub fn get(&self) -> &Preferences {
         &self.value
     }
+    pub fn clear_account(&mut self, id: &str) -> Result<(), String> {
+        if self.value.account.as_deref() == Some(id) {
+            let mut next = self.value.clone();
+            next.account = None;
+            crate::store::save(&self.database, "preferences", &next)?;
+            self.value = next;
+        }
+        Ok(())
+    }
     pub fn update(&mut self, input: PreferencesInput) -> Result<Preferences, String> {
         let mut next = self.value.clone();
         if let Some(mcp) = input.mcp {
@@ -128,6 +156,12 @@ impl PreferenceStore {
         }
         if let Some(accent) = input.accent {
             next.accent = (!accent.is_empty()).then_some(accent.to_ascii_lowercase());
+        }
+        if let Some(font) = input.font {
+            next.font = Some(font);
+        }
+        if let Some(size) = input.font_size {
+            next.font_size = Some(size);
         }
         if let Some(notifications) = input.notifications {
             next.notification_position_chosen |=
@@ -148,6 +182,37 @@ impl PreferenceStore {
 mod tests {
     use super::*;
 
+    #[test]
+    fn typography_is_bounded_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path()).unwrap();
+        let mut store = PreferenceStore::open(db.clone()).unwrap();
+        for value in [
+            serde_json::json!({"font":""}),
+            serde_json::json!({"font":"   "}),
+            serde_json::json!({"font":"x".repeat(65)}),
+            serde_json::json!({"font":"Arial; color:red"}),
+            serde_json::json!({"font_size":12}),
+            serde_json::json!({"font_size":19}),
+        ] {
+            assert!(
+                store
+                    .update(serde_json::from_value(value).unwrap())
+                    .is_err()
+            );
+        }
+        for font in ["mona", "inter", "geist", "plex", "atkinson", "Segoe UI"] {
+            store
+                .update(
+                    serde_json::from_value(serde_json::json!({"font":font,"font_size":18}))
+                        .unwrap(),
+                )
+                .unwrap();
+        }
+        let restored = PreferenceStore::open(db).unwrap();
+        assert_eq!(restored.get().font.as_deref(), Some("Segoe UI"));
+        assert_eq!(restored.get().font_size, Some(18));
+    }
     #[test]
     fn legacy_default_moves_to_top_but_new_position_choices_persist() {
         let dir = tempfile::tempdir().unwrap();
@@ -188,6 +253,8 @@ mod tests {
             account: Some("work".into()),
             workspace: Some(workspace),
             accent: None,
+            font: None,
+            font_size: None,
             notifications: None,
             remote_images: Some(true),
         };
@@ -216,6 +283,8 @@ mod tests {
             account: None,
             workspace: None,
             accent: Some(value.into()),
+            font: None,
+            font_size: None,
             notifications: None,
             remote_images: None,
         };

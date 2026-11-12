@@ -106,6 +106,12 @@ implemented. See [self-hosting](self-hosting.md).
 Device synchronization is a later goal. Keep identifiers and storage ownership clear,
 but do not build speculative sync code before it is designed.
 
+The local Host can retain UI and owner authentication while proxying API bodies and
+SSE to a daemon through an absolute `unix:` socket address. Its persisted
+`upstream.json` references the daemon's private owner-token file; scoped callers
+cannot acquire that owner authority. Upstream switching and systemd user-service
+controls remain local and are refused by remote Hosts and socket daemons.
+
 ## Working rules
 
 - Prefer working vertical slices, existing patterns, small modules and explicit

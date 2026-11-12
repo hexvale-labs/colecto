@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ServerSettings from '../../ServerSettings.svelte';
   import CommandRunner from '../../CommandRunner.svelte';
   import type { Command, MessageHit } from '../../CommandRunner.svelte';
   import type { Labels } from '../../lib/api';
@@ -15,7 +16,10 @@
   import { mailExtensions } from '../registry';
   import ApiKeys from '../../ApiKeys.svelte';
   import SendApprovals from '../../SendApprovals.svelte';
+  import ExtensionSettings from './ExtensionSettings.svelte';
   import AccountSettings from '../../AccountSettings.svelte';
+  import { applyTypography, DEFAULT_FONT, DEFAULT_TEXT_SIZE } from '../../lib/typography';
+  import { setBusAccount } from '../../lib/bus';
   import { createServices, hostService } from '../../lib/api';
   import type { Draft, MailItem, AccountInfo, SecurityInfo } from '../../lib/api';
   import type { Workspace } from '../../App.svelte';
@@ -38,15 +42,24 @@
   let accountId = $state('demo');
   // Settings is a card over the workspace: the workspace stays mounted behind it, so opening it never closes a message or draft.
   let settingsOpen = $state(false);
+  // Enabled extensions that declare settings each get a page, grouped by bundled or third-party.
+  let extensionPages = $derived(extensionStates.filter(e => e.enabled && e.manifest.settings?.length));
+  let currentExtension = $derived(extensionPages.find(e => `extension:${e.manifest.id}` === settingsPage));
   let settingsPage = $state<SettingsPage>('accounts');
   let settingsDirty = $state(false);
   let reviewRequest = $state<string | null>(null);
   let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'top' });
   let accent = $state<string | null>(null);
   let remoteImages = $state(false);
+  let font = $state(DEFAULT_FONT);
+  let textSize = $state(DEFAULT_TEXT_SIZE);
+  $effect(() => { void applyTypography(font, textSize); });
+  $effect(() => setBusAccount(accountId));
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); });
-  function savePreferences(input: { accent?: string; notifications?: NotificationPreferences; remote_images?: boolean }) {
+  function savePreferences(input: { accent?: string; notifications?: NotificationPreferences; remote_images?: boolean; font?: string; font_size?: number }) {
     if (input.accent !== undefined) accent = input.accent || null;
+    if (input.font !== undefined) font = input.font;
+    if (input.font_size !== undefined) textSize = input.font_size;
     if (input.notifications) notificationPrefs = input.notifications;
     if (input.remote_images !== undefined) remoteImages = input.remote_images;
     void hostService.savePreferences(input).catch(e => notify({ title: 'Could not save your preference', body: (e as Error).message }));
@@ -188,7 +201,7 @@
     accounts = nextAccounts; security = nextSecurity;
     connected = nextAccounts.find(a => a.id === accountId)?.connected ?? false;
   }
-  let accountOptions = $derived(accounts.length ? accounts.map(account => ({ value: account.id, label: account.settings?.name || account.settings?.address || 'Demo account', hint: account.settings?.address ?? 'Sample mail' })) : [{ value: 'demo', label: 'Demo account', hint: 'Sample mail' }]);
+  let accountOptions = $derived(accounts.length ? accounts.map(account => ({ value: account.id, label: account.settings?.name || account.settings?.address || 'Demo account', hint: !account.settings ? 'Sample mail' : account.settings.name ? account.settings.address : account.settings.protocol === 'jmap' ? 'JMAP' : account.settings.imap_host })) : [{ value: 'demo', label: 'Demo account', hint: 'Sample mail' }]);
   const folders = [{ name: 'Inbox', icon: 'inbox' }, { name: 'Drafts', icon: 'drafts' }, { name: 'Sent', icon: 'sent' }] as const;
   function selectAccount(next: string) {
     if (!accounts.some(account => account.id === next) || !leaveSettings() || !canLeave()) return;
@@ -395,6 +408,7 @@
     void preferences.then(saved => {
       savedLayout = parseLayout(saved?.workspace); layoutReady = true;
       accent = saved?.accent ?? null;
+      font = saved?.font || DEFAULT_FONT; textSize = saved?.font_size || DEFAULT_TEXT_SIZE;
       if (saved?.notifications) notificationPrefs = saved.notifications;
       remoteImages = saved?.remote_images ?? false;
     });
@@ -439,6 +453,7 @@
   </header>
   {#if accountError}<div class="account-error error-box" role="alert">{accountError}<button class="text-button" onclick={() => { accountError = ''; void refreshAccounts().catch(e => accountError = (e as Error).message); }}>Retry account settings</button></div>{/if}
   {#if layoutReady}<DockArea {layout} {panes} focus={panes.some(pane => pane.id === focus) ? focus : 'mailbox'} {compact} onchange={commitLayout} onactivate={activate}>
+    {#snippet header(pane)}{#if pane === 'reader'}{@render messageTabs()}{/if}{/snippet}
     {#snippet content(pane)}
       {#if pane === 'mailbox'}{@render mailboxPane()}
       {:else if pane === 'reader'}{@render readerPane()}
@@ -460,16 +475,27 @@
     <div class="settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" use:focusCard>
       <nav class="settings-nav" aria-label="Settings sections">
         <h1 id="settings-title">Settings</h1>
-        {#each settingsPages as page (page.id)}<button class="nav-item" class:active={settingsPage === page.id} aria-current={settingsPage === page.id ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(page.id)}><Icon name={page.icon} />{page.name}</button>{/each}
+        <div class="nav-group" role="group" aria-labelledby="settings-built-in">
+          <span class="nav-group-label" id="settings-built-in">Built-in</span>
+          {#each settingsPages as page (page.id)}<button class="nav-item" class:active={settingsPage === page.id} aria-current={settingsPage === page.id ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(page.id)}><Icon name={page.icon} /><span class="nav-label">{page.name}</span></button>{/each}
+          {#each extensionPages.filter(e => e.bundled) as extension (extension.manifest.id)}{@render extensionNav(extension)}{/each}
+        </div>
+        {#if extensionPages.some(e => !e.bundled)}
+          <div class="nav-group" role="group" aria-labelledby="settings-extensions">
+            <span class="nav-group-label" id="settings-extensions">Extensions</span>
+            {#each extensionPages.filter(e => !e.bundled) as extension (extension.manifest.id)}{@render extensionNav(extension)}{/each}
+          </div>
+        {/if}
       </nav>
       <div class="settings-main">
-        <header class="settings-head"><p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name}</strong></p><button class="icon-button" aria-label="Close settings" title="Close  Esc" disabled={busy} onclick={closeSettings}><Icon name="close" size={16} /></button></header>
+        <header class="settings-head"><p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name ?? currentExtension?.manifest.name ?? 'Extension'}</strong></p><button class="icon-button" aria-label="Close settings" title="Close  Esc" disabled={busy} onclick={closeSettings}><Icon name="close" size={16} /></button></header>
         <div class="settings-page">
-          {#if settingsPage === 'accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
-          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} onchange={(next) => savePreferences({ accent: next })} />
+          {#if settingsPage.startsWith('extension:')}{#if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
+          {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
+          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences} />
           {:else if settingsPage === 'notifications'}<NotificationSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
           {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
-          {:else if settingsPage === 'servers'}<section class="settings-section"><header class="section-head"><h2>Mail service</h2><p>You are connected to <strong class="selectable">{window.location.origin}</strong>. Accounts and saved drafts belong to this service.</p></header><div class="settings-card"><h3>Use another server</h3><p>Open a remote daemon’s HTTPS address. Your credentials stay on that server. Local services can also use HTTP on loopback.</p><form class="inline-form" onsubmit={visitServer}><label class="field">Server address<input type="url" bind:value={serverUrl} placeholder="https://mail.example.com" required autocomplete="url" /></label>{#if serverError}<p class="error-box" role="alert">{serverError}</p>{/if}<div class="button-row"><button class="secondary">Open server</button><button type="button" class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></div></form></div></section>
+          {:else if settingsPage === 'servers'}<ServerSettings />
           {:else if settingsPage === 'send-approvals'}<SendApprovals requestId={reviewRequest} />
           {:else if settingsPage === 'api-keys'}<ApiKeys {accounts} />
           {:else}{@render extensionSettings(workspace)}{/if}
@@ -480,6 +506,10 @@
 {/if}
 
 
+{#snippet extensionNav(extension: import('../../lib/api').ExtensionState)}
+  {@const id = `extension:${extension.manifest.id}` as const}
+  <button class="nav-item" class:active={settingsPage === id} aria-current={settingsPage === id ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(id)}><span class="nav-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1).toUpperCase()}</span><span class="nav-label">{extension.manifest.name}</span></button>
+{/snippet}
 {#snippet folderNav()}
 <nav class="folder-nav" aria-label="Mail folders">
   {#each folders as item (item.name)}<button class:active={folder === item.name} aria-current={folder === item.name ? 'page' : undefined} disabled={busy || !initialized} onclick={() => navigate(item.name)}><Icon name={item.icon} /><span>{item.name}</span>{#if folder === item.name && !loading && items.length}<span class="count" aria-hidden="true">{items.length}</span>{/if}</button>{/each}
@@ -516,8 +546,7 @@
   </div>
 {/snippet}
 
-{#snippet readerPane()}
-  <div class="stage">
+{#snippet messageTabs()}
     {#if currentTabs.length}<nav class="tab-strip" aria-label="Open messages">
       {#each currentTabs as tab (tab.id)}<div class="message-tab" class:active={view?.kind === 'message' && view.id === tab.id}>
         <button class="tab-title" aria-pressed={view?.kind === 'message' && view.id === tab.id} disabled={busy} onclick={() => activateTab(tab)} title={tab.subject}>{tab.subject}</button>
@@ -525,6 +554,11 @@
       </div>{/each}
       {#if currentTabs.length > 1}<button class="tab-close-all" aria-label="Close all message tabs" title="Close all tabs" disabled={busy} onclick={closeAllTabs}><Icon name="close" size={13} /><span>Close all</span></button>{/if}
     </nav>{/if}
+{/snippet}
+
+{#snippet readerPane()}
+  <div class="stage">
+    {#if compact}{@render messageTabs()}{/if}
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
         {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} {remoteImages} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />
@@ -542,3 +576,4 @@
     </div>
   </div>
 {/snippet}
+

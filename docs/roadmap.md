@@ -28,10 +28,14 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | --- | --- |
 | Dockable workspace, command runner, notifications, accent colour | Done |
 | Extensions: Wasm panels and overlays, install-time consent, z-index layers | Done |
+| Declarative extension settings, owner controls and per-guest reads | Done |
+| Named extension bus: guest requests/events and bundled integrations | Done |
 | Onboarding for the first account; demo account off by default | Next |
-| Font choice, loading screen, account avatars in Settings, selection polish | Next |
+| Font choice and text size, account rows and add/edit account dialog, account removal | Done |
+| Loading screen and selection polish | Done |
 | Custom ports in every server field | Next |
-| Install the daemon as a background service (systemd user unit, Windows logon task) | Next |
+| Install the daemon and notifier as Linux systemd user services from Connection | Done; real systemd validation pending |
+| Install the daemon as a Windows logon task | Next |
 | Stress testing with thousands of messages and very long HTML mail | Next |
 | Warning when an extension targets an API version that can no longer fully work | Later |
 

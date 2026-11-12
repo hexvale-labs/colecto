@@ -1,8 +1,10 @@
 //! Trusted HTTP adapter for bundled UI and isolated Wasm extensions.
 pub mod api_keys;
 pub mod approvals;
+mod bus;
 pub mod mcp;
 pub mod preferences;
+pub mod services;
 mod store;
 use api_keys::{ApiKeys, Principal};
 mod extensions;
@@ -57,6 +59,7 @@ pub(crate) type Events = tokio::sync::broadcast::Sender<(&'static str, String)>;
 #[derive(Clone)]
 struct Host {
     events: Events,
+    bus_replies: bus::Replies,
     keys: Arc<Mutex<ApiKeys>>,
     preferences: Arc<Mutex<preferences::PreferenceStore>>,
     approvals: Arc<Mutex<approvals::Approvals>>,
@@ -149,6 +152,10 @@ pub fn app_with_accounts(accounts: Accounts, authority: String, assets: PathBuf)
 fn build_app(host: Host, assets: Assets) -> Router {
     let api = Router::new()
         .route(
+            "/extensions/{id}/settings",
+            get(get_extension_settings).put(put_extension_settings),
+        )
+        .route(
             "/preferences",
             get(get_preferences).post(update_preferences),
         )
@@ -170,8 +177,12 @@ fn build_app(host: Host, assets: Assets) -> Router {
             axum::routing::post(review_extension)
                 .layer(DefaultBodyLimit::max(package::MAX_UPLOAD_BODY)),
         )
+        .route("/bus/{bus}/request", axum::routing::post(bus::request_http))
+        .route("/bus/events", axum::routing::post(bus::emit_http))
+        .route("/bus/replies/{id}", axum::routing::post(bus::reply_http))
         .route("/extensions/{id}/run", axum::routing::post(run_extension))
         .route("/accounts", get(list_accounts).post(upsert_account))
+        .route("/accounts/{id}", axum::routing::delete(remove_account))
         .route(
             "/accounts/{id}/disconnect",
             axum::routing::post(disconnect_account),
@@ -529,6 +540,22 @@ fn extension_service(
     epoch: u64,
     request: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    if request.get("operation").and_then(|v| v.as_str()) == Some("settings.read") {
+        if request.as_object().is_none_or(|o| o.len() != 1) {
+            return Err("Invalid settings request".into());
+        }
+        return host
+            .extensions
+            .lock()
+            .map_err(|_| "Extension policy unavailable")?
+            .settings_guest(extension, epoch);
+    }
+    if matches!(
+        request["operation"].as_str(),
+        Some("bus.request" | "bus.emit")
+    ) {
+        return bus::service(host, extension, account, epoch, request);
+    }
     let request: ServiceRequest =
         serde_json::from_value(request).map_err(|_| "Invalid service request")?;
     // Identity and account come from the Host invocation, never from guest input.
@@ -613,7 +640,7 @@ fn extension_service(
                 .map_err(|_| "Mail delivery failed")?;
             serde_json::to_value(true)
         }
-        MessagesOrganize | AppNavigate | WindowOverlay => {
+        MessagesOrganize | AppNavigate | WindowOverlay | ExtensionsBus => {
             return Err("Capability not granted".into());
         }
     };
@@ -994,6 +1021,24 @@ async fn upsert_account(
         .await
         .map(Json)
 }
+async fn remove_account(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<bool>, Failure> {
+    host_grant(&headers)?;
+    tokio::task::spawn_blocking(move || {
+        host.accounts.lock().map_err(|_| forbidden())?.remove(&id)?;
+        host.preferences
+            .lock()
+            .map_err(|_| forbidden())?
+            .clear_account(&id)
+            .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+        Ok(Json(true))
+    })
+    .await
+    .map_err(|_| forbidden())?
+}
 async fn disconnect_account(
     State(host): State<Host>,
     headers: HeaderMap,
@@ -1332,6 +1377,41 @@ async fn approve_send(
     .map_err(|_| approval_failure("Delivery outcome uncertain; do not retry".into()))?
 }
 
+async fn get_extension_settings(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    host.extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .settings(&id)
+        .map(Json)
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))
+}
+async fn put_extension_settings(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    input: Result<Json<serde_json::Map<String, serde_json::Value>>, JsonRejection>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    let Json(values) =
+        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid settings".into()))?;
+    let result = host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .update_settings(&id, values)
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+    let _ = host.events.send((
+        "extension.settings",
+        serde_json::json!({"id":id}).to_string(),
+    ));
+    Ok(Json(result))
+}
+
 #[cfg(test)]
 mod extension_service_tests {
     use super::*;
@@ -1358,6 +1438,7 @@ mod extension_service_tests {
         extensions.update("connection-panel", true).unwrap();
         let host = Host {
             events: tokio::sync::broadcast::channel(1).0,
+            bus_replies: Default::default(),
             keys: Arc::new(Mutex::new(ApiKeys::open(database.clone()).unwrap())),
             preferences: Arc::new(Mutex::new(
                 preferences::PreferenceStore::open(database.clone()).unwrap(),
@@ -1395,6 +1476,27 @@ mod extension_service_tests {
         assert_eq!(
             extension_service(&host, "connection-panel", "demo", epoch, forward).unwrap_err(),
             "Capability not granted"
+        );
+        assert_eq!(
+            extension_service(
+                &host,
+                "connection-panel",
+                "demo",
+                epoch,
+                serde_json::json!({"operation":"settings.read"})
+            )
+            .unwrap(),
+            serde_json::json!({})
+        );
+        assert!(
+            extension_service(
+                &host,
+                "connection-panel",
+                "demo",
+                epoch + 1,
+                serde_json::json!({"operation":"settings.read"})
+            )
+            .is_err()
         );
         let valid = serde_json::json!({"operation":"account.read"});
         assert_eq!(

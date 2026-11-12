@@ -10,6 +10,7 @@ use std::{
 
 fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
     let manifest: ExtensionManifest = toml::from_str(source).map_err(|e| e.to_string())?;
+    colecto_extension_api::validate_settings(&manifest.settings)?;
     if manifest.api_version != API_VERSION {
         return Err("Unsupported extension API version".into());
     }
@@ -49,6 +50,24 @@ fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
             return Err("Duplicate capability".into());
         }
     }
+    if let Some(bus) = &manifest.bus {
+        if !manifest.capabilities.contains(&Capability::ExtensionsBus) {
+            return Err("bus subscriptions require extensions.bus".into());
+        }
+        if bus.subscribe.len() > 32
+            || bus.subscribe.iter().any(|entry| {
+                entry.split_once('/').is_none_or(|(bus, name)| {
+                    bus.is_empty()
+                        || !bus
+                            .bytes()
+                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+                        || !crate::bus::valid_name(name)
+                })
+            })
+        {
+            return Err("Invalid bus subscriptions (maximum 32)".into());
+        }
+    }
     Ok(manifest)
 }
 
@@ -77,6 +96,7 @@ struct CachedPackage {
 }
 #[derive(Clone)]
 pub struct Extensions {
+    setting_values: HashMap<String, serde_json::Map<String, serde_json::Value>>,
     manifests: Vec<ExtensionManifest>,
     policy: Policy,
     database: Option<Database>,
@@ -99,6 +119,7 @@ impl Extensions {
         .map(|source| parse_manifest(source).expect("valid bundled manifest"))
         .collect();
         Self {
+            setting_values: HashMap::new(),
             manifests,
             policy: Policy {
                 version: 1,
@@ -125,6 +146,10 @@ impl Extensions {
                 Ok(policy)
             },
         )?;
+        extensions.setting_values =
+            crate::store::open(&database, "extension-settings", HashMap::new, |b| {
+                serde_json::from_slice(b).map_err(|e| e.to_string())
+            })?;
         extensions.database = Some(database);
         let mut legacy = false;
         for package in &mut extensions.policy.packages {
@@ -193,10 +218,56 @@ impl Extensions {
             {
                 return Err("Extension policy too large".into());
             }
+            crate::store::save(database, "extension-settings", &next.setting_values)?;
             crate::store::save(database, "extensions", &next.policy)?;
         }
         *self = next;
         Ok(())
+    }
+    pub fn settings(&self, id: &str) -> Result<serde_json::Value, String> {
+        let manifest = self.manifest(id).ok_or("Unknown extension")?;
+        let mut values = serde_json::Map::new();
+        for setting in &manifest.settings {
+            let value = self
+                .setting_values
+                .get(id)
+                .and_then(|v| v.get(&setting.key))
+                .filter(|v| setting.accepts(v))
+                .unwrap_or(&setting.default);
+            values.insert(setting.key.clone(), value.clone());
+        }
+        Ok(serde_json::json!({"schema": manifest.settings, "values": values}))
+    }
+    pub fn settings_guest(&self, id: &str, epoch: u64) -> Result<serde_json::Value, String> {
+        if !self.cache.get(id).is_some_and(|p| p.generation == epoch)
+            || self.policy.disabled.contains(id)
+        {
+            return Err("Extension disabled or stale".into());
+        }
+        Ok(self.settings(id)?["values"].clone())
+    }
+    pub fn update_settings(
+        &mut self,
+        id: &str,
+        values: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        let manifest = self.manifest(id).ok_or("Unknown extension")?;
+        for (key, value) in &values {
+            if !manifest
+                .settings
+                .iter()
+                .any(|s| s.key == *key && s.accepts(value))
+            {
+                return Err(format!("Invalid setting: {key}"));
+            }
+        }
+        let mut next = self.clone();
+        next.setting_values
+            .entry(id.into())
+            .or_default()
+            .extend(values);
+        self.commit(next)?;
+        self.settings(id)
     }
     pub fn list(&self, _account: &str) -> Vec<ExtensionState> {
         self.manifests
@@ -271,7 +342,10 @@ impl Extensions {
         let manifest = parse_manifest(&source)?;
         validate_manifest(&manifest)?;
         if self.manifest(&manifest.id).is_some() {
-            return Err("Extension ID already installed".into());
+            return Err(format!(
+                "An extension with the ID `{}` is already installed",
+                manifest.id
+            ));
         }
         if self.policy.packages.len() >= MAX_INSTALLED {
             return Err("Extension package limit reached".into());
@@ -315,6 +389,7 @@ impl Extensions {
             return Err("Only installed third-party packages can be removed".into());
         }
         let mut next = self.clone();
+        next.setting_values.remove(id);
         next.policy.packages.retain(|p| p.manifest.id != id);
         next.cache.remove(id);
         next.memory_packages.remove(id);
@@ -384,6 +459,40 @@ fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn duplicate_ids_and_bus_subscriptions() {
+        let mut extensions = Extensions::bundled();
+        let base =
+            include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");
+        let module = wat::parse_str("(module (func (export \"run\")))".replace("\\", "")).unwrap();
+        for id in ["reader", "connection-panel"] {
+            let source = base.replace("connection-panel", id);
+            if id == "connection-panel" {
+                extensions.install(&source, module.clone()).unwrap();
+            }
+            assert_eq!(
+                extensions.install(&source, module.clone()).unwrap_err(),
+                format!("An extension with the ID `{id}` is already installed")
+            );
+        }
+        let bus = base.replace("account.read", "extensions.bus");
+        assert!(
+            parse_manifest(&format!(
+                "{bus}\n[bus]\nsubscribe = ['reader/v1/message_opened']"
+            ))
+            .is_ok()
+        );
+        for source in [
+            format!("{base}\n[bus]\nsubscribe = []"),
+            format!("{bus}\n[bus]\nsubscribe = ['reader/INVALID']"),
+            format!(
+                "{bus}\n[bus]\nsubscribe = [{}]",
+                vec!["'reader/v1/x'"; 33].join(",")
+            ),
+        ] {
+            assert!(parse_manifest(&source).is_err());
+        }
+    }
     #[test]
     fn compiled_cache_reuses_modules_but_instances_are_fresh_and_reinstall_invalidates() {
         let mut extensions = Extensions::bundled();
@@ -513,5 +622,62 @@ mod tests {
             br#"{"version":1,"disabled":[],"grants":[{"nonsense":"obsolete"}],"packages":[]}"#;
         let policy: Policy = serde_json::from_slice(old).unwrap();
         extensions.check(&policy).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    #[test]
+    fn settings_validate_persist_and_clear_on_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        let mut extensions = Extensions::open(database.clone()).unwrap();
+        let source = format!(
+            "{}\n[[settings]]\nkey='speed'\nlabel='Speed'\ntype='range'\ndefault=10\nmin=2\nmax=30\n",
+            include_str!("../../../docs/extensions/examples/connection-panel/extension.toml")
+        );
+        let module = wat::parse_str(include_str!(
+            "../../../docs/extensions/examples/connection-panel/module.wat"
+        ))
+        .unwrap();
+        extensions.install(&source, module.clone()).unwrap();
+        for value in [
+            serde_json::json!({"speed":31}),
+            serde_json::json!({"speed":"10"}),
+            serde_json::json!({"unknown":10}),
+        ] {
+            assert!(
+                extensions
+                    .update_settings("connection-panel", value.as_object().unwrap().clone())
+                    .is_err()
+            );
+        }
+        extensions
+            .update_settings(
+                "connection-panel",
+                serde_json::json!({"speed":12}).as_object().unwrap().clone(),
+            )
+            .unwrap();
+        assert_eq!(
+            Extensions::open(database.clone())
+                .unwrap()
+                .settings("connection-panel")
+                .unwrap()["values"]["speed"],
+            12
+        );
+        extensions.remove("connection-panel").unwrap();
+        extensions.install(&source, module).unwrap();
+        assert_eq!(
+            extensions.settings("connection-panel").unwrap()["values"]["speed"],
+            10
+        );
+        for bad in [
+            source.replace("default=10", "default=31"),
+            source.replace("key='speed'", "key='Bad'"),
+            source.replace("label='Speed'", "label='Speed'\nunknown=1"),
+        ] {
+            assert!(parse_manifest(&bad).is_err());
+        }
     }
 }

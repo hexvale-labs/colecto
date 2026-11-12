@@ -1,8 +1,12 @@
 async function openExtensions(page: import('@playwright/test').Page) {
   // Settings is a card over the workspace; open it unless it is open, or the workspace is off and Extensions shows on its own.
   const settings = page.getByRole('button', { name: 'Settings', exact: true });
-  if (!await page.getByRole('dialog', { name: 'Settings' }).count() && await settings.count()) await settings.click();
-  await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const extensions = page.getByRole('button', { name: 'Extensions', exact: true });
+  // Counting does not wait, so first let the app mount one of the three.
+  await expect(settings.or(dialog).or(extensions).first()).toBeVisible();
+  if (!await dialog.count() && await settings.count()) await settings.click();
+  await extensions.click();
 }
 import { test, expect, ownerToken, chooseAccount } from './fixtures';
 
@@ -125,14 +129,16 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
   await page.getByLabel('Confirm master password').fill('correct horse battery staple');
   await page.getByRole('button', { name: 'Enable password protection' }).click();
   await expect(page.getByText('Password protection enabled', { exact: true })).toBeVisible({ timeout: 20000 });
-  await page.getByLabel('Account name (optional)').fill('Work');
+  await expect(page.getByLabel('Name (optional)')).not.toBeVisible();
+  await page.getByRole('button', { name: 'Add account', exact: true }).click();
+  await page.getByLabel('Name (optional)').fill('Work');
   await page.getByLabel('Email address', { exact: true }).fill('work@example.test');
-  await page.getByLabel('IMAP host').fill('imap.example.test');
-  await page.getByLabel('SMTP host').fill('smtp.example.test');
+  await page.getByLabel('Incoming (IMAP) server').fill('imap.example.test');
+  await page.getByLabel('Outgoing (SMTP) server').fill('smtp.example.test');
   await page.getByLabel('Username').fill('work@example.test');
-  await page.getByLabel('Password or app password').fill('provider-secret');
+  await page.getByLabel('Password', { exact: true }).fill('provider-secret');
   await page.getByRole('button', { name: 'Save account', exact: true }).click();
-  await expect(page.getByText('Account saved. Open Inbox to check the connection.')).toBeVisible();
+  await expect(page.getByText('Work saved. Colecto checks the connection in the background.')).toBeVisible();
   await page.getByRole('button', { name: 'Close settings' }).click();
   await chooseAccount(page, 'Work');
   await page.getByRole('button', { name: /^Drafts/ }).click();
@@ -271,7 +277,7 @@ test('owner generates a scoped key, sees its secret once, and revokes it on a ph
   await page.getByRole('button', { name: 'API keys', exact: true }).click();
   await page.getByLabel('Key name', { exact: true }).fill('Phone assistant');
   await page.getByRole('checkbox', { name: 'Demo account', exact: true }).check();
-  await page.getByRole('checkbox', { name: 'messages.list', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'List messages', exact: true }).check();
   await page.getByRole('button', { name: 'Generate API key', exact: true }).click();
   const secret = page.getByRole('textbox', { name: 'API key secret', exact: true });
   await expect(secret).toHaveValue(/^colecto_/);

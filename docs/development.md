@@ -84,7 +84,11 @@ just perf-check       # verification plus three recorded resource runs
 ```
 
 The browser tests run a separate Host on port 4179 with temporary sample data and do
-not touch your `.colecto` directory. Playwright may need system browser libraries.
+not touch your `.colecto` directory. Set `COLECTO_TEST_PORT` to use another port
+when checkouts run tests concurrently. Set `COLECTO_ASSETS` to the absolute path of
+this checkout’s `ui/dist` when reusing a Host binary built in another checkout.
+The shared Playwright fixture skips the startup-screen delay; timing tests opt back
+in. Playwright may need system browser libraries.
 
 `ui/tests/html-mail.spec.ts` opens five published company email templates
 (`ui/tests/fixtures/html-mail/`, sources and licences in its `README.md`) in Chromium

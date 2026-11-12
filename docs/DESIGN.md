@@ -32,7 +32,9 @@ In practical terms:
 ## Layout
 
 A slim top bar, then the workspace, flush to the window edges. Nothing floats on the
-ground: panes meet at 1px separators, like the panels of a game engine's editor.
+ground: draw each boundary once; prefer spacing and tone over lines. Dock splitters
+provide the single divider between adjacent panes. Pane headers and list footers
+use spacing rather than additional rules.
 
 - **Top bar**: brand on the left, the command palette trigger (`Ctrl K`) centred, and
   Settings on the right. These are host controls and do not move. Compose joins them
@@ -55,10 +57,18 @@ Settings → Extensions. The layout is an owner preference in the Host's databas
 it follows you between devices. Panes stay mounted while they move or sit behind
 another tab, so rearranging never loses a draft.
 
+Settings controls follow the value's shape: a switch for on/off, a segmented control
+for two to four choices, a list for more, and a slider (`.slider`, accent-filled up to
+the thumb) for a bounded number, with the current value beside its label and the ends
+underneath. Settings save as they change; there is no Save button. An extension's own
+settings page (`ExtensionSettings.svelte`) renders its manifest's `[[settings]]` with
+these same controls.
+
 Settings open as a card over the workspace, which stays mounted (and inert) behind a
 dimmed backdrop, so an open message or draft is still there when Settings close. The
 card has a section list, a breadcrumb and a close button; Escape or a click on the
-backdrop closes it. On phones the card fills the screen. Under 800 px the app shows one
+backdrop closes it. On phones the card fills the screen (under 800 px wide, and on short
+touch screens such as a phone on its side). Under 800 px the app shows one
 pane at a time, and folders become a bottom tab bar.
 
 Reordering groups that share a row or column keeps every group's size; only a drop that
@@ -107,15 +117,19 @@ the same correspondent is recognisable at a glance.
 Mona Sans (variable weight and width, bundled through Fontsource so the desktop app
 works offline). UI text is 13 to 14 px; message bodies are 15.5 px with 1.68 line
 height and a 68ch measure. Headings use a slightly wider width (`font-stretch`
-106 to 108 %) rather than a second typeface. No all-caps eyebrow labels. Monospace
+106 to 108 %) rather than a second typeface. No all-caps eyebrow labels, with one
+exception: the Settings section list groups its pages under small uppercase *Built-in*
+and *Extensions* labels (written in normal case, uppercased with CSS so screen readers
+read words). Monospace
 is only for real identifiers such as extension capabilities.
 
 ## Signature
 
 The selected message carries a small, softly glowing mint dot, the same
 incoming-message node as in the logo. It means "this is the one you are reading".
-The same mint marks the active pane tab's icon and underline, a connected account's
-status dot (its glow is never clipped) and the drop preview while docking. The welcome
+The same mint marks the active pane tab's icon and underline and the drop preview
+while docking. A connected account's status dot is the one exception: it is always
+green (see below), whatever the accent. The welcome
 mark sits plainly in the empty reader, without a glow. Empty states may be a little warm (a time-of-day
 greeting, a dry line when there are no API keys) but stay short. If unread state is added
 later, show it with weight, not another dot.
@@ -159,3 +173,44 @@ more than a few options, and a segmented control for two or three. Checkboxes,
 switches, file pickers (`FilePick.svelte`: a labelled drop zone over the native
 input) and scrollbars are themed from the palette. Icons come from
 `Icon.svelte` (Lucide paths, one stroke weight).
+
+## Connection status and startup
+
+`--status-online` is a calm green independent of the configurable accent. Connected
+account dots use it with a subtle 2400 ms expanding ring (scale 1 to 2.4, opacity
+0.5 to 0). Disconnected dots stay neutral. Reduced motion disables the ring.
+
+Desktop message tabs share the dock header with the Reader tab; its drag handle,
+arrange menu and pane semantics remain available. Compact mode keeps message tabs
+inside the reader because it has no dock header. Tab strips scroll horizontally.
+
+The static `index.html` startup splash (the full logo on `--ground`; the wordmark is
+vector, so it needs no web font) paints before mounting, with a two-frame
+paint checkpoint. It stays for at least 800 ms after that checkpoint and until a
+usable app surface exists, then fades over 200 ms with ease-out without moving the
+layout. Reduced motion removes the fade. Automated browsers can set sessionStorage
+`colecto.fastStartup` to `1` to skip timing; normal browsers ignore that hook.
+
+## Typography and settings controls
+
+Appearance offers five bundled fonts: Mona Sans (the default, in the main bundle),
+Inter, Geist, IBM Plex Sans and Atkinson Hyperlegible Next. The others load only
+when chosen or when the font menu opens, so the default bundle does not grow. The menu
+lists **Bundled** and **System** families, each previewed in its own face. Browsers
+cannot list installed fonts without asking (WebKit cannot at all), so System shows the
+common families `probeSystemFonts()` in `lib/typography.ts` finds by measuring text;
+where the Local Font Access API exists, **List all installed fonts** asks for the full list.
+
+Text size is four steps (13, 14, 16 and 18 px; 14 is the design size), shown as "Aa"
+samples. Every `font-size` in the stylesheets is written as
+`calc(<px> * var(--text-scale))`, and the setting sets `--text-scale`. Write new font
+sizes the same way. Spacing and pane geometry stay in px on purpose, so docking and
+layout maths do not change with text size.
+
+Owner preferences store `font` (a bundled id or a system family, at most 64
+characters) and `font_size` (13 to 18).
+
+Keep switches for booleans, radio segments for small exclusive choices, accent
+swatches for colours and the corner picker for notification placement. Native
+account dialogs trap focus, support Escape, scroll within the viewport and keep
+destructive actions behind a confirmation.

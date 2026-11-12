@@ -350,6 +350,32 @@ impl Accounts {
         }
         result
     }
+    pub fn remove(&mut self, id: &str) -> Result<(), Error> {
+        let handle = self.store(id)?;
+        let mut store = handle.try_lock().map_err(|_| busy())?;
+        let mut records = self.vault.accounts().to_vec();
+        if !records.iter().any(|a| a.id == id) {
+            return Err(invalid("Sample account cannot be removed"));
+        }
+        let mut secrets = self
+            .vault
+            .secrets
+            .as_ref()
+            .ok_or_else(|| invalid("Unlock credentials first"))?
+            .clone();
+        records.retain(|a| a.id != id);
+        secrets.remove(id);
+        let result = self.vault.commit(records, secrets);
+        if !self.vault.accounts().iter().any(|a| a.id == id) {
+            store.disconnect();
+            self.stores.remove(id);
+            self.snapshots.remove(id);
+        }
+        result?;
+        // The vault removal stays committed if cleanup fails; leftover rows are harmless
+        // and remove_account_data can safely be retried.
+        self.database.remove_account_data(id)
+    }
     pub fn security(&self) -> SecurityInfo {
         SecurityInfo {
             cleanup_pending: self.vault.cleanup_pending(),
@@ -440,6 +466,123 @@ impl Accounts {
 #[cfg(test)]
 mod storage_tests {
     use super::*;
+    #[test]
+    // The fixture writes rows on a single-threaded block_on; nothing else contends for the lock.
+    #[allow(clippy::await_holding_lock)]
+    fn removal_deletes_only_the_selected_accounts_data() {
+        struct NoKeys;
+        impl SecretStore for NoKeys {
+            fn get(&self, _: &str) -> Result<String, Error> {
+                Err(Error::Missing)
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), Error> {
+                Ok(())
+            }
+            fn delete(&self, _: &str) -> Result<(), Error> {
+                Ok(())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut accounts =
+            Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(NoKeys)).unwrap();
+        // A per-run password, so no credential is written into the source.
+        let password = format!("{0}-{0}", dir.path().file_name().unwrap().to_string_lossy());
+        accounts.protect(&password).unwrap();
+        assert!(accounts.remove("demo").is_err());
+        assert!(accounts.remove("unknown").is_err());
+        let mut ids = Vec::new();
+        for address in ["a@example.test", "b@example.test"] {
+            let input = serde_json::from_value(serde_json::json!({"name":"Test","address":address,"protocol":"imap","imap_host":"imap.example.test","smtp_host":"smtp.example.test","username":address,"secret":"secret"})).unwrap();
+            let id = accounts.upsert(input).unwrap().id;
+            ids.push(id);
+        }
+        let handle = accounts.store(&ids[0]).unwrap();
+        accounts.lock().unwrap();
+        assert!(
+            accounts
+                .remove(&ids[0])
+                .unwrap_err()
+                .to_string()
+                .contains("Unlock credentials first")
+        );
+        accounts.unlock(&password).unwrap();
+        for id in &ids {
+            for name in ["drafts", "labels", "folders"] {
+                accounts
+                    .database
+                    .set_record(&format!("account:{id}"), name, 1, b"local data")
+                    .unwrap();
+            }
+            futures_executor::block_on(async {
+                let connection = accounts.database.connection().unwrap();
+                connection
+                    .execute(
+                        "INSERT INTO snapshots VALUES (?1,'provider','inbox',1,'[]')",
+                        [id.as_str()],
+                    )
+                    .await
+                    .unwrap();
+                connection
+                    .execute(
+                        "INSERT INTO mailbox_identity VALUES (?1,'provider','inbox','identity')",
+                        [id.as_str()],
+                    )
+                    .await
+                    .unwrap();
+            });
+        }
+        let watcher = handle.lock().unwrap().push_watcher().unwrap();
+        accounts.remove(&ids[0]).unwrap();
+        assert!(watcher.account.lock().unwrap().is_none());
+        assert!(accounts.store(&ids[0]).is_err());
+        assert!(!accounts.vault.accounts().iter().any(|a| a.id == ids[0]));
+        assert!(
+            !accounts
+                .vault
+                .secrets
+                .as_ref()
+                .unwrap()
+                .contains_key(&ids[0])
+        );
+        assert!(
+            accounts
+                .vault
+                .secrets
+                .as_ref()
+                .unwrap()
+                .contains_key(&ids[1])
+        );
+        for (index, id) in ids.iter().enumerate() {
+            for name in ["drafts", "labels", "folders"] {
+                assert_eq!(
+                    accounts
+                        .database
+                        .get_record(&format!("account:{id}"), name, 1)
+                        .unwrap()
+                        .is_some(),
+                    index == 1
+                );
+            }
+            futures_executor::block_on(async {
+                let connection = accounts.database.connection().unwrap();
+                for table in ["snapshots", "mailbox_identity"] {
+                    let mut rows = connection
+                        .query(
+                            &format!("SELECT COUNT(*) FROM {table} WHERE account=?1"),
+                            [id.as_str()],
+                        )
+                        .await
+                        .unwrap();
+                    assert_eq!(
+                        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
+                        index as i64
+                    );
+                }
+            });
+        }
+        accounts.database.remove_account_data(&ids[0]).unwrap();
+    }
+
     #[test]
     fn vault_lock_revokes_detached_push_credentials() {
         struct NoKeys;
