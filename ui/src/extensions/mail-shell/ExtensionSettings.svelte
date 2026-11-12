@@ -101,18 +101,18 @@
 
 <style>
   .range-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
-  .range-head label { color: var(--ink); font-size: 15px; font-weight: 640; letter-spacing: -0.01em; }
+  .range-head label { color: var(--ink); font-size: calc(15px * var(--text-scale)); font-weight: 640; letter-spacing: -0.01em; }
   .range > * { max-width: 480px; }
-  .range-head output { min-width: 6ch; color: var(--ink-2); font-size: 13px; font-weight: 560; text-align: right; }
-  .settings-card > p, .segmented-field > p { margin: 0 0 4px; max-width: 58ch; color: var(--ink-2); font-size: 13.5px; line-height: 1.55; }
+  .range-head output { min-width: 6ch; color: var(--ink-2); font-size: calc(13px * var(--text-scale)); font-weight: 560; text-align: right; }
+  .settings-card > p, .segmented-field > p { margin: 0 0 4px; max-width: 58ch; color: var(--ink-2); font-size: calc(13.5px * var(--text-scale)); line-height: 1.55; }
   .slider { margin-top: 12px; }
-  .range-ends { display: flex; justify-content: space-between; margin-top: 6px; color: var(--ink-3); font-size: 11.5px; }
+  .range-ends { display: flex; justify-content: space-between; margin-top: 6px; color: var(--ink-3); font-size: calc(11.5px * var(--text-scale)); }
   .segmented-field .segmented { margin-top: 10px; }
   .choice-select { margin-top: 10px; max-width: 280px; }
   .field { margin-top: 0; max-width: 440px; }
-  .hint { margin-top: 6px; color: var(--ink-3); font-size: 12.5px; }
+  .hint { margin-top: 6px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
   .footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .footer .text-button:disabled { color: var(--ink-3); }
-  .save-state { color: var(--ink-3); font-size: 12.5px; opacity: 0; transition: opacity 200ms var(--ease-out); }
+  .save-state { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); opacity: 0; transition: opacity 200ms var(--ease-out); }
   .save-state.visible { opacity: 1; }
 </style>

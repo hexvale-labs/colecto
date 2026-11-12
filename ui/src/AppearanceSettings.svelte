@@ -1,29 +1,23 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { hostService } from './lib/api';
-  import { applyTypography, previewBundledFonts } from './lib/typography';
-  import Select from './Select.svelte';
-  import { bundledFonts, installedFonts } from './lib/typography';
   import Icon from './Icon.svelte';
-  let { value, onchange, font = 'mona', fontSize = 14 }: { value: string | null; onchange: (accent: string) => void; font?: string; fontSize?: number } = $props();
-  let typographyError = $state('');
-  onMount(() => { void hostService.preferences().then(p => { font = p.font ?? 'mona'; fontSize = p.font_size ?? 14; }).catch(e => typographyError = e.message); });
-  async function ontypography(change: { font?: string; font_size?: number }) {
-    try { const p = await hostService.savePreferences(change); font = p.font ?? 'mona'; fontSize = p.font_size ?? 14; await applyTypography(font, fontSize); typographyError = ''; }
-    catch (e) { typographyError = (e as Error).message; }
-  }
-  let systemFonts = $state<string[]>(installedFonts());
+  import Select from './Select.svelte';
+  import { bundledFonts, canListAllFonts, familyOf, listAllFonts, loadBundled, probeSystemFonts, textSizes } from './lib/typography';
+  let { value, font, textSize, onchange, ontypography }: {
+    value: string | null; font: string; textSize: number;
+    onchange: (accent: string) => void; ontypography: (change: { font?: string; font_size?: number }) => void;
+  } = $props();
+  let systemFonts = $state(probeSystemFonts());
   let fontNote = $state('');
-  let options = $derived([
-    ...bundledFonts.map(item => ({ ...item, group: 'BUNDLED' })),
-    ...Array.from(new Set([...systemFonts, ...(!bundledFonts.some(item => item.value === font) ? [font] : [])])).map(family => ({ value: family, label: family, family, group: 'SYSTEM' })),
+  let fontOptions = $derived([
+    ...bundledFonts.map(item => ({ value: item.id, label: item.name, family: item.family, group: 'Bundled' })),
+    // A saved system font stays listed even on a device that cannot detect it.
+    ...[...new Set([...systemFonts, ...(bundledFonts.some(item => item.id === font) ? [] : [font])])]
+      .map(family => ({ value: family, label: family, family, group: 'System' })),
   ]);
-  async function discover() {
-    const local = window as unknown as { queryLocalFonts?: () => Promise<{ family: string }[]> };
-    try {
-      if (local.queryLocalFonts) systemFonts = [...new Set((await local.queryLocalFonts()).map(item => item.family))].filter(family => family.length <= 64).sort();
-      else fontNote = 'Showing installed fonts detected on this device.';
-    } catch { fontNote = 'Font access was declined. Showing detected system fonts.'; }
+  async function listAll() {
+    fontNote = '';
+    try { systemFonts = await listAllFonts(); fontNote = `${systemFonts.length} installed fonts listed.`; }
+    catch { fontNote = 'Colecto was not allowed to list your fonts. Showing common ones it found.'; }
   }
   const DEFAULT_ACCENT = '#a2d6b1';
   // Light, low-chroma tones that stay readable as text and as a fill on the dark ground.
@@ -45,19 +39,28 @@
 
 <section class="settings-section" aria-labelledby="appearance-title">
   <header class="section-head"><h2 id="appearance-title">Appearance</h2>
-  <p>Colecto stays dark. Pick the accent used for selection, focus and primary buttons.</p></header>
-  <div class="settings-card typography-settings">
-    <h3>Typography</h3>{#if typographyError}<p role="alert">{typographyError}</p>{/if}
-    <p>Bundled fonts work offline. System fonts must be installed on each device.</p>
-    <Select onopen={() => { void previewBundledFonts().catch(() => {}); }} label="Interface font" value={font} {options} onchange={(font) => ontypography({ font })} />
-    <button class="text-button" onclick={discover}>Find system fonts</button>
-    {#if fontNote}<p role="status">{fontNote}</p>{/if}
-    <fieldset class="segmented-field"><legend>Font size</legend><div class="segmented">
-      {#each [{ size: 13, label: 'S' }, { size: 14, label: 'M' }, { size: 16, label: 'L' }, { size: 18, label: 'XL' }] as item}
-        <label><input type="radio" name="font-size" checked={fontSize === item.size} onchange={() => ontypography({ font_size: item.size })} />{item.label}<small>{item.size}px</small></label>
-      {/each}
-    </div></fieldset>
-    <p style:font-size={fontSize + 'px'}>The quick brown fox brings your next message.</p>
+  <p>Colecto stays dark. Choose how text looks and the accent used for selection, focus and primary buttons.</p></header>
+  <div class="settings-card">
+    <h3 id="font-title">Font</h3>
+    <p>Bundled fonts work offline on every device. System fonts must be installed where you use Colecto.</p>
+    <div class="font-picker">
+      <Select label="Interface font" value={font} options={fontOptions} onopen={() => void loadBundled().catch(() => {})} onchange={(next) => ontypography({ font: next })}>
+        {#snippet trigger(current)}<span class="font-current" style:font-family={familyOf(current?.value ?? font)}>{current?.label ?? font}</span>{/snippet}
+      </Select>
+      {#if canListAllFonts()}<button type="button" class="text-button" onclick={listAll}>List all installed fonts</button>{/if}
+    </div>
+    {#if fontNote}<p class="hint" role="status">{fontNote}</p>{/if}
+  </div>
+  <div class="settings-card">
+    <fieldset class="segmented-field">
+      <legend><h3>Text size</h3></legend>
+      <p>Scales text across the app. Spacing stays compact.</p>
+      <div class="segmented text-sizes">
+        {#each textSizes as item (item.size)}
+          <label title={`${item.name}, ${item.size}px`}><input type="radio" name="text-size" checked={textSize === item.size} onchange={() => ontypography({ font_size: item.size })} /><span class="sample" style:font-size={`${item.size + 1}px`} aria-hidden="true">Aa</span><span class="sr-only">{item.name}</span></label>
+        {/each}
+      </div>
+    </fieldset>
   </div>
   <div class="settings-card">
     <h3 id="accent-title">Accent colour</h3>

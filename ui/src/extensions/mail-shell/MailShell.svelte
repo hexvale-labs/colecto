@@ -17,6 +17,7 @@
   import SendApprovals from '../../SendApprovals.svelte';
   import ExtensionSettings from './ExtensionSettings.svelte';
   import AccountSettings from '../../AccountSettings.svelte';
+  import { applyTypography, DEFAULT_FONT, DEFAULT_TEXT_SIZE } from '../../lib/typography';
   import { createServices, hostService } from '../../lib/api';
   import type { Draft, MailItem, AccountInfo, SecurityInfo } from '../../lib/api';
   import type { Workspace } from '../../App.svelte';
@@ -48,9 +49,14 @@
   let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'top' });
   let accent = $state<string | null>(null);
   let remoteImages = $state(false);
+  let font = $state(DEFAULT_FONT);
+  let textSize = $state(DEFAULT_TEXT_SIZE);
+  $effect(() => { void applyTypography(font, textSize); });
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); });
-  function savePreferences(input: { accent?: string; notifications?: NotificationPreferences; remote_images?: boolean }) {
+  function savePreferences(input: { accent?: string; notifications?: NotificationPreferences; remote_images?: boolean; font?: string; font_size?: number }) {
     if (input.accent !== undefined) accent = input.accent || null;
+    if (input.font !== undefined) font = input.font;
+    if (input.font_size !== undefined) textSize = input.font_size;
     if (input.notifications) notificationPrefs = input.notifications;
     if (input.remote_images !== undefined) remoteImages = input.remote_images;
     void hostService.savePreferences(input).catch(e => notify({ title: 'Could not save your preference', body: (e as Error).message }));
@@ -399,6 +405,7 @@
     void preferences.then(saved => {
       savedLayout = parseLayout(saved?.workspace); layoutReady = true;
       accent = saved?.accent ?? null;
+      font = saved?.font || DEFAULT_FONT; textSize = saved?.font_size || DEFAULT_TEXT_SIZE;
       if (saved?.notifications) notificationPrefs = saved.notifications;
       remoteImages = saved?.remote_images ?? false;
     });
@@ -482,7 +489,7 @@
         <div class="settings-page">
           {#if settingsPage.startsWith('extension:')}{#if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
           {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
-          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} onchange={(next) => savePreferences({ accent: next })} />
+          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences} />
           {:else if settingsPage === 'notifications'}<NotificationSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
           {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
           {:else if settingsPage === 'servers'}<section class="settings-section"><header class="section-head"><h2>Mail service</h2><p>You are connected to <strong class="selectable">{window.location.origin}</strong>. Accounts and saved drafts belong to this service.</p></header><div class="settings-card"><h3>Use another server</h3><p>Open a remote daemon’s HTTPS address. Your credentials stay on that server. Local services can also use HTTP on loopback.</p><form class="inline-form" onsubmit={visitServer}><label class="field">Server address<input type="url" bind:value={serverUrl} placeholder="https://mail.example.com" required autocomplete="url" /></label>{#if serverError}<p class="error-box" role="alert">{serverError}</p>{/if}<div class="button-row"><button class="secondary">Open server</button><button type="button" class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></div></form></div></section>

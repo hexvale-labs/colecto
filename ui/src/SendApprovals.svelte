@@ -48,11 +48,11 @@
 </section>
 <style>
   article { display: grid; gap: 4px; margin-bottom: 12px; overflow-wrap: anywhere; }
-  h3 { margin: 0 0 8px; font-size: 16px; }
-  dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 8px 0; font-size: 13.5px; }
+  h3 { margin: 0 0 8px; font-size: calc(16px * var(--text-scale)); }
+  dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 8px 0; font-size: calc(13.5px * var(--text-scale)); }
   dt { color: var(--ink-3); font-weight: 540; } dd { margin: 0; color: var(--ink); }
   dl + dl { padding-top: 12px; border-top: 1px solid var(--line-soft); }
-  .snapshot { white-space: pre-wrap; } article > p { color: var(--ink-3); font-size: 12.5px; }
+  .snapshot { white-space: pre-wrap; } article > p { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
   .decisions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
   @container settings (max-width: 480px) { dl { grid-template-columns: minmax(0, 1fr); gap: 2px; } dd { margin-bottom: 8px; } }
 </style>

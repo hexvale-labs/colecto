@@ -71,19 +71,19 @@
   .check-group .choice:has(input:checked) { background: var(--select); border-color: var(--mint); }
   .check-group .choice:has(input:focus-visible) { outline: 2px solid var(--mint); outline-offset: 2px; }
   .check-group { display: flex; flex-wrap: wrap; gap: 2px 18px; margin-top: 18px; }
-  .check-group legend { width: 100%; margin-bottom: 6px; padding: 0; color: var(--ink-2); font-size: 12.5px; font-weight: 560; }
+  .check-group legend { width: 100%; margin-bottom: 6px; padding: 0; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); font-weight: 560; }
   .settings-card > .primary { margin-top: 20px; }
-  .list-title { margin: 28px 0 10px; font-size: 15px; }
+  .list-title { margin: 28px 0 10px; font-size: calc(15px * var(--text-scale)); }
   .issued-key { display: grid; gap: 6px; margin-bottom: 10px; overflow-wrap: anywhere; }
-  .issued-key p { color: var(--ink-2); font-size: 13px; }
-  .issued-key .meta { color: var(--ink-3); font-size: 12.5px; }
+  .issued-key p { color: var(--ink-2); font-size: calc(13px * var(--text-scale)); }
+  .issued-key .meta { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
   .issued-key .secondary { justify-self: start; margin-top: 6px; }
   .caps { display: flex; flex-wrap: wrap; gap: 6px; }
   .caps code { padding: 2px 7px; border-radius: 6px; background: var(--sunk); }
-  h4 { margin: 0; font-size: 14px; }
+  h4 { margin: 0; font-size: calc(14px * var(--text-scale)); }
   .secret { display: grid; gap: 10px; margin: 16px 0; padding: 18px; border-radius: 12px; background: var(--select); }
   .secret h3 { margin: 0; color: var(--mint-hi); }
   .secret p { color: var(--ink-2); }
   .secret div { display: flex; gap: 12px; }
-  textarea { width: 100%; min-height: 84px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunk); resize: vertical; word-break: break-all; font: 13px/1.5 ui-monospace, monospace; }
+  textarea { width: 100%; min-height: 84px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunk); resize: vertical; word-break: break-all; font: calc(13px * var(--text-scale))/1.5 ui-monospace, monospace; }
 </style>

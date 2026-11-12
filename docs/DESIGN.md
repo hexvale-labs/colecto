@@ -67,7 +67,8 @@ these same controls.
 Settings open as a card over the workspace, which stays mounted (and inert) behind a
 dimmed backdrop, so an open message or draft is still there when Settings close. The
 card has a section list, a breadcrumb and a close button; Escape or a click on the
-backdrop closes it. On phones the card fills the screen. Under 800 px the app shows one
+backdrop closes it. On phones the card fills the screen (under 800 px wide, and on short
+touch screens such as a phone on its side). Under 800 px the app shows one
 pane at a time, and folders become a bottom tab bar.
 
 Reordering groups that share a row or column keeps every group's size; only a drop that
@@ -192,17 +193,22 @@ layout. Reduced motion removes the fade. Automated browsers can set sessionStora
 
 ## Typography and settings controls
 
-Appearance offers bundled Mona Sans (default), Inter, Geist, IBM Plex Sans and
-Atkinson Hyperlegible Next. Non-default CSS and font assets load when selected.
-The font menu groups Bundled and System families and previews each option in that
-family when loaded. System detection probes common installed families; **Find
-system fonts** requests local-font access only on a user gesture where supported.
-System choices depend on fonts installed on each device.
+Appearance offers five bundled fonts: Mona Sans (the default, in the main bundle),
+Inter, Geist, IBM Plex Sans and Atkinson Hyperlegible Next. The others load only
+when chosen or when the font menu opens, so the default bundle does not grow. The menu
+lists **Bundled** and **System** families, each previewed in its own face. Browsers
+cannot list installed fonts without asking (WebKit cannot at all), so System shows the
+common families `probeSystemFonts()` in `lib/typography.ts` finds by measuring text;
+where the Local Font Access API exists, **List all installed fonts** asks for the full list.
 
-Owner preferences persist `font` (bundled id or system family, at most 64 characters)
-and `font_size` (13–18px). S/M/L/XL choose 13/14/16/18px for predictable one-click
-changes without slider precision. The root font size and settings copy scale;
-fixed workspace geometry remains compact.
+Text size is four steps (13, 14, 16 and 18 px; 14 is the design size), shown as "Aa"
+samples. Every `font-size` in the stylesheets is written as
+`calc(<px> * var(--text-scale))`, and the setting sets `--text-scale`. Write new font
+sizes the same way. Spacing and pane geometry stay in px on purpose, so docking and
+layout maths do not change with text size.
+
+Owner preferences store `font` (a bundled id or a system family, at most 64
+characters) and `font_size` (13 to 18).
 
 Keep switches for booleans, radio segments for small exclusive choices, accent
 swatches for colours and the corner picker for notification placement. Native
