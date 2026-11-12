@@ -273,7 +273,7 @@ test('owner generates a scoped key, sees its secret once, and revokes it on a ph
   await page.getByRole('button', { name: 'API keys', exact: true }).click();
   await page.getByLabel('Key name', { exact: true }).fill('Phone assistant');
   await page.getByRole('checkbox', { name: 'Demo account', exact: true }).check();
-  await page.getByRole('checkbox', { name: 'messages.list', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'List messages', exact: true }).check();
   await page.getByRole('button', { name: 'Generate API key', exact: true }).click();
   const secret = page.getByRole('textbox', { name: 'API key secret', exact: true });
   await expect(secret).toHaveValue(/^colecto_/);
