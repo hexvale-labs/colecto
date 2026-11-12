@@ -116,7 +116,7 @@
           <li class="account-row">
             <span class="avatar" style:--hue={hue(title(account))} aria-hidden="true">{initial(title(account))}</span>
             <div class="account-text">
-              <span class="account-line"><strong>{title(account)}</strong>{#if account.settings}<span class="protocol-tag">{account.settings.protocol === 'imap' ? 'IMAP' : 'JMAP'}</span>{/if}</span>
+              <span class="account-line"><strong title={title(account)}>{title(account)}</strong>{#if account.settings}<span class="protocol-tag">{account.settings.protocol === 'imap' ? 'IMAP' : 'JMAP'}</span>{/if}</span>
               <span class="account-line meta"><span class="status-dot {state.tone}" class:on={state.tone === 'on'} aria-hidden="true"></span><span>{state.text}</span><span class="sep" aria-hidden="true">·</span><span class="account-detail">{detail(account)}</span></span>
             </div>
             {#if account.settings}

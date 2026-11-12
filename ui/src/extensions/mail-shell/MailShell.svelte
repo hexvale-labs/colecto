@@ -201,7 +201,7 @@
     accounts = nextAccounts; security = nextSecurity;
     connected = nextAccounts.find(a => a.id === accountId)?.connected ?? false;
   }
-  let accountOptions = $derived(accounts.length ? accounts.map(account => ({ value: account.id, label: account.settings?.name || account.settings?.address || 'Demo account', hint: account.settings?.address ?? 'Sample mail' })) : [{ value: 'demo', label: 'Demo account', hint: 'Sample mail' }]);
+  let accountOptions = $derived(accounts.length ? accounts.map(account => ({ value: account.id, label: account.settings?.name || account.settings?.address || 'Demo account', hint: !account.settings ? 'Sample mail' : account.settings.name ? account.settings.address : account.settings.protocol === 'jmap' ? 'JMAP' : account.settings.imap_host })) : [{ value: 'demo', label: 'Demo account', hint: 'Sample mail' }]);
   const folders = [{ name: 'Inbox', icon: 'inbox' }, { name: 'Drafts', icon: 'drafts' }, { name: 'Sent', icon: 'sent' }] as const;
   function selectAccount(next: string) {
     if (!accounts.some(account => account.id === next) || !leaveSettings() || !canLeave()) return;

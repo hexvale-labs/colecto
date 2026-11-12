@@ -350,7 +350,8 @@ button.attachment:hover:not(:disabled) { background: var(--control); }
 .setting-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .setting-row h3 { margin: 0 0 6px !important; font-size: calc(15px * var(--text-scale)); }
 .setting-row p { max-width: 58ch; color: var(--ink-2); font-size: calc(13.5px * var(--text-scale)); line-height: 1.55; }
-.setting-row .switch { margin-top: 2px; }
+.setting-row > :first-child { min-width: 0; overflow-wrap: anywhere; }
+.setting-row .switch { flex-shrink: 0; margin-top: 2px; }
 .settings-card h2, .settings-card legend, .settings-card > h3 { margin-bottom: 6px; padding: 0; color: var(--ink); font-size: calc(15.5px * var(--text-scale)); font-weight: 640; letter-spacing: -0.01em; }
 .settings-card h3 { font-size: calc(14px * var(--text-scale)); margin: 20px 0 8px; }
 .settings-card > h3:first-child { margin-top: 0; }
@@ -371,7 +372,7 @@ details[open] > summary { margin-bottom: 10px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
 .wide-field { grid-column: 1 / -1; }
 .segmented-field legend { padding: 0; margin-bottom: 6px; font-size: calc(12.5px * var(--text-scale)); font-weight: 560; color: var(--ink-2); }
-.segmented { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--sunk); border: 1px solid var(--line); }
+.segmented { display: inline-flex; flex-wrap: wrap; max-width: 100%; padding: 3px; gap: 2px; border-radius: 9px; background: var(--sunk); border: 1px solid var(--line); }
 .segmented label { position: relative; display: flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; color: var(--ink-2); font-size: calc(13px * var(--text-scale)); cursor: pointer; transition: background-color 140ms ease, color 140ms ease; white-space: nowrap; }
 .segmented label:has(input:checked) { background: var(--control); color: var(--ink); }
 .segmented label:has(input:focus-visible) { outline: 2px solid var(--mint); outline-offset: 1px; }
@@ -652,7 +653,12 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .add-account { margin-top: 14px; }
 .settings-card .hint, .sheet .hint { margin-top: 8px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
-@container settings (max-width: 460px) { .account-line .sep, .account-detail { display: none; } }
+@container settings (max-width: 460px) {
+  .account-line .sep, .account-detail, .protocol-tag { display: none; }
+  .account-row { gap: 10px; }
+  .row-actions .icon-button { width: 30px; }
+}
+.account-line.meta > span:not(.account-detail) { white-space: nowrap; }
 
 /* Sheets: modal dialogs with a fixed header and footer around a scrolling body. */
 .sheet { width: min(560px, calc(100vw - 24px)); max-height: min(720px, calc(100dvh - 24px)); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--float); box-shadow: 0 30px 80px -20px oklch(0 0 0 / 0.75); overflow: hidden; transition: opacity 200ms var(--ease-out), transform 220ms var(--ease-out); }

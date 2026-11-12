@@ -35,7 +35,8 @@
   }
   function reset() { if (data) for (const setting of data.schema) change(setting.key, setting.default); }
   const isDefault = $derived(!!data && data.schema.every(setting => data!.values[setting.key] === setting.default));
-  const shown = (setting: ExtensionSetting, value: Value) => `${value}${setting.unit ? (setting.unit === '%' ? '%' : ` ${setting.unit}`) : ''}`;
+  const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+  const shown = (setting: ExtensionSetting, value: Value) => `${number.format(Number(value))}${setting.unit ? (setting.unit === '%' ? '%' : ` ${setting.unit}`) : ''}`;
   // How far along its track a slider is, for the filled part of the track.
   const fill = (setting: ExtensionSetting, value: Value) => `${((Number(value) - (setting.min ?? 0)) / ((setting.max ?? 1) - (setting.min ?? 0) || 1)) * 100}%`;
   onMount(() => {
