@@ -3,9 +3,7 @@ name: Prune Rust caches
 on:
   workflow_call:
 
-permissions:
-  contents: read
-
+# Callers grant `actions: write`; asking for anything they do not grant fails at startup.
 jobs:
   prune-caches:
     runs-on: ubuntu-24.04
