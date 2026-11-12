@@ -87,12 +87,12 @@ test('account action labels use email when the optional profile name is empty', 
   await page.route('**/api/v1/security', route => route.fulfill({ json: { protected: false, locked: false, cleanup_pending: false } }));
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit unnamed@example.test', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reconnect unnamed@example.test', exact: true })).toBeVisible();
   let question = '';
   page.once('dialog', async dialog => { question = dialog.message(); await dialog.dismiss(); });
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
-  expect(question).toContain('Remove saved credentials for unnamed@example.test?');
+  await page.getByRole('button', { name: 'Remove unnamed@example.test', exact: true }).click();
+  expect(question).toContain('Remove unnamed@example.test from Colecto?');
 });
 
 test('mobile controls stay reachable and mail text stays selectable on narrow screens', async ({ page }) => {
