@@ -3,7 +3,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use zeroize::Zeroizing;
 
 const MAX_REQUEST_BYTES: usize = 512_000;
-const MAX_RESPONSE_BYTES: usize = 1_000_000;
+// 100 messages, 100000 body bytes each, worst-case JSON escaping twice
+// (the MCP text content itself contains JSON), plus envelope and metadata space.
+const MAX_RESPONSE_BYTES: usize =
+    colecto_core::MAX_LIST_MESSAGES * colecto_core::MAX_BODY_BYTES * 12 + 10_000_000;
 
 async fn run() -> Result<(), String> {
     let endpoint = std::env::args().nth(1).ok_or("Usage: colecto-mcp https://host/api/v1/mcp (credential via COLECTO_MCP_KEY_FILE or COLECTO_MCP_KEY)")?;
@@ -111,7 +114,7 @@ async fn run() -> Result<(), String> {
             .map_err(|_| "MCP response interrupted")?
         {
             if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES {
-                return Err("MCP response exceeds 1000000 bytes".into());
+                return Err("MCP response exceeds broker byte limit".into());
             }
             bytes.extend_from_slice(&chunk);
         }
@@ -137,5 +140,22 @@ async fn main() {
     if let Err(error) = run().await {
         tracing::error!("{error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn large_message_list_fits_broker() {
+        let list = serde_json::json!(
+            (0..100)
+                .map(|_| serde_json::json!({"body":"\u{0001}".repeat(100_000)}))
+                .collect::<Vec<_>>()
+        );
+        let response =
+            serde_json::json!({"result":{"content":[{"type":"text","text":list.to_string()}]}});
+        let bytes = serde_json::to_vec(&response).unwrap();
+        assert!(bytes.len() > 1_000_000);
+        assert!(bytes.len() <= super::MAX_RESPONSE_BYTES);
     }
 }

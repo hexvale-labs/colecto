@@ -20,12 +20,72 @@ fn undecodable() -> Error {
     Error::Transport("The message could not be decoded.".into())
 }
 
-fn leaves<'a>(mail: &'a ParsedMail<'a>, out: &mut Vec<&'a ParsedMail<'a>>) {
-    if mail.subparts.is_empty() {
-        out.push(mail);
+// Mirror mailparse's line-prefix boundary matching before entering its unbounded parser.
+fn validate_structure(raw: &[u8]) -> Result<(), Error> {
+    fn scan(raw: &[u8], depth: usize, count: &mut usize) -> Result<(), Error> {
+        *count += 1;
+        if depth > 32 || *count > 1_000 {
+            return Err(undecodable());
+        }
+        let (headers, body) = mailparse::parse_headers(raw).map_err(|_| undecodable())?;
+        let ctype = mailparse::parse_content_type(
+            &headers.get_first_value("Content-Type").unwrap_or_default(),
+        );
+        if !ctype.mimetype.starts_with("multipart/") {
+            return Ok(());
+        }
+        let Some(boundary) = ctype.params.get("boundary") else {
+            return Ok(());
+        };
+        if boundary.contains(['\r', '\n']) {
+            return Err(undecodable());
+        }
+        let boundary = format!("--{boundary}");
+        let mut starts = Vec::new();
+        let mut at = body;
+        for line in raw[body..].split_inclusive(|b| *b == b'\n') {
+            if raw[at..].starts_with(boundary.as_bytes()) {
+                starts.push((at, at + boundary.len()));
+            }
+            at += line.len();
+        }
+        if let Some(&(_, mut end)) = starts.first() {
+            for next in starts.iter().skip(1).map(Some).chain(std::iter::once(None)) {
+                let Some(start) = raw[end..]
+                    .iter()
+                    .position(|b| *b == b'\n')
+                    .map(|i| end + i + 1)
+                else {
+                    break;
+                };
+                let part_end = next.map_or(raw.len(), |(at, _)| *at);
+                scan(&raw[start..part_end], depth + 1, count)?;
+                let Some(&(_, boundary_end)) = next else {
+                    break;
+                };
+                end = boundary_end;
+                if raw.get(end..end + 2).is_none_or(|v| v == b"--") {
+                    break;
+                }
+            }
+        }
+        Ok(())
     }
-    for part in &mail.subparts {
-        leaves(part, out);
+    scan(raw, 0, &mut 0)
+}
+
+pub(crate) fn parse(raw: &[u8]) -> Result<ParsedMail<'_>, Error> {
+    validate_structure(raw)?;
+    mailparse::parse_mail(raw).map_err(|_| undecodable())
+}
+
+fn leaves<'a>(mail: &'a ParsedMail<'a>, out: &mut Vec<&'a ParsedMail<'a>>) {
+    let mut pending = vec![mail];
+    while let Some(part) = pending.pop() {
+        if part.subparts.is_empty() {
+            out.push(part);
+        }
+        pending.extend(part.subparts.iter().rev());
     }
 }
 
@@ -112,7 +172,7 @@ fn truncate(mut text: String, limit: usize) -> String {
 }
 
 pub(crate) fn content(raw: &[u8]) -> Result<MessageContent, Error> {
-    let mail = mailparse::parse_mail(raw).map_err(|_| undecodable())?;
+    let mail = parse(raw)?;
     let header = |name: &str| mail.headers.get_first_value(name).unwrap_or_default();
     let attachments = attachment_parts(&mail)
         .into_iter()
@@ -145,13 +205,13 @@ fn decoded(part: &ParsedMail<'_>, index: usize) -> Result<Attachment, Error> {
 }
 
 pub(crate) fn attachment(raw: &[u8], index: usize) -> Result<Attachment, Error> {
-    let mail = mailparse::parse_mail(raw).map_err(|_| undecodable())?;
+    let mail = parse(raw)?;
     let parts = attachment_parts(&mail);
     decoded(parts.get(index).ok_or(Error::Missing)?, index)
 }
 
 pub(crate) fn attachments(raw: &[u8]) -> Result<Vec<Attachment>, Error> {
-    let mail = mailparse::parse_mail(raw).map_err(|_| undecodable())?;
+    let mail = parse(raw)?;
     attachment_parts(&mail)
         .into_iter()
         .enumerate()
@@ -241,6 +301,24 @@ pub(crate) fn html_text(html: &str) -> String {
 mod tests {
     use super::*;
     const RAW: &[u8] = b"From: a@example.test\r\nTo: Me <me@example.test>, b@example.test\r\nCc: c@example.test\r\nMessage-ID: <m1@example.test>\r\nReferences: <m0@example.test>\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: multipart/related; boundary=r\r\n\r\n--r\r\nContent-Type: text/html\r\n\r\n<style>p{color:red}</style><p>Hi&nbsp;<b>there</b></p><img src=\"cid:logo\">\r\n--r\r\nContent-Type: image/png\r\nContent-ID: <logo>\r\n\r\nPNG\r\n--r--\r\n--b\r\nContent-Type: application/pdf; name=\"../report.pdf\"\r\nContent-Disposition: attachment\r\nContent-Transfer-Encoding: base64\r\n\r\nUERG\r\n--b--\r\n";
+
+    #[test]
+    fn rejects_hostile_nesting_and_part_counts_before_parsing() {
+        let mut raw = String::new();
+        for i in 0..5_000 {
+            raw.push_str(&format!(
+                "Content-Type: multipart/mixed; boundary=b{i}\r\n\r\n--b{i}\r\n"
+            ));
+        }
+        raw.push_str("\r\nbody");
+        assert!(validate_structure(raw.as_bytes()).is_err());
+        let wide = format!(
+            "Content-Type: multipart/mixed; boundary=b\r\n\r\n{}--b--\r\n",
+            "--b\r\n\r\nx\r\n".repeat(1_001)
+        );
+        assert!(validate_structure(wide.as_bytes()).is_err());
+        assert!(parse(wide.as_bytes()).is_err());
+    }
 
     #[test]
     fn reads_html_threading_and_attachments_but_not_inline_images() {

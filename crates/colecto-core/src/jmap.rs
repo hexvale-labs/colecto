@@ -471,7 +471,7 @@ impl Session<'_> {
             (
                 "Email/query",
                 json!({"filter":filter,
-                "sort":[{"property":"receivedAt","isAscending":false}],"limit":100}),
+                "sort":[{"property":"receivedAt","isAscending":false}],"limit":crate::MAX_LIST_MESSAGES}),
             ),
             (
                 "Email/get",
@@ -579,8 +579,15 @@ fn identity_for<'a>(identities: &'a [Value], address: &str) -> Option<&'a Value>
 /// The server id of an object created by a `/set` call, or why the server refused it.
 fn created_id<'a>(result: &'a Value, key: &str) -> Result<&'a str, Error> {
     if let Some(kind) = result["notCreated"][key]["type"].as_str() {
+        let reason = match kind {
+            "tooLarge" => "tooLarge: message exceeds provider limits",
+            "overQuota" => "overQuota: provider storage is full",
+            "forbidden" => "forbidden: provider denied permission",
+            "invalidProperties" => "invalidProperties: provider rejected message fields",
+            _ => "provider rejected creation",
+        };
         return Err(Error::Transport(format!(
-            "The JMAP server refused the message ({kind})."
+            "The JMAP server refused the message ({reason})."
         )));
     }
     field(&result["created"][key], "id")
@@ -666,6 +673,14 @@ impl Drop for JmapAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn creation_errors_do_not_echo_provider_text() {
+        let error = created_id(&json!({"notCreated":{"x":{"type":"secret\ntext"}}}), "x")
+            .unwrap_err()
+            .to_string();
+        assert!(!error.contains("secret"));
+        assert!(error.contains("provider rejected creation"));
+    }
     #[test]
     fn parses_seen_and_flagged_keywords() {
         let message =

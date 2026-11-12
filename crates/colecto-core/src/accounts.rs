@@ -441,6 +441,44 @@ impl Accounts {
 mod storage_tests {
     use super::*;
     #[test]
+    fn vault_lock_revokes_detached_push_credentials() {
+        struct NoKeys;
+        impl SecretStore for NoKeys {
+            fn get(&self, _: &str) -> Result<String, Error> {
+                Err(Error::Missing)
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), Error> {
+                Ok(())
+            }
+            fn delete(&self, _: &str) -> Result<(), Error> {
+                Ok(())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut accounts =
+            Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(NoKeys)).unwrap();
+        accounts.protect("a strong test password").unwrap();
+        let store = accounts.store("demo").unwrap();
+        let watcher = {
+            let mut store = store.lock().unwrap();
+            store.account = Some(Account::Jmap(JmapAccount {
+                session_url: "https://example.test/jmap".into(),
+                token: "secret".into(),
+                address: "me@example.test".into(),
+                username: String::new(),
+            }));
+            store.account_key = Some("test".into());
+            store.push_watcher().unwrap()
+        };
+        accounts.lock().unwrap();
+        assert!(watcher.account.lock().unwrap().is_none());
+        assert!(matches!(
+            watcher.wait(std::time::Duration::ZERO),
+            Err(Error::Missing)
+        ));
+    }
+
+    #[test]
     fn failed_registry_transaction_never_stages_a_system_key() {
         struct NoKeys;
         impl SecretStore for NoKeys {

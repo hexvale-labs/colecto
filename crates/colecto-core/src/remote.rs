@@ -249,7 +249,9 @@ fn parse_id(id: &str) -> Result<(String, u32, u32), Error> {
         .collect();
     let (name, numbers) = match parts.as_slice() {
         [validity, uid] => ("INBOX".to_owned(), (validity, uid)),
-        [hex, validity, uid] if hex.len() % 2 == 0 => {
+        [hex, validity, uid]
+            if hex.len() % 2 == 0 && hex.bytes().all(|b| b.is_ascii_hexdigit()) =>
+        {
             let bytes = (0..hex.len())
                 .step_by(2)
                 .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
@@ -365,7 +367,7 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
         let selected: Vec<_> = ids
             .into_iter()
             .rev()
-            .take(100)
+            .take(crate::MAX_LIST_MESSAGES)
             .map(|id| id.to_string())
             .collect();
         if selected.is_empty() {
@@ -432,7 +434,7 @@ fn sent_mailbox(names: &[imap::types::Name]) -> Result<String, Error> {
 }
 
 fn parse_message(raw: &[u8], validity: u32, uid: u32) -> Result<Message, Error> {
-    let mail = mailparse::parse_mail(raw).map_err(remote)?;
+    let mail = crate::mime::parse(raw)?;
     let from = mail.headers.get_first_value("From").unwrap_or_default();
     let body = crate::bounded_body(crate::mime::text(&mail)?);
     Ok(Message {
@@ -461,6 +463,12 @@ impl Drop for MailAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unicode_imap_ids_are_missing_without_panicking() {
+        for id in ["imap-界a-7-42", "imap-éé-7-42", "imap-zz-7-42"] {
+            assert!(matches!(parse_id(id), Err(Error::Missing)));
+        }
+    }
     #[test]
     fn empty_mailbox_reports_successful_uidvalidity_changes() {
         use std::io::{BufRead, BufReader, Write};

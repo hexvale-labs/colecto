@@ -248,3 +248,6 @@ concurrency cap. Disable and removal drop the compiled entry; reinstall gets a n
 generation. Policy contains metadata only; compressed package bytes live in separate
 database records. Listing extensions never reads module bodies or recompiles them.
 The UI uploads binary bodies; legacy JSON byte-array uploads are still accepted.
+
+Guest `messages.send` requests with `forward_of` also require `messages.read` for
+the selected account, because forwarding reads the original and its attachments.

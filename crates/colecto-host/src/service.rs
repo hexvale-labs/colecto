@@ -134,6 +134,7 @@ async fn authenticate(
             path,
             "/api/v1/account"
                 | "/api/v1/messages"
+                | "/api/v1/folders"
                 | "/api/v1/drafts"
                 | "/api/v1/labels"
                 | "/api/v1/send"

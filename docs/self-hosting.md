@@ -359,7 +359,7 @@ private `0600` file containing a scoped key. `COLECTO_MCP_KEY` is an alternative
 environment variable; do not put secrets in arguments or URLs. The broker
 connects to the already running Host rather than opening a separate mail store.
 Only MCP JSON goes to stdout. Errors go to stderr without credential contents.
-Input lines are limited to 512000 bytes and responses to 1000000 bytes; oversized
+Input lines are limited to 512000 bytes and responses to 130000000 bytes; oversized
 messages fail rather than truncate. Redirects are disabled.
 
 Tools expose `account.read`, `messages.list`, `messages.read`, `drafts.list`,
@@ -397,3 +397,9 @@ uncertain request: check Sent or contact the recipient. This provides at-most-on
 application initiation, not exactly-once SMTP delivery. A disconnected reviewing
 browser does not cancel an already initiated send. Reject, expiry, revoked keys,
 removed/disconnected accounts or missing grants prevent initiation.
+
+The stdio response bound covers 100 message bodies of 100000 bytes with worst-case
+JSON escaping inside MCP text content, plus envelope and metadata space. Scoped
+keys with `messages.list` can use `GET /api/v1/folders` for their allowed accounts.
+Approval returns HTTP 429 when its account store is busy, without waiting while
+holding the account registry lock; retry after the mail operation finishes.
