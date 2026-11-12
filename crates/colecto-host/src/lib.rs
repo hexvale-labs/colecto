@@ -37,6 +37,15 @@ use std::{
 };
 use tower_http::services::ServeDir;
 
+/// This build's version: the workspace `version` in the root `Cargo.toml`.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The Git commit this build came from, when the build sets `COLECTO_COMMIT`
+/// (release CI, the Docker image and the AUR `-git` package do).
+pub fn commit() -> Option<&'static str> {
+    option_env!("COLECTO_COMMIT").filter(|commit| !commit.is_empty())
+}
+
 /// Looks up a request path such as `/index.html`, returning its bytes and MIME type.
 pub type AssetLookup = Arc<dyn Fn(&str) -> Option<(Vec<u8>, String)> + Send + Sync>;
 
@@ -217,6 +226,7 @@ fn build_app(host: Host, assets: Assets) -> Router {
         )
         .route("/drafts", get(drafts).post(save_draft))
         .route("/drafts/{id}", get(draft))
+        .route("/version", get(version))
         .fallback(|| async { Failure(StatusCode::NOT_FOUND, "API route not found".into()) });
     let router = Router::new().nest("/api/v1", api);
     let router = match assets {
@@ -239,6 +249,16 @@ fn build_app(host: Host, assets: Assets) -> Router {
             ),
         )
         .with_state(host)
+}
+
+/// Public, like a health check: callers can check compatibility before they hold a token.
+async fn version() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "name": "colecto",
+        "version": VERSION,
+        "commit": commit(),
+        "api": "v1",
+    }))
 }
 
 async fn boundary(State(host): State<Host>, request: Request, next: Next) -> Response {

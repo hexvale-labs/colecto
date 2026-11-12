@@ -29,6 +29,20 @@ fn unix_http_runtime_serves_requests_and_cleans_socket_on_sigterm() {
         .read_line(&mut output)
         .unwrap();
     assert!(output.contains("HTTP socket"), "{output}");
+    let mut version = UnixStream::connect(&socket).unwrap();
+    version
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    version
+        .write_all(b"GET /api/v1/version HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let mut response = String::new();
+    version.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(
+        response.contains(&format!("\"version\":\"{}\"", env!("CARGO_PKG_VERSION"))),
+        "{response}"
+    );
     let mut bootstrap = UnixStream::connect(&socket).unwrap();
     bootstrap
         .set_read_timeout(Some(Duration::from_secs(5)))

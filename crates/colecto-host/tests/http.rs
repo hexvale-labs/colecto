@@ -1327,3 +1327,30 @@ async fn removal_is_host_only_and_clears_selected_account() {
         StatusCode::BAD_REQUEST
     );
 }
+
+#[tokio::test]
+async fn version_is_public_but_keeps_the_host_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    );
+    let get = |host: &str| {
+        Request::builder()
+            .uri("/api/v1/version")
+            .header("host", host)
+            .body(Body::empty())
+            .unwrap()
+    };
+    let response = router.clone().oneshot(get("127.0.0.1:4173")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(body["name"], "colecto");
+    assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(body["api"], "v1");
+    assert!(body["commit"].is_null() || body["commit"].is_string());
+    let forged = router.oneshot(get("evil.example")).await.unwrap();
+    assert_eq!(forged.status(), StatusCode::FORBIDDEN);
+}

@@ -16,6 +16,8 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
 COPY ui/src/extensions ui/src/extensions
+# Compiled into the daemon and reported by GET /api/v1/version; empty when unset.
+ARG COLECTO_COMMIT=""
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p colecto-host --bin colecto-daemon \

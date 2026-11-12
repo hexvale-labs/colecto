@@ -42,6 +42,8 @@ env:
   UPLOAD: ${{ startsWith(github.ref, 'refs/tags/') || inputs.artifacts }}
   CARGO_INCREMENTAL: 0
   TAURI_CLI: "@tauri-apps/cli@2.12.4"
+  # Compiled into colecto-host and reported by `GET /api/v1/version`.
+  COLECTO_COMMIT: ${{ github.sha }}
 
 jobs:
   version:
@@ -50,6 +52,9 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       number: ${{ steps.version.outputs.number }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: version
         env:
           REF: ${{ github.ref }}
@@ -60,6 +65,11 @@ jobs:
           number="${tag#v}"
           if ! [[ "$number" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Release tags must look like v1.2.3 (installers need a plain numeric version)"; exit 1
+          fi
+          # The binaries report the workspace version, so a release tag must match it.
+          crate=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)
+          if [[ "$REF" == refs/tags/v* && "$number" != "$crate" ]]; then
+            echo "::error::Tag $tag does not match version $crate in Cargo.toml; bump [workspace.package] version first"; exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "number=$number" >> "$GITHUB_OUTPUT"
@@ -384,6 +394,7 @@ jobs:
         with:
           context: .
           platforms: linux/${{ matrix.arch }}
+          build-args: COLECTO_COMMIT=${{ github.sha }}
           outputs: ${{ startsWith(github.ref, 'refs/tags/') && format('type=image,name=ghcr.io/{0}/colectod,push-by-digest=true,name-canonical=true,push=true', github.repository_owner) || 'type=cacheonly' }}
 
       - name: Record the digest

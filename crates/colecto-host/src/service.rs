@@ -102,7 +102,7 @@ async fn authenticate(
     mut request: Request,
     next: Next,
 ) -> Response {
-    if !request.uri().path().starts_with("/api/") {
+    if !request.uri().path().starts_with("/api/") || request.uri().path() == "/api/v1/version" {
         return next.run(request).await;
     }
     let session_request = request.uri().path() == "/api/v1/session";
