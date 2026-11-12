@@ -383,3 +383,53 @@ test('notifications can be disabled while the mail workspace keeps working', asy
   await page.getByRole('button', { name: 'Close settings', exact: true }).click();
   await expect(page.locator('section.toasts')).toHaveCount(1);
 });
+
+test('pending attachment reads reserve limits and block sending, and failures remain visible', async ({ page }) => {
+  await page.route('**/api/v1/accounts', route => route.fulfill({ json: [{ id: 'demo', settings: null, connected: true, configured: false }] }));
+  await page.addInitScript(() => {
+    const readers: FileReader[] = [];
+    (window as any).attachmentReaders = readers;
+    window.FileReader = class {
+      result = 'data:text/plain;base64,YQ==';
+      onload: any; onerror: any; onabort: any;
+      readAsDataURL() { readers.push(this as unknown as FileReader); }
+    } as any;
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  const input = page.locator('input[type=file]');
+  await page.evaluate(() => Object.defineProperty(File.prototype, 'size', { configurable: true, get: () => 14 * 1024 * 1024 }));
+  await input.setInputFiles({ name: 'large.txt', mimeType: 'text/plain', buffer: Buffer.from('a') });
+  await input.setInputFiles({ name: 'also-large.txt', mimeType: 'text/plain', buffer: Buffer.from('a') });
+  await expect(page.getByRole('alert')).toContainText('25 MB');
+  await page.evaluate(() => {
+    delete (File.prototype as any).size;
+    (window as any).attachmentReaders[0].onload();
+  });
+  await page.getByRole('button', { name: 'Remove large.txt', exact: true }).click();
+  await page.evaluate(() => { (window as any).attachmentReaders.splice(0); });
+  await input.setInputFiles(Array.from({ length: 20 }, (_, i) => ({ name: `${i}.txt`, mimeType: 'text/plain', buffer: Buffer.from('a') })));
+  const send = page.getByRole('button', { name: 'Send', exact: true });
+  await expect(send).toBeDisabled();
+  await expect(page.getByText('Reading attachments… Send will be available when all files are ready.')).toBeVisible();
+  await input.setInputFiles({ name: 'extra.txt', mimeType: 'text/plain', buffer: Buffer.from('a') });
+  await expect(page.getByRole('alert')).toContainText('at most 20');
+  await page.evaluate(() => {
+    const readers = (window as any).attachmentReaders;
+    readers[0].onerror();
+    readers.slice(1).forEach((reader: any) => reader.onload());
+  });
+  await expect(page.getByRole('alert')).toContainText('Could not read 0.txt');
+  await expect(send).toBeDisabled();
+  await page.getByRole('button', { name: 'Remove all attachments' }).click();
+  await expect(send).toBeEnabled();
+  await input.setInputFiles({ name: 'ready.txt', mimeType: 'text/plain', buffer: Buffer.from('a') });
+  await page.evaluate(() => (window as any).attachmentReaders.at(-1).onload());
+  await expect(send).toBeEnabled();
+  await expect(page.getByRole('list', { name: 'Files to send' })).toContainText('ready.txt');
+  let payload: any;
+  await page.route('**/api/v1/send', route => { payload = route.request().postDataJSON(); return route.fulfill({ json: true }); });
+  await send.click();
+  await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('button', { name: 'Sent', exact: true })).toBeVisible();
+  expect(payload.attachments).toEqual([{ name: 'ready.txt', content_type: 'text/plain', data: 'YQ==' }]);
+});

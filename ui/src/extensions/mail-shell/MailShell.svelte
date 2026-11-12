@@ -40,6 +40,7 @@
   let settingsOpen = $state(false);
   let settingsPage = $state<SettingsPage>('accounts');
   let settingsDirty = $state(false);
+  let reviewRequest = $state<string | null>(null);
   let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'top' });
   let accent = $state<string | null>(null);
   let remoteImages = $state(false);
@@ -342,7 +343,7 @@
     alert('approvals', {
       key, duration: 0, title: 'Automation wants to send a message',
       body: `“${event.subject || '(No subject)'}” from ${event.from || nameOf(accounts.find(item => item.id === event.account))}`,
-      actions: [{ label: 'Approve and send', primary: true, run: () => decide('approve') }, { label: 'Reject', run: () => decide('reject') }, { label: 'Review', run: () => { dismissKey(key); openSettings('send-approvals'); } }],
+      actions: [{ label: 'Review message', primary: true, run: () => { reviewRequest = id; dismissKey(key); openSettings('send-approvals'); } }, { label: 'Reject', run: () => decide('reject') }],
     });
   }
   function onNavigate(event: { target?: unknown; account?: string }) {
@@ -469,7 +470,7 @@
           {:else if settingsPage === 'notifications'}<NotificationSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
           {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
           {:else if settingsPage === 'servers'}<section class="settings-section"><header class="section-head"><h2>Mail service</h2><p>You are connected to <strong class="selectable">{window.location.origin}</strong>. Accounts and saved drafts belong to this service.</p></header><div class="settings-card"><h3>Use another server</h3><p>Open a remote daemon’s HTTPS address. Your credentials stay on that server. Local services can also use HTTP on loopback.</p><form class="inline-form" onsubmit={visitServer}><label class="field">Server address<input type="url" bind:value={serverUrl} placeholder="https://mail.example.com" required autocomplete="url" /></label>{#if serverError}<p class="error-box" role="alert">{serverError}</p>{/if}<div class="button-row"><button class="secondary">Open server</button><button type="button" class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></div></form></div></section>
-          {:else if settingsPage === 'send-approvals'}<SendApprovals />
+          {:else if settingsPage === 'send-approvals'}<SendApprovals requestId={reviewRequest} />
           {:else if settingsPage === 'api-keys'}<ApiKeys {accounts} />
           {:else}{@render extensionSettings(workspace)}{/if}
         </div>

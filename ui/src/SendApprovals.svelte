@@ -1,7 +1,12 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { hostService, type PendingSend, type ApiKey } from './lib/api';
   import Icon from './Icon.svelte';
+  let { requestId = null }: { requestId?: string | null } = $props();
+  $effect(() => {
+    const id = requestId;
+    if (id && !busy) void tick().then(() => document.getElementById(`send-request-${id}`)?.focus());
+  });
   let requests = $state<PendingSend[]>([]);
   let keys = $state<ApiKey[]>([]);
   let busy = $state(false);
@@ -31,12 +36,12 @@
   <p role="status">{status}</p>
   {#if !requests.length && !busy}<p class="empty-note">Nothing waiting for you. Automation is behaving.</p>{/if}
   {#each requests.slice().reverse() as request (request.id)}
-    <article class="settings-card" aria-label={`Delivery request: ${request.snapshot?.subject || '(no subject)'}`}>
+    <article id={`send-request-${request.id}`} tabindex="-1" class="settings-card" aria-label={`Delivery request: ${request.snapshot?.subject || '(no subject)'}`}>
       <h3>{request.snapshot?.subject || '(no subject)'}</h3>
       <dl><dt>Requested by</dt><dd>{keys.find(key => key.id === request.requester)?.name || request.requester}</dd><dt>Account</dt><dd>{request.account}</dd><dt>From</dt><dd>{request.from}</dd><dt>Status</dt><dd>{request.status}</dd><dt>Expires</dt><dd>{new Date(request.expires_at * 1000).toLocaleString()}</dd></dl>
       {#if request.snapshot}<dl>{#each Object.entries(request.snapshot).filter(([key]) => key !== 'id') as [key, value]}<dt>{key === 'recipient' ? 'To' : key === 'subject' ? 'Subject' : key === 'body' ? 'Body' : key}</dt><dd class="snapshot">{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</dd>{/each}</dl>{/if}
       <p>Encryption: none. Attachments: none.</p>
-      {#if request.status === 'pending'}<div class="decisions"><button class="primary" disabled={busy} onclick={() => decide(request, 'approve')}>Approve and send</button><button class="secondary" disabled={busy} onclick={() => decide(request, 'reject')}>Reject</button></div>
+      {#if request.status === 'pending' && request.snapshot}<div class="decisions"><button class="primary" disabled={busy} onclick={() => decide(request, 'approve')}>Approve and send</button><button class="secondary" disabled={busy} onclick={() => decide(request, 'reject')}>Reject</button></div>
       {:else if request.status === 'uncertain' || request.status === 'submitting'}<p>Delivery may have started. Do not submit a duplicate; check Sent or contact the recipient.</p>{/if}
     </article>
   {/each}

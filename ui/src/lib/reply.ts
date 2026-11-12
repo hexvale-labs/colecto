@@ -6,16 +6,27 @@ const bare = (entry: string) => (entry.match(/<([^>]+)>/)?.[1] ?? entry).trim().
 // Split on commas outside quoted display names.
 const split = (list: string) => (list.match(/(?:"[^"]*"|[^,])+/g) ?? []).map(entry => entry.trim()).filter(Boolean);
 const prefixed = (prefix: string, subject: string) => new RegExp(`^${prefix}:`, 'i').test(subject.trim()) ? subject : `${prefix}: ${subject}`;
-const quote = (text: string) => text.split('\n').map(line => `> ${line}`).join('\n');
+const encoder = new TextEncoder();
+function limitedBody(header: string, text: string, quoted = false): string {
+  let result = '';
+  let bytes = 0;
+  // Iterate code points so truncation never separates an emoji's surrogate pair.
+  for (const point of header + (quoted ? '> ' : '') + text.replace(/\n/g, quoted ? '\n> ' : '\n')) {
+    const size = encoder.encode(point).length;
+    if (bytes + size > 100_000) break;
+    result += point; bytes += size;
+  }
+  return result;
+}
 
 /** Prefill an unsaved composer draft from a message the owner is reading. */
 export function replyDraft(mode: ReplyMode, message: Message, content: MessageContent | null, self: string): Draft {
-  const text = (content?.text || message.body).slice(0, 80_000);
+  const text = (content?.text || message.body);
   const from = message.sender && message.sender !== message.address ? `${message.sender} <${message.address}>` : message.address;
   if (mode === 'forward') {
     return {
       id: '', recipient: '', subject: prefixed('Fwd', message.subject),
-      body: `\n\n---------- Forwarded message ----------\nFrom: ${from}\nDate: ${message.date}\nSubject: ${message.subject}\n${content?.to ? `To: ${content.to}\n` : ''}\n${text}`,
+      body: limitedBody(`\n\n---------- Forwarded message ----------\nFrom: ${from}\nDate: ${message.date}\nSubject: ${message.subject}\n${content?.to ? `To: ${content.to}\n` : ''}\n`, text),
       ...(content?.attachments.length ? { forward_of: message.id } : {}),
     };
   }
@@ -27,7 +38,7 @@ export function replyDraft(mode: ReplyMode, message: Message, content: MessageCo
   const id = content?.message_id ?? '';
   return {
     id: '', recipient: to.join(', '), cc: cc.join(', '), subject: prefixed('Re', message.subject),
-    body: `\n\nOn ${message.date}, ${from} wrote:\n${quote(text)}`,
+    body: limitedBody(`\n\nOn ${message.date}, ${from} wrote:\n`, text, true),
     in_reply_to: id, references: [content?.references ?? '', id].join(' ').trim(),
   };
 }
