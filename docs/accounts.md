@@ -193,8 +193,10 @@ including during background refresh. Body and attachment readers share this chec
 Malformed non-ASCII IMAP folder IDs return a missing-message error.
 
 Disconnect, vault lock/reset and account reconfiguration revoke push watcher
-credentials before returning. An active synchronous provider wait must finish before
-its credentials can be erased; this can delay completion by the network timeout
-(the push wait is up to ten minutes). Revoked watchers cannot start another wait.
+credentials without waiting, and revoked watchers cannot start another wait. A push
+wait already in progress (IMAP IDLE or a JMAP event stream, up to ten minutes) cannot
+be interrupted, so it keeps its own credential copy until it returns; the copy is then
+dropped. Lock therefore does not guarantee that no credential remains in memory until
+that wait ends.
 JMAP creation errors show fixed descriptions for recognized error types and a
 fixed generic description for unknown provider values.

@@ -70,7 +70,8 @@ struct PreparedConnection {
     messages: Vec<Message>,
 }
 
-type PushCredentials = Mutex<Option<Account>>;
+// Revocation only empties the slot, so it never waits for a push wait in progress.
+type PushCredentials = Mutex<Option<Arc<Account>>>;
 
 pub struct MailStore {
     directory: PathBuf,
@@ -238,7 +239,6 @@ impl MailStore {
             .drain(..)
             .filter_map(|w| w.upgrade())
         {
-            // A wait holds this lock through transport use; revoke and erase before returning.
             watcher.lock().unwrap_or_else(|e| e.into_inner()).take();
         }
     }
@@ -258,7 +258,7 @@ impl MailStore {
     }
     /// A detached handle for push notifications, so waiting never holds this store's lock.
     pub fn push_watcher(&self) -> Option<PushWatcher> {
-        let account = Arc::new(Mutex::new(Some(self.account.clone()?)));
+        let account = Arc::new(Mutex::new(Some(Arc::new(self.account.clone()?))));
         let mut watchers = self.watchers.lock().ok()?;
         watchers.retain(|w| w.strong_count() > 0);
         watchers.push(Arc::downgrade(&account));
@@ -739,8 +739,14 @@ impl PushWatcher {
     /// `Ok(true)` when new mail may have arrived, `Ok(false)` after a quiet `timeout`.
     /// `Error::Invalid` means the provider does not support push; keep polling instead.
     pub fn wait(&self, timeout: std::time::Duration) -> Result<bool, Error> {
-        let account = self.account.lock().map_err(|_| Error::Missing)?;
-        match account.as_ref().ok_or(Error::Missing)? {
+        // Hold the lock only to take a reference; a wait in progress keeps it until it returns.
+        let account = self
+            .account
+            .lock()
+            .map_err(|_| Error::Missing)?
+            .clone()
+            .ok_or(Error::Missing)?;
+        match account.as_ref() {
             Account::Imap(account) => account.wait_for_inbox(timeout),
             Account::Jmap(account) => account.wait_for_change(timeout),
         }
