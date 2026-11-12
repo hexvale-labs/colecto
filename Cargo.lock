@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "colecto-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "colecto-host",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "colecto-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -886,14 +886,14 @@ dependencies = [
 
 [[package]]
 name = "colecto-extension-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "colecto-host"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "colecto-core",
