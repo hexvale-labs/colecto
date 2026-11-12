@@ -91,9 +91,11 @@ test('feels like an app: chrome is not selectable, mail is, and images do not dr
 /** Serve one burst of Host events, then nothing, so each test controls exactly what arrives. */
 async function events(page: Page, list: [string, unknown][]) {
   let sent = false;
-  await page.route('**/api/v1/events', route => {
+  await page.route('**/api/v1/events', async route => {
     if (sent) return route.fulfill({ status: 204 });
     sent = true;
+    // The stream is shared and may open before the mail shell listens; it listens once Settings enables.
+    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeEnabled();
     return route.fulfill({ status: 200, contentType: 'text/event-stream', body: list.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join('') });
   });
 }

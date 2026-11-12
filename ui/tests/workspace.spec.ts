@@ -363,10 +363,10 @@ test('account dialog and long identities remain usable at 360px', async ({ page 
   await page.route('**/api/v1/security', route => route.fulfill({ json: { protected: false, locked: false, cleanup_pending: false } }));
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const edit = page.getByRole('button', { name: 'Edit', exact: true }).first();
+  const edit = page.getByRole('button', { name: 'Edit Aleksandra Wiśniewska-Kowalczyk', exact: true });
   await edit.click();
   await expect(page.locator('dialog.account-dialog')).toBeVisible();
-  await expect(page.getByLabel('Account name (optional)')).toHaveValue('Aleksandra Wiśniewska-Kowalczyk');
+  await expect(page.getByLabel('Name (optional)')).toHaveValue('Aleksandra Wiśniewska-Kowalczyk');
   await page.keyboard.press('Escape');
   await expect(page.locator('dialog.account-dialog')).not.toBeVisible();
   await page.getByRole('button', { name: 'Add account', exact: true }).click();
@@ -374,7 +374,7 @@ test('account dialog and long identities remain usable at 360px', async ({ page 
   await expect(page.getByLabel('Username', { exact: true })).toHaveValue('jo@example.test');
   await page.getByRole('radio', { name: 'JMAP', exact: true }).focus();
   await page.keyboard.press('Space');
-  await expect(page.getByLabel('IMAP host')).not.toBeVisible();
+  await expect(page.getByLabel('Incoming (IMAP) server')).not.toBeVisible();
   await expect(page.getByLabel('JMAP server or session URL')).toBeVisible();
   const dialog = page.locator('dialog.account-dialog');
   expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
@@ -396,9 +396,11 @@ test('appearance applies and restores typography preferences', async ({ page }) 
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
   await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--font'))).toContain('Inter Variable');
-  await page.getByRole('radio', { name: /XL/ }).focus();
+  await page.getByRole('radio', { name: 'Larger', exact: true }).focus();
   await page.keyboard.press('Space');
-  await expect.poll(() => page.evaluate(() => document.documentElement.style.fontSize)).toBe('18px');
+  // Text size scales every font through --text-scale (18 / 14).
+  const scale = () => page.evaluate(() => document.documentElement.style.getPropertyValue('--text-scale'));
+  await expect.poll(scale).toBe(String(18 / 14));
   await page.reload();
-  await expect.poll(() => page.evaluate(() => document.documentElement.style.fontSize)).toBe('18px');
+  await expect.poll(scale).toBe(String(18 / 14));
 });

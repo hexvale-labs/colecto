@@ -187,7 +187,7 @@
     </fieldset>
     <footer class="sheet-foot">
       <button type="button" class="secondary" disabled={working} onclick={close}>Cancel</button>
-      <button class="primary" type="submit" disabled={working}>{working ? 'Saving…' : editing ? 'Save changes' : 'Add account'}</button>
+      <button class="primary" type="submit" disabled={working}>{working ? 'Saving…' : editing ? 'Save changes' : 'Save account'}</button>
     </footer>
   </form>
 </dialog>
