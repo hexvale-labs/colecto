@@ -443,6 +443,7 @@
   </header>
   {#if accountError}<div class="account-error error-box" role="alert">{accountError}<button class="text-button" onclick={() => { accountError = ''; void refreshAccounts().catch(e => accountError = (e as Error).message); }}>Retry account settings</button></div>{/if}
   {#if layoutReady}<DockArea {layout} {panes} focus={panes.some(pane => pane.id === focus) ? focus : 'mailbox'} {compact} onchange={commitLayout} onactivate={activate}>
+    {#snippet header(pane)}{#if pane === 'reader'}{@render messageTabs()}{/if}{/snippet}
     {#snippet content(pane)}
       {#if pane === 'mailbox'}{@render mailboxPane()}
       {:else if pane === 'reader'}{@render readerPane()}
@@ -535,8 +536,7 @@
   </div>
 {/snippet}
 
-{#snippet readerPane()}
-  <div class="stage">
+{#snippet messageTabs()}
     {#if currentTabs.length}<nav class="tab-strip" aria-label="Open messages">
       {#each currentTabs as tab (tab.id)}<div class="message-tab" class:active={view?.kind === 'message' && view.id === tab.id}>
         <button class="tab-title" aria-pressed={view?.kind === 'message' && view.id === tab.id} disabled={busy} onclick={() => activateTab(tab)} title={tab.subject}>{tab.subject}</button>
@@ -544,6 +544,11 @@
       </div>{/each}
       {#if currentTabs.length > 1}<button class="tab-close-all" aria-label="Close all message tabs" title="Close all tabs" disabled={busy} onclick={closeAllTabs}><Icon name="close" size={13} /><span>Close all</span></button>{/if}
     </nav>{/if}
+{/snippet}
+
+{#snippet readerPane()}
+  <div class="stage">
+    {#if compact}{@render messageTabs()}{/if}
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
         {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} {remoteImages} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />

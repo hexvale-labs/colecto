@@ -17,6 +17,7 @@
   --mint-hi: color-mix(in oklch, var(--mint) 55%, white);
   --mint-ink: color-mix(in oklch, var(--mint) 14%, black);
   --select: color-mix(in oklch, var(--mint) 13%, var(--bg));
+  --status-online: #82c995;
   --danger: oklch(0.8 0.1 30);
   --danger-bg: oklch(0.245 0.045 28);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -101,7 +102,10 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 /* Room for the status glow: nothing around the dot clips. */
 .account-name small { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 1px; color: var(--ink-3); font-size: 11.5px; font-weight: 450; }
 .status-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--ink-3); }
-.status-dot.on { background: var(--mint); box-shadow: 0 0 5px color-mix(in oklch, var(--mint) 55%, transparent); }
+.status-dot.on { position: relative; background: var(--status-online); }
+.status-dot.on::after { content: ''; position: absolute; inset: 0; border: 1px solid var(--status-online); border-radius: 50%; animation: online-sonar 2400ms ease-out infinite; }
+@keyframes online-sonar { from { transform: scale(1); opacity: 0.5; } to { transform: scale(2.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .status-dot.on::after { animation: none; display: none; } }
 .avatar { display: inline-grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: oklch(0.33 0.055 var(--hue, 158)); color: oklch(0.93 0.045 var(--hue, 158)); font-size: 12.5px; font-weight: 640; }
 .account-error { position: absolute; z-index: var(--layer-menus); top: 52px; right: 12px; max-width: min(90%, 480px); }
 .account-pane { display: flex; align-items: center; gap: 2px; height: 100%; min-height: 0; padding: 0 6px 0 4px; }
@@ -113,9 +117,11 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 /* Workspace: a tree of groups laid out in pixels; each group is a tab strip over its panes. */
 .dock-area { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .dock-frame { position: absolute; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
-.dock-head { display: flex; align-items: stretch; height: var(--head-h); flex-shrink: 0; padding: 0 2px 0 4px; border-bottom: 1px solid var(--line-soft); }
+.dock-head { display: flex; align-items: stretch; height: var(--head-h); flex-shrink: 0; padding: 0 2px 0 4px; }
 .dock-tabs { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .dock-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 0 10px; color: var(--ink-3); font-size: 12.5px; font-weight: 580; white-space: nowrap; cursor: grab; touch-action: none; transition: color 120ms ease; }
+.dock-head:has(.tab-strip) .dock-tabs { flex: 0 1 auto; }
+.dock-head .tab-strip { flex: 1; min-width: 0; height: var(--head-h); }
 .dock-tab:hover { color: var(--ink-2); }
 .dock-tab[aria-selected='true'] { color: var(--ink); }
 .dock-tab[aria-selected='true'] .icon { color: var(--mint); }
@@ -217,19 +223,19 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 .list-note { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; color: var(--ink-3); font-size: 12px; }
 .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.25; } }
-.list-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding: 0 6px 0 16px; flex-shrink: 0; border-top: 1px solid var(--line-soft); color: var(--ink-3); font-size: 12px; }
+.list-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding: 0 6px 0 16px; flex-shrink: 0; color: var(--ink-3); font-size: 12px; }
 
 /* Reader pane */
 .stage { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: var(--bg); }
 .tab-close-all { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 26px; margin-left: auto; padding: 0 9px; border-radius: 6px; color: var(--ink-3); font-size: 12px; font-weight: 560; transition: background-color 120ms ease, color 120ms ease, transform 120ms var(--ease-out); }
 .tab-close-all:hover:not(:disabled) { background: var(--raise); color: var(--ink); }
 .tab-close-all:active:not(:disabled) { transform: scale(0.97); }
-.tab-strip { display: flex; align-items: center; gap: 2px; flex-shrink: 0; height: 38px; padding: 0 6px; border-bottom: 1px solid var(--line-soft); overflow-x: auto; scrollbar-width: none; }
+.tab-strip { display: flex; align-items: center; gap: 2px; flex-shrink: 0; height: 38px; padding: 0 6px; overflow-x: auto; scrollbar-width: none; }
 .message-tab { display: flex; align-items: center; flex-shrink: 0; max-width: 220px; height: 28px; border-radius: 6px; color: var(--ink-3); transition: background-color 120ms ease, color 120ms ease; }
 .message-tab:hover { color: var(--ink-2); background: color-mix(in oklch, var(--raise) 60%, transparent); }
 .message-tab.active { background: var(--raise); color: var(--ink); }
 .tab-title { min-width: 0; height: 100%; padding: 0 4px 0 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 540; border-radius: 8px; }
-.tab-close { display: grid; place-items: center; width: 22px; height: 22px; margin-right: 4px; border-radius: 6px; opacity: 0.65; }
+.tab-close { flex-shrink: 0; display: grid; place-items: center; width: 22px; height: 22px; margin-right: 4px; border-radius: 6px; opacity: 0.65; }
 .tab-close:hover:not(:disabled) { opacity: 1; background: var(--control); }
 .reading-pane { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; container: pane / size; }
 
