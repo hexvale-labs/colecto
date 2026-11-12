@@ -137,7 +137,7 @@ default = 10
 min = 2
 max = 30
 step = 1
-unit = "px/frame"
+unit = "px"
 ```
 
 The owner edits this in Settings. See Oneko's `src/lib.rs` for a no_std guest
