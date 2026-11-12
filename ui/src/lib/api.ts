@@ -27,7 +27,7 @@ async function download(extension: string, account: string, path: string): Promi
   if (!response.ok) { const data = await response.json().catch(() => null); throw new ServiceError(typeof data?.error === 'string' ? data.error : `Download failed (HTTP ${response.status}).`, typeof data?.category === 'string' ? data.category : 'server', response.status); }
   return response.blob();
 }
-async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE' | 'PUT'): Promise<T> {
+export async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE' | 'PUT'): Promise<T> {
   const delivery = path === '/send' || (path.startsWith('/send-requests/') && path.endsWith('/approve'));
   const deliveryWarning = 'Delivery status is unknown. Check Sent and delivery requests before sending again.';
   let response: Response;
@@ -100,7 +100,7 @@ export const hostService = {
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 
-export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate' | 'window.overlay';
+export type Capability = 'extensions.bus' | 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate' | 'window.overlay';
 export interface ExtensionState {
   manifest: { settings?: ExtensionSetting[]; id: string; name: string; description: string; author: string; api_version: number; slot: string; z_index?: number; capabilities: Capability[] };
   bundled: boolean;
@@ -140,7 +140,7 @@ export interface PendingSend { id: string; requester: string; account: string; f
  * Follow the Host's server-sent events (`mail`, `approval`, `navigate`), reconnecting with backoff.
  * Uses fetch rather than EventSource so the owner token can travel in a header. Returns a stop function.
  */
-export function subscribeEvents(onevent: (name: string, data: unknown) => void): () => void {
+function openEvents(onevent: (name: string, data: unknown) => void): () => void {
   const controller = new AbortController();
   let delay = 1000;
   void (async () => {
@@ -174,6 +174,20 @@ export function subscribeEvents(onevent: (name: string, data: unknown) => void):
     }
   })();
   return () => controller.abort();
+}
+
+type EventListener = (name: string, data: unknown) => void;
+const eventListeners = new Set<EventListener>();
+let closeEvents: (() => void) | undefined;
+/** Listen to the Host's event stream. All listeners share one connection: browsers allow only
+ *  six per origin, and a stream per extension would starve ordinary requests. */
+export function subscribeEvents(onevent: EventListener): () => void {
+  eventListeners.add(onevent);
+  closeEvents ??= openEvents((name, data) => { for (const listener of [...eventListeners]) listener(name, data); });
+  return () => {
+    eventListeners.delete(onevent);
+    if (!eventListeners.size) { closeEvents?.(); closeEvents = undefined; }
+  };
 }
 
 export interface OverlayOutput { overlay: { items: { opacity?: number; image: string; x: number; y: number; width: number; height: number; frame: { x: number; y: number; width: number; height: number } }[] }; state: string }

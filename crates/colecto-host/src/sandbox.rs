@@ -18,6 +18,7 @@ struct Context {
     view: Option<serde_json::Value>,
     assets: Option<Arc<crate::package::Assets>>,
     calls: u8,
+    bus: bool,
 }
 fn engine() -> Engine {
     let mut config = Config::default();
@@ -53,7 +54,7 @@ pub fn validate(bytes: &[u8]) -> Result<(), String> {
 fn read(caller: &Caller<'_, Context>, ptr: i32, len: i32) -> Option<Vec<u8>> {
     let len = usize::try_from(len).ok()?;
     let ptr = usize::try_from(ptr).ok()?;
-    if len > MAX_OUTPUT {
+    if len > 64 * 1024 {
         return None;
     }
     let memory = caller.get_export("memory")?.into_memory()?;
@@ -68,7 +69,7 @@ fn write(caller: &mut Caller<'_, Context>, ptr: i32, capacity: i32, bytes: &[u8]
     let Ok(capacity) = usize::try_from(capacity) else {
         return -1;
     };
-    if bytes.len() > MAX_OUTPUT || bytes.len() > capacity {
+    if bytes.len() > 64 * 1024 || bytes.len() > capacity {
         return -1;
     }
     let Some(Extern::Memory(memory)) = caller.get_export("memory") else {
@@ -91,7 +92,18 @@ pub fn run_output(
     service: Service,
     assets: Option<Arc<crate::package::Assets>>,
 ) -> Result<Value, String> {
-    if action.len() > if assets.is_some() { MAX_OUTPUT } else { 128 } {
+    let bus = serde_json::from_str::<Value>(action)
+        .ok()
+        .is_some_and(|v| matches!(v["event"].as_str(), Some("bus.request" | "bus.event")));
+    if action.len()
+        > if bus {
+            64 * 1024
+        } else if assets.is_some() {
+            MAX_OUTPUT
+        } else {
+            128
+        }
+    {
         return Err("Extension action too long".into());
     }
     let engine = &compiled.engine;
@@ -113,6 +125,7 @@ pub fn run_output(
             view: None,
             assets,
             calls: 0,
+            bus,
         },
     );
     store.limiter(|data| &mut data.limits);
@@ -139,7 +152,22 @@ pub fn run_output(
                 let Some(bytes) = read(&caller, ptr, len) else {
                     return -1;
                 };
-                let view = if let Some(assets) = &caller.data().assets {
+                if bytes.len() > MAX_OUTPUT {
+                    return -1;
+                }
+                let view = if caller.data().bus {
+                    let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
+                        return -1;
+                    };
+                    if v.as_object().is_none_or(|o| o.len() != 1)
+                        || v["bus"]
+                            .as_object()
+                            .is_none_or(|o| o.len() != 1 || !o.contains_key("response"))
+                    {
+                        return -1;
+                    }
+                    v
+                } else if let Some(assets) = &caller.data().assets {
                     match crate::overlay::validate(&bytes, assets)
                         .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
                     {
@@ -202,6 +230,9 @@ pub fn run_output(
         .get_typed_func::<(), ()>(&store, "run")
         .map_err(|e| e.to_string())?;
     function.call(&mut store, ()).map_err(|e| e.to_string())?;
+    if bus {
+        return Ok(store.data_mut().view.take().unwrap_or(Value::Null));
+    }
     store
         .data_mut()
         .view

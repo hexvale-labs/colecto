@@ -2,6 +2,6 @@ id = "inbox"
 name = "Mailbox"
 api_version = 1
 slot = "mailbox"
-capabilities = ["account.read", "messages.organize", "messages.list", "drafts.list"]
+capabilities = ["extensions.bus", "account.read", "messages.organize", "messages.list", "drafts.list"]
 description = "Browse messages and saved drafts for the selected account."
 author = "Colecto"

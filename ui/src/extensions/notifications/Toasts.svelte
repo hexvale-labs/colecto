@@ -1,5 +1,13 @@
 <script lang="ts">
   import { flip } from 'svelte/animate';
+  import { onMount } from 'svelte';
+  import { extensionBus, extensionName } from '../../lib/bus';
+  import { notify } from './store.svelte';
+  const bus = extensionBus('notifications');
+  onMount(() => bus.handle('v1/notify', async (p, from) => {
+    if (typeof p?.title === 'string' && typeof p?.body === 'string') notify({title: `${await extensionName(from)}: ${p.title}`,body:p.body});
+    return null;
+  }));
   import Icon from '../../Icon.svelte';
   import { dismiss, toasts, type Toast } from './store.svelte';
   import type { Corner } from '../../lib/api';

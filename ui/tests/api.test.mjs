@@ -27,3 +27,18 @@ test('unreadable read response retains its ordinary recovery category', async ()
   const error = await createServices('demo').inbox.labels().catch(error => error);
   expect(error.category).toBe('invalid_response');
 });
+
+test('bus sends caller identity and returns only request data', async () => {
+  const { extensionBus } = await import('../src/lib/bus.ts');
+  const calls = [];
+  globalThis.fetch = async (path, input) => {
+    calls.push({path, ...input});
+    return Response.json(path.endsWith('/request') ? {data: {draft: {body: 'Updated'}}} : {});
+  };
+  const bus = extensionBus('composer');
+  expect(await bus.request('helper', 'v1/rewrite', {draft: {body: 'Original'}})).toEqual({draft: {body: 'Updated'}});
+  await bus.emit('v1/opened', {});
+  expect(calls[0].headers['x-colecto-extension']).toBe('composer');
+  expect(calls[0].path).toBe('/api/v1/bus/helper/request');
+  expect(JSON.parse(calls[1].body)).toEqual({name:'v1/opened',payload:{}});
+});

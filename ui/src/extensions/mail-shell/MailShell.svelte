@@ -18,6 +18,7 @@
   import ExtensionSettings from './ExtensionSettings.svelte';
   import AccountSettings from '../../AccountSettings.svelte';
   import { applyTypography, DEFAULT_FONT, DEFAULT_TEXT_SIZE } from '../../lib/typography';
+  import { setBusAccount } from '../../lib/bus';
   import { createServices, hostService } from '../../lib/api';
   import type { Draft, MailItem, AccountInfo, SecurityInfo } from '../../lib/api';
   import type { Workspace } from '../../App.svelte';
@@ -52,6 +53,7 @@
   let font = $state(DEFAULT_FONT);
   let textSize = $state(DEFAULT_TEXT_SIZE);
   $effect(() => { void applyTypography(font, textSize); });
+  $effect(() => setBusAccount(accountId));
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); });
   function savePreferences(input: { accent?: string; notifications?: NotificationPreferences; remote_images?: boolean; font?: string; font_size?: number }) {
     if (input.accent !== undefined) accent = input.accent || null;

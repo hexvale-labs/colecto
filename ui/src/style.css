@@ -695,3 +695,9 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .text-sizes label { justify-content: center; width: 52px; height: 40px; padding: 0; }
 /* Each sample keeps its own fixed size, so the control reads the same at every text size. */
 .text-sizes .sample { font-weight: 560; line-height: 1; }
+
+/* Reader notes added by extensions over the bus (text only). */
+.reader-banner { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; padding: 9px 12px; border-radius: 9px; background: var(--raise); color: var(--ink-2); font-size: calc(13px * var(--text-scale)); line-height: 1.45; overflow-wrap: anywhere; }
+.reader-banner .icon { flex-shrink: 0; margin-top: 2px; color: var(--ink-3); }
+.reader-banner.warning { background: oklch(0.26 0.04 75); color: oklch(0.9 0.06 80); }
+.reader-banner.warning .icon { color: oklch(0.82 0.11 75); }

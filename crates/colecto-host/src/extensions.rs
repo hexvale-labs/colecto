@@ -50,6 +50,24 @@ fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
             return Err("Duplicate capability".into());
         }
     }
+    if let Some(bus) = &manifest.bus {
+        if !manifest.capabilities.contains(&Capability::ExtensionsBus) {
+            return Err("bus subscriptions require extensions.bus".into());
+        }
+        if bus.subscribe.len() > 32
+            || bus.subscribe.iter().any(|entry| {
+                entry.split_once('/').is_none_or(|(bus, name)| {
+                    bus.is_empty()
+                        || !bus
+                            .bytes()
+                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+                        || !crate::bus::valid_name(name)
+                })
+            })
+        {
+            return Err("Invalid bus subscriptions (maximum 32)".into());
+        }
+    }
     Ok(manifest)
 }
 
@@ -324,7 +342,10 @@ impl Extensions {
         let manifest = parse_manifest(&source)?;
         validate_manifest(&manifest)?;
         if self.manifest(&manifest.id).is_some() {
-            return Err("Extension ID already installed".into());
+            return Err(format!(
+                "An extension with the ID `{}` is already installed",
+                manifest.id
+            ));
         }
         if self.policy.packages.len() >= MAX_INSTALLED {
             return Err("Extension package limit reached".into());
@@ -438,6 +459,40 @@ fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn duplicate_ids_and_bus_subscriptions() {
+        let mut extensions = Extensions::bundled();
+        let base =
+            include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");
+        let module = wat::parse_str("(module (func (export \"run\")))".replace("\\", "")).unwrap();
+        for id in ["reader", "connection-panel"] {
+            let source = base.replace("connection-panel", id);
+            if id == "connection-panel" {
+                extensions.install(&source, module.clone()).unwrap();
+            }
+            assert_eq!(
+                extensions.install(&source, module.clone()).unwrap_err(),
+                format!("An extension with the ID `{id}` is already installed")
+            );
+        }
+        let bus = base.replace("account.read", "extensions.bus");
+        assert!(
+            parse_manifest(&format!(
+                "{bus}\n[bus]\nsubscribe = ['reader/v1/message_opened']"
+            ))
+            .is_ok()
+        );
+        for source in [
+            format!("{base}\n[bus]\nsubscribe = []"),
+            format!("{bus}\n[bus]\nsubscribe = ['reader/INVALID']"),
+            format!(
+                "{bus}\n[bus]\nsubscribe = [{}]",
+                vec!["'reader/v1/x'"; 33].join(",")
+            ),
+        ] {
+            assert!(parse_manifest(&source).is_err());
+        }
+    }
     #[test]
     fn compiled_cache_reuses_modules_but_instances_are_fresh_and_reinstall_invalidates() {
         let mut extensions = Extensions::bundled();

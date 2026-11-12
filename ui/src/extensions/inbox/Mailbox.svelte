@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { MailItem } from '../../lib/api';
   import { when } from '../../lib/when';
+  import { extensionBus } from '../../lib/bus';
+  const bus = extensionBus('inbox');
   import Icon from '../../Icon.svelte';
   let { items, grouped = true, fetching = false, fetchedAt = null, filtered = false, searching = false, selected, folder, loading, error, disabled, onopen, onretry }: {
     /** A search or label narrows the list. */ filtered?: boolean;
@@ -31,7 +33,7 @@
     {:else}
       {#each rows as { item, date, heading } (item.id)}
         {#if heading}<h3 class="day">{heading}</h3>{/if}
-        <button class="mail-item" class:selected={selected === item.id} aria-pressed={selected === item.id} {disabled} onclick={() => onopen(item.id)}>
+        <button class="mail-item" class:selected={selected === item.id} aria-pressed={selected === item.id} {disabled} onclick={() => { void bus.emit('v1/selected', {message_id:item.id}).catch(() => {}); onopen(item.id); }}>
           <span class="item-sender">{item.name || 'Unknown sender'}</span>
           {#if date.label}<time class="item-date" title={date.full}>{date.label}</time>{/if}
           <span class="item-subject">{item.subject || '(No subject)'}</span>
