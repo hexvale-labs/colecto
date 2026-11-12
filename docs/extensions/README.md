@@ -251,3 +251,35 @@ The UI uploads binary bodies; legacy JSON byte-array uploads are still accepted.
 
 Guest `messages.send` requests with `forward_of` also require `messages.read` for
 the selected account, because forwarding reads the original and its attachments.
+
+## Extension settings
+
+Bundled and third-party manifests can declare up to 16 `[[settings]]` tables.
+No capability is required. Keys are unique `[a-z0-9_]{1,32}` identifiers.
+Unknown fields, wrong types and invalid defaults reject the manifest.
+
+| Field | Limit or meaning |
+| --- | --- |
+| `key` | 1–32 lowercase ASCII letters, digits or underscores; unique |
+| `label` | 1–64 UTF-8 bytes |
+| `description` | Optional, at most 256 UTF-8 bytes |
+| `type` | `toggle`, `range`, `choice`, `text` |
+| `default` | Boolean, finite number, option string, or string respectively |
+| `min`, `max` | Required finite inclusive bounds for range only |
+| `step` | Optional positive finite range increment (control hint) |
+| `unit` | Optional range suffix, at most 8 UTF-8 bytes |
+| `options` | Choice only: 2–8 distinct string `value` and nonempty `label` pairs |
+
+Owner-authenticated `GET /api/v1/extensions/{id}/settings` returns `{schema, values}`.
+`PUT` at the same route accepts a partial `{key: value}` object; unknown keys and
+invalid values reject the entire update. Values persist per extension ID in Turso,
+merge over defaults, and are deleted on uninstall. Updates emit the SSE event
+`extension.settings` with `{id}`. Enabled extensions with settings appear in Settings;
+bundled entries follow built-in pages and installed entries have their own group.
+
+Guests call `colecto.request` with `{"operation":"settings.read"}` and receive
+`{"ok":true,"data":{"key":"value"}}`. The Host binds identity to the invocation;
+guests cannot select another extension. Disabled or stale invocations are rejected.
+
+Overlay items additionally accept optional `opacity`, a finite number from 0 through
+1, defaulting to 1. It affects only the emitted sprite.

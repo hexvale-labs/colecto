@@ -27,7 +27,7 @@ async function download(extension: string, account: string, path: string): Promi
   if (!response.ok) { const data = await response.json().catch(() => null); throw new ServiceError(typeof data?.error === 'string' ? data.error : `Download failed (HTTP ${response.status}).`, typeof data?.category === 'string' ? data.category : 'server', response.status); }
   return response.blob();
 }
-async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE'): Promise<T> {
+async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE' | 'PUT'): Promise<T> {
   const delivery = path === '/send' || (path.startsWith('/send-requests/') && path.endsWith('/approve'));
   const deliveryWarning = 'Delivery status is unknown. Check Sent and delivery requests before sending again.';
   let response: Response;
@@ -101,7 +101,7 @@ export const hostService = {
 
 export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate' | 'window.overlay';
 export interface ExtensionState {
-  manifest: { id: string; name: string; description: string; author: string; api_version: number; slot: string; z_index?: number; capabilities: Capability[] };
+  manifest: { settings?: ExtensionSetting[]; id: string; name: string; description: string; author: string; api_version: number; slot: string; z_index?: number; capabilities: Capability[] };
   bundled: boolean;
   enabled: boolean;
 }
@@ -116,6 +116,8 @@ async function uploadExtension<T>(path: string, pkg: Uint8Array): Promise<T> {
   return data as T;
 }
 export const extensionHost = {
+  settings: (id: string) => request<ExtensionSettings>("host", "demo", `/extensions/${encodeURIComponent(id)}/settings`),
+  saveSettings: (id: string, values: ExtensionSettings["values"]) => request<ExtensionSettings>("host", "demo", `/extensions/${encodeURIComponent(id)}/settings`, values, "PUT"),
   /** `pkg` is a .colectoext file: a zip with manifest.toml and module.wasm. */
   install: (pkg: Uint8Array) => uploadExtension<boolean>('', pkg),
   review: (pkg: Uint8Array) => uploadExtension<ExtensionState['manifest']>('/review', pkg),
@@ -173,4 +175,7 @@ export function subscribeEvents(onevent: (name: string, data: unknown) => void):
   return () => controller.abort();
 }
 
-export interface OverlayOutput { overlay: { items: { image: string; x: number; y: number; width: number; height: number; frame: { x: number; y: number; width: number; height: number } }[] }; state: string }
+export interface OverlayOutput { overlay: { items: { opacity?: number; image: string; x: number; y: number; width: number; height: number; frame: { x: number; y: number; width: number; height: number } }[] }; state: string }
+
+export interface ExtensionSetting { key: string; label: string; description?: string; type: "toggle" | "range" | "choice" | "text"; default: boolean | number | string; min?: number; max?: number; step?: number; unit?: string; options?: {value: string; label: string}[] }
+export interface ExtensionSettings { schema: ExtensionSetting[]; values: Record<string, boolean | number | string> }

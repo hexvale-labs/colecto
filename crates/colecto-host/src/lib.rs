@@ -149,6 +149,10 @@ pub fn app_with_accounts(accounts: Accounts, authority: String, assets: PathBuf)
 fn build_app(host: Host, assets: Assets) -> Router {
     let api = Router::new()
         .route(
+            "/extensions/{id}/settings",
+            get(get_extension_settings).put(put_extension_settings),
+        )
+        .route(
             "/preferences",
             get(get_preferences).post(update_preferences),
         )
@@ -529,6 +533,16 @@ fn extension_service(
     epoch: u64,
     request: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    if request.get("operation").and_then(|v| v.as_str()) == Some("settings.read") {
+        if request.as_object().is_none_or(|o| o.len() != 1) {
+            return Err("Invalid settings request".into());
+        }
+        return host
+            .extensions
+            .lock()
+            .map_err(|_| "Extension policy unavailable")?
+            .settings_guest(extension, epoch);
+    }
     let request: ServiceRequest =
         serde_json::from_value(request).map_err(|_| "Invalid service request")?;
     // Identity and account come from the Host invocation, never from guest input.
@@ -1396,6 +1410,27 @@ mod extension_service_tests {
             extension_service(&host, "connection-panel", "demo", epoch, forward).unwrap_err(),
             "Capability not granted"
         );
+        assert_eq!(
+            extension_service(
+                &host,
+                "connection-panel",
+                "demo",
+                epoch,
+                serde_json::json!({"operation":"settings.read"})
+            )
+            .unwrap(),
+            serde_json::json!({})
+        );
+        assert!(
+            extension_service(
+                &host,
+                "connection-panel",
+                "demo",
+                epoch + 1,
+                serde_json::json!({"operation":"settings.read"})
+            )
+            .is_err()
+        );
         let valid = serde_json::json!({"operation":"account.read"});
         assert_eq!(
             extension_service(&host, "connection-panel", "demo", epoch, valid.clone()).unwrap(),
@@ -1481,4 +1516,39 @@ mod extension_service_tests {
         release_tx.send(()).unwrap();
         busy.join().unwrap();
     }
+}
+
+async fn get_extension_settings(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    host.extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .settings(&id)
+        .map(Json)
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))
+}
+async fn put_extension_settings(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    input: Result<Json<serde_json::Map<String, serde_json::Value>>, JsonRejection>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    let Json(values) =
+        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid settings".into()))?;
+    let result = host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .update_settings(&id, values)
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+    let _ = host.events.send((
+        "extension.settings",
+        serde_json::json!({"id":id}).to_string(),
+    ));
+    Ok(Json(result))
 }

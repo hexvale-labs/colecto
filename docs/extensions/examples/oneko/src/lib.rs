@@ -3,6 +3,7 @@ use core::fmt::Write;
 use serde::Deserialize;
 #[link(wasm_import_module = "colecto")]
 unsafe extern "C" {
+    fn request(ptr: *const u8, len: usize, output: *mut u8, capacity: usize) -> i32;
     fn action(ptr: *mut u8, capacity: usize) -> i32;
     fn emit(ptr: *const u8, len: usize) -> i32;
 }
@@ -29,6 +30,10 @@ struct Input<'a> {
     viewport: Viewport,
     state: &'a str,
 }
+#[derive(Deserialize)]
+struct Settings { speed: f32, opacity: f32, stop_distance: f32 }
+#[derive(Deserialize)]
+struct Response { data: Settings }
 #[unsafe(no_mangle)]
 pub extern "C" fn run() {
     let mut buffer = [0u8; 8192];
@@ -39,6 +44,12 @@ pub extern "C" fn run() {
     let Ok((input, _)) = serde_json_core::from_slice::<Input>(&buffer[..len as usize]) else {
         return;
     };
+    let query = br#"{"operation":"settings.read"}"#;
+    let mut response = [0u8; 1024];
+    let size = unsafe { request(query.as_ptr(), query.len(), response.as_mut_ptr(), response.len()) };
+    let settings = if size > 0 { serde_json_core::from_slice::<Response>(&response[..size as usize]).ok().map(|(r, _)| r.data) } else { None };
+    let settings = settings.unwrap_or(Settings { speed: 10.0, opacity: 100.0, stop_distance: 44.0 });
+    let opacity = settings.opacity / 100.0;
     let mut values = input.state.split(',');
     let mut number = || {
         values
@@ -70,13 +81,13 @@ pub extern "C" fn run() {
         };
         idle = 0.0;
         frame = (7, 3);
-    } else if input.pointer.inside && distance > 44.0 {
+    } else if input.pointer.inside && distance > settings.stop_distance {
         if idle > 1.0 {
             idle = idle.min(7.0) - 1.0;
             frame = (7, 3);
         } else {
-            x += dx / distance * 10.0;
-            y += dy / distance * 10.0;
+            x += dx / distance * settings.speed;
+            y += dy / distance * settings.speed;
             let horizontal = dx.abs() > distance * 0.5;
             let vertical = dy.abs() > distance * 0.5;
             let frames = match (horizontal, vertical, dx > 0.0, dy > 0.0) {
@@ -108,7 +119,7 @@ pub extern "C" fn run() {
     let mut output = heapless::String::<1024>::new();
     let _ = write!(
         output,
-        "{{\"overlay\":{{\"items\":[{{\"image\":\"oneko.png\",\"x\":{x},\"y\":{y},\"width\":32,\"height\":32,\"frame\":{{\"x\":{},\"y\":{},\"width\":32,\"height\":32}}}}]}},\"state\":\"{x},{y},{idle},{tick}\"}}",
+        "{{\"overlay\":{{\"items\":[{{\"image\":\"oneko.png\",\"x\":{x},\"y\":{y},\"width\":32,\"height\":32,\"opacity\":{opacity},\"frame\":{{\"x\":{},\"y\":{},\"width\":32,\"height\":32}}}}]}},\"state\":\"{x},{y},{idle},{tick}\"}}",
         frame.0 * 32,
         frame.1 * 32
     );
