@@ -16,7 +16,9 @@ Temporary processes and data are cleaned up even when a workload fails.
 
 Each timestamped JSON under `docs/performance/results/` retains the three raw runs,
 mean/median, commit/dirty status, executable/UI hashes, machine/kernel/CPU, workload,
-build profile, and browser-driver/Node versions. These files are ignored by git
+build profile, Rust/Cargo versions, compiler/profile environment settings, Cargo
+configuration hashes, CPU affinity, ancestor cgroup v2 CPU/memory limits, and
+browser-driver/Node versions. These files are ignored by git
 but persist locally. Keep or archive this directory for long-term trends; in CI,
 upload `docs/performance/results/*.json` as retained artifacts and restore prior
 history before measuring. CI runs `just verify` and `just ui-test`, but not `just perf`, so it records no history yet.
@@ -40,7 +42,7 @@ The daemon and Node/Chromium process tree are measured separately:
   leak or measure native WebView/Android behavior.
 
 The recorder compares the latest matching machine, profile, workload, cycle
-count, UI mode, and browser runtime, reporting median changes without failing on
+count, UI mode, browser runtime, build settings, and resource limits, reporting median changes without failing on
 performance thresholds. Three runs give a quick signal, not statistical proof.
 Use a quiet machine, inspect raw samples, and repeat suspicious changes. Set
 budgets after several stable runs; do not gate changes on a guessed RAM limit.
@@ -83,3 +85,12 @@ The existing plaintext cache is not encrypted by the credential vault. Explicit
 Disconnect and vault Lock clear the active memory snapshots; failure to reach a
 provider leaves them intact. Retained database snapshots are selected again only
 after the configured provider identity reconnects.
+
+Build metadata describes the recorder's current toolchain and environment. Build
+the binary in that same environment before recording (also for `--binary`); the
+recorder cannot recover historical compiler flags from a prebuilt executable.
+Cgroup v2 ancestor limits are retained from leaf to root; unsupported cgroup
+layouts are marked unknown. Unknown limits cannot establish resource equivalence.
+Older results without the added compatibility fields are not compared with new
+runs. The JSON structure remains version 1 with additive metadata; the committed
+baseline remains historical evidence and needs no regeneration for this change.

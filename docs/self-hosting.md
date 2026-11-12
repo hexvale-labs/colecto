@@ -310,7 +310,7 @@ accounts receive no existing key grants. A supplied invalid or scoped bearer
 never falls back to a privileged cookie or local bootstrap. Scoped keys cannot
 manage accounts, credentials, extensions, other keys, events, or owner-token validation.
 Direct delivery is denied for scoped callers, including keys with `messages.send`;
-reviewed send requests belong to the later approval/MCP slice.
+reviewed send requests use the approval flow described below.
 
 Automation uses `Authorization: Bearer <key>` plus `x-colecto-account`.
 `x-colecto-extension` cannot confer scoped privileges. Retain the configured
@@ -386,7 +386,7 @@ snapshots or approve/reject. Requests expire in 10 minutes; at most 16 pending
 requests per key and 128 retained requests per installation are allowed.
 Snapshots are at most 110000 serialized bytes in this slice. Retained snapshots
 are purged after 24 hours on journal access/restart or the existing receive maintenance pass; they are local plaintext in
-a private `send-approvals.json`. Do not store the data directory under static
+the private `colecto.db` send-approval journal. Do not store the data directory under static
 assets. Edits require a new request.
 
 Approval rechecks the requesting key, account connection and From identity,

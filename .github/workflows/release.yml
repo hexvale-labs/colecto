@@ -6,7 +6,7 @@ name: Release
 # Build caches: a tag run can restore caches saved on main but not those saved by an earlier
 # tag, so only main saves them. Main rebuilds when dependencies or this workflow change, and
 # twice a week so a new stable toolchain is cached before the next release and GitHub does
-# not evict caches unused for 7 days. CI's prune-caches job deletes superseded entries.
+# not evict caches unused for 7 days. Both workflows prune superseded entries.
 # Each Rust cache key includes a hash of the root Cargo.toml, so a [profile.*] change gets
 # new caches (rust-cache itself only notices dependency and lockfile changes).
 on:
@@ -106,8 +106,6 @@ jobs:
         with:
           shared-key: release-${{ matrix.target }}-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          # Dependencies built before a later failure (bundling, upload) are still valid.
-          cache-on-failure: true
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -185,8 +183,6 @@ jobs:
         with:
           shared-key: release-${{ matrix.triple }}-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          # Dependencies built before a later failure (bundling, upload) are still valid.
-          cache-on-failure: true
 
       # The Gradle version and Android plugins come from the Tauri CLI's project template.
       # Only downloads are cached; build outputs are not reused.
@@ -292,8 +288,6 @@ jobs:
         with:
           shared-key: release-aarch64-apple-ios-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          # Dependencies built before a later failure (bundling, upload) are still valid.
-          cache-on-failure: true
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -344,6 +338,14 @@ jobs:
           name: ios
           path: dist/*
           if-no-files-found: error
+
+  prune-caches:
+    # Wait for action post-steps to save caches, including when another target failed.
+    if: always() && github.ref == 'refs/heads/main'
+    needs: [desktop, android, ios]
+    permissions:
+      actions: write
+    uses: ./.github/workflows/prune-caches.yml
 
   daemon-image:
     # Scheduled runs only refresh the Rust caches; the image has none to refresh.
