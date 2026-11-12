@@ -485,7 +485,9 @@ mod storage_tests {
         let dir = tempfile::tempdir().unwrap();
         let mut accounts =
             Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(NoKeys)).unwrap();
-        accounts.protect("a strong test password").unwrap();
+        // A per-run password, so no credential is written into the source.
+        let password = format!("{0}-{0}", dir.path().file_name().unwrap().to_string_lossy());
+        accounts.protect(&password).unwrap();
         assert!(accounts.remove("demo").is_err());
         assert!(accounts.remove("unknown").is_err());
         let mut ids = Vec::new();
@@ -503,7 +505,7 @@ mod storage_tests {
                 .to_string()
                 .contains("Unlock credentials first")
         );
-        accounts.unlock("a strong test password").unwrap();
+        accounts.unlock(&password).unwrap();
         for id in &ids {
             for name in ["drafts", "labels", "folders"] {
                 accounts
