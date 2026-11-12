@@ -14,6 +14,8 @@ pub struct Overlay {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Item {
+    #[serde(default = "default_opacity")]
+    pub opacity: f64,
     pub image: String,
     pub x: f64,
     pub y: f64,
@@ -29,13 +31,18 @@ pub struct Frame {
     pub width: f64,
     pub height: f64,
 }
+fn default_opacity() -> f64 {
+    1.0
+}
 pub fn validate(bytes: &[u8], assets: &crate::package::Assets) -> Result<Output, String> {
     let output: Output = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
     if output.state.len() > 4096 || output.overlay.items.len() > 16 {
         return Err("Overlay exceeds limits".into());
     }
     for i in &output.overlay.items {
-        if !assets.contains_key(&i.image)
+        if !i.opacity.is_finite()
+            || !(0.0..=1.0).contains(&i.opacity)
+            || !assets.contains_key(&i.image)
             || ![i.x, i.y, i.frame.x, i.frame.y]
                 .iter()
                 .all(|n| n.is_finite())
@@ -65,6 +72,8 @@ mod tests {
             ("image", serde_json::json!("other.png")),
             ("width", serde_json::json!(513)),
             ("height", serde_json::json!(-1)),
+            ("opacity", serde_json::json!(-0.1)),
+            ("opacity", serde_json::json!(1.1)),
             ("script", serde_json::json!("evil")),
         ] {
             let mut bad = good.clone();

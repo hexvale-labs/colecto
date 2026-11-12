@@ -15,6 +15,7 @@
   import { mailExtensions } from '../registry';
   import ApiKeys from '../../ApiKeys.svelte';
   import SendApprovals from '../../SendApprovals.svelte';
+  import ExtensionSettings from './ExtensionSettings.svelte';
   import AccountSettings from '../../AccountSettings.svelte';
   import { createServices, hostService } from '../../lib/api';
   import type { Draft, MailItem, AccountInfo, SecurityInfo } from '../../lib/api';
@@ -38,6 +39,7 @@
   let accountId = $state('demo');
   // Settings is a card over the workspace: the workspace stays mounted behind it, so opening it never closes a message or draft.
   let settingsOpen = $state(false);
+  let extensionPages = $derived(extensionStates.filter(e => e.enabled && e.manifest.settings?.length));
   let settingsPage = $state<SettingsPage>('accounts');
   let settingsDirty = $state(false);
   let reviewRequest = $state<string | null>(null);
@@ -460,12 +462,20 @@
     <div class="settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" use:focusCard>
       <nav class="settings-nav" aria-label="Settings sections">
         <h1 id="settings-title">Settings</h1>
+        <h2 class="settings-group">BUILT-IN</h2>
         {#each settingsPages as page (page.id)}<button class="nav-item" class:active={settingsPage === page.id} aria-current={settingsPage === page.id ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(page.id)}><Icon name={page.icon} />{page.name}</button>{/each}
+        {#each [true, false] as bundled}
+          {#if !bundled && extensionPages.some(e => !e.bundled)}<h2 class="settings-group">EXTENSIONS</h2>{/if}
+          {#each extensionPages.filter(e => e.bundled === bundled) as extension}
+            <button class="nav-item" class:active={settingsPage === `extension:${extension.manifest.id}`} aria-current={settingsPage === `extension:${extension.manifest.id}` ? 'page' : undefined} onclick={() => settingsTab(`extension:${extension.manifest.id}`)}><span class="extension-badge" aria-hidden="true">{extension.manifest.name.slice(0,1)}</span>{extension.manifest.name}</button>
+          {/each}
+        {/each}
       </nav>
       <div class="settings-main">
-        <header class="settings-head"><p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name}</strong></p><button class="icon-button" aria-label="Close settings" title="Close  Esc" disabled={busy} onclick={closeSettings}><Icon name="close" size={16} /></button></header>
+        <header class="settings-head"><p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name ?? extensionPages.find(e => `extension:${e.manifest.id}` === settingsPage)?.manifest.name}</strong></p><button class="icon-button" aria-label="Close settings" title="Close  Esc" disabled={busy} onclick={closeSettings}><Icon name="close" size={16} /></button></header>
         <div class="settings-page">
-          {#if settingsPage === 'accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
+          {#if settingsPage.startsWith('extension:')}{#key settingsPage}<ExtensionSettings id={settingsPage.slice(10)} />{/key}
+          {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
           {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} onchange={(next) => savePreferences({ accent: next })} />
           {:else if settingsPage === 'notifications'}<NotificationSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
           {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
@@ -542,3 +552,8 @@
     </div>
   </div>
 {/snippet}
+
+<style>
+  .settings-group { font-size: 11px; letter-spacing: .09em; color: var(--ink-3); padding: 16px 12px 6px; margin: 0; font-weight: 600; }
+  .extension-badge { width: 18px; height: 18px; display: inline-grid; place-items: center; border-radius: 4px; background: var(--control); font-size: 11px; flex-shrink: 0; }
+</style>

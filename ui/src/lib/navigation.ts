@@ -12,7 +12,7 @@ export const settingsPages = [
   { id: 'api-keys', name: 'API keys', icon: 'key' },
   { id: 'send-approvals', name: 'Send approvals', icon: 'shield' },
 ] as const satisfies readonly { id: string; name: string; icon: IconName }[];
-export type SettingsPage = typeof settingsPages[number]['id'];
+export type SettingsPage = typeof settingsPages[number]['id'] | `extension:${string}`;
 
 export type Folder = 'Inbox' | 'Drafts' | 'Sent';
 export type Destination = 'inbox' | 'drafts' | 'sent' | 'compose' | `settings/${SettingsPage}`;

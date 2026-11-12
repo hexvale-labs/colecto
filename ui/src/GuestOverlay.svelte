@@ -33,7 +33,7 @@
 </script>
 {#if error}<p class="error-box" role="alert">{id}: {error}</p>{/if}
 {#each output.overlay.items as item}
-  <svg aria-hidden="true" class="sprite" width={item.width} height={item.height} viewBox={`${item.frame.x} ${item.frame.y} ${item.frame.width} ${item.frame.height}`} style:transform={`translate(${item.x}px, ${item.y}px)`}>
+  <svg style:opacity={item.opacity ?? 1} aria-hidden="true" class="sprite" width={item.width} height={item.height} viewBox={`${item.frame.x} ${item.frame.y} ${item.frame.width} ${item.frame.height}`} style:transform={`translate(${item.x}px, ${item.y}px)`}>
     <image href={images[item.image]} />
   </svg>
 {/each}

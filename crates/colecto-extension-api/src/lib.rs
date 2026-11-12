@@ -249,6 +249,8 @@ pub const NAVIGATION_TARGETS: &[&str] = &[
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtensionManifest {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<ExtensionSetting>,
     pub description: String,
     pub author: String,
     pub id: String,
@@ -303,4 +305,123 @@ pub struct LabelInput {
     pub message_id: Option<String>,
     #[serde(default)]
     pub remove: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingOption {
+    pub value: String,
+    pub label: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionSetting {
+    pub key: String,
+    pub label: String,
+    pub description: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub default: serde_json::Value,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub step: Option<f64>,
+    pub unit: Option<String>,
+    pub options: Option<Vec<SettingOption>>,
+}
+impl ExtensionSetting {
+    pub fn accepts(&self, value: &serde_json::Value) -> bool {
+        match self.kind.as_str() {
+            "toggle" => value.is_boolean(),
+            "text" => value.is_string(),
+            "choice" => value.as_str().is_some_and(|v| {
+                self.options
+                    .as_ref()
+                    .is_some_and(|o| o.iter().any(|o| o.value == v))
+            }),
+            "range" => value.as_f64().is_some_and(|v| {
+                v.is_finite()
+                    && self.min.is_some_and(|min| v >= min)
+                    && self.max.is_some_and(|max| v <= max)
+            }),
+            _ => false,
+        }
+    }
+}
+pub fn validate_settings(settings: &[ExtensionSetting]) -> Result<(), String> {
+    let mut keys = std::collections::HashSet::new();
+    if settings.len() > 16 {
+        return Err("At most 16 settings allowed".into());
+    }
+    for s in settings {
+        let range = s.kind == "range";
+        if s.key.is_empty()
+            || s.key.len() > 32
+            || !s
+                .key
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            || !keys.insert(&s.key)
+            || s.label.is_empty()
+            || s.label.len() > 64
+            || s.description.as_ref().is_some_and(|d| d.len() > 256)
+            || s.unit.as_ref().is_some_and(|u| u.len() > 8)
+            || (!range
+                && (s.min.is_some() || s.max.is_some() || s.step.is_some() || s.unit.is_some()))
+            || (range
+                && (!s.min.is_some_and(f64::is_finite)
+                    || !s.max.is_some_and(f64::is_finite)
+                    || s.min > s.max
+                    || s.step.is_some_and(|n| !n.is_finite() || n <= 0.0)))
+            || (s.kind != "choice" && s.options.is_some())
+            || (s.kind == "choice"
+                && !s.options.as_ref().is_some_and(|o| {
+                    let mut values = std::collections::HashSet::new();
+                    (2..=8).contains(&o.len())
+                        && o.iter().all(|o| {
+                            !o.value.is_empty() && !o.label.is_empty() && values.insert(&o.value)
+                        })
+                }))
+            || !s.accepts(&s.default)
+        {
+            return Err(format!("Invalid extension setting: {}", s.key));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod setting_tests {
+    use super::*;
+    #[test]
+    fn typed_settings_and_limits() {
+        let range = serde_json::json!({"key":"speed","label":"Speed","type":"range","default":10,"min":2,"max":30});
+        let parse = |v| serde_json::from_value::<ExtensionSetting>(v).unwrap();
+        assert!(validate_settings(&[parse(range.clone())]).is_ok());
+        for (kind, value) in [
+            ("toggle", serde_json::json!(true)),
+            ("text", serde_json::json!("hello")),
+        ] {
+            let s =
+                parse(serde_json::json!({"key":"test","label":"Test","type":kind,"default":value}));
+            assert!(validate_settings(&[s]).is_ok());
+        }
+        let choice = parse(
+            serde_json::json!({"key":"test","label":"Test","type":"choice","default":"a","options":[{"value":"a","label":"A"},{"value":"b","label":"B"}]}),
+        );
+        assert!(validate_settings(&[choice]).is_ok());
+        for (key, value) in [
+            ("default", serde_json::json!(31)),
+            ("default", serde_json::json!("10")),
+            ("step", serde_json::json!(0)),
+            ("key", serde_json::json!("Bad")),
+            ("label", serde_json::json!("")),
+            ("unit", serde_json::json!("123456789")),
+        ] {
+            let mut bad = range.clone();
+            bad[key] = value;
+            assert!(validate_settings(&[parse(bad)]).is_err());
+        }
+        assert!(validate_settings(&vec![parse(range.clone()); 17]).is_err());
+        assert!(validate_settings(&[parse(range.clone()), parse(range)]).is_err());
+    }
 }
