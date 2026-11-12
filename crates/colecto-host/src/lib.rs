@@ -539,6 +539,15 @@ fn extension_service(
     if !extensions.allows_guest(extension, account, request.operation, epoch) {
         return Err("Capability not granted".into());
     }
+    if request.operation == Capability::MessagesSend
+        && request
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.forward_of.is_some())
+        && !extensions.allows_guest(extension, account, Capability::MessagesRead, epoch)
+    {
+        return Err("Capability not granted".into());
+    }
     // Already authorized operations may finish after a later revocation.
     drop(extensions);
     if request.operation == Capability::MessagesRead
@@ -1288,7 +1297,12 @@ async fn approve_send(
             })
             .ok_or_else(forbidden)?;
         let store = accounts.store(&info.id).map_err(Failure::from)?;
-        let store = store.lock().map_err(|_| forbidden())?;
+        let store = store.try_lock().map_err(|_| {
+            Failure(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Mail service busy; try again".into(),
+            )
+        })?;
         let mut keys = host.keys.lock().map_err(|_| forbidden())?;
         if !keys.allows(
             &request.requester,
@@ -1321,8 +1335,8 @@ async fn approve_send(
 #[cfg(test)]
 mod extension_service_tests {
     use super::*;
-    #[test]
-    fn guest_service_rejects_identity_injection_and_checks_current_grants() {
+    #[tokio::test]
+    async fn guest_service_rejects_identity_injection_and_checks_current_grants() {
         let dir = tempfile::tempdir().unwrap();
         let accounts = Accounts::open(
             MailStore::open(dir.path()).unwrap(),
@@ -1333,7 +1347,11 @@ mod extension_service_tests {
         let mut extensions = extensions::Extensions::open(database.clone()).unwrap();
         extensions
             .install(
-                include_str!("../../../docs/extensions/examples/connection-panel/extension.toml"),
+                &include_str!("../../../docs/extensions/examples/connection-panel/extension.toml")
+                    .replace(
+                        "capabilities = [\"account.read\"]",
+                        "capabilities = [\"account.read\", \"messages.send\"]",
+                    ),
                 wat::parse_str("(module (func (export \"run\")))").unwrap(),
             )
             .unwrap();
@@ -1361,6 +1379,23 @@ mod extension_service_tests {
             .module("connection-panel")
             .unwrap()
             .0;
+        assert!(host.extensions.lock().unwrap().allows_guest(
+            "connection-panel",
+            "demo",
+            Capability::MessagesSend,
+            epoch
+        ));
+        assert!(!host.extensions.lock().unwrap().allows_guest(
+            "connection-panel",
+            "demo",
+            Capability::MessagesRead,
+            epoch
+        ));
+        let forward = serde_json::json!({"operation":"messages.send", "draft":{"recipient":"a@example.test", "subject":"Forward", "body":"Hi", "forward_of":"welcome"}});
+        assert_eq!(
+            extension_service(&host, "connection-panel", "demo", epoch, forward).unwrap_err(),
+            "Capability not granted"
+        );
         let valid = serde_json::json!({"operation":"account.read"});
         assert_eq!(
             extension_service(&host, "connection-panel", "demo", epoch, valid.clone()).unwrap(),
@@ -1384,5 +1419,66 @@ mod extension_service_tests {
             .update("connection-panel", false)
             .unwrap();
         assert!(extension_service(&host, "connection-panel", "demo", epoch, valid).is_err());
+        let account = {
+            let mut accounts = host.accounts.lock().unwrap();
+            accounts.protect("a strong test password").unwrap();
+            accounts.upsert(serde_json::from_value(serde_json::json!({
+                "address":"from@example.test", "protocol":"jmap",
+                "session_url":"https://example.test/jmap", "username":"from", "secret":"secret"
+            })).unwrap()).unwrap().id
+        };
+        let pending = host
+            .approvals
+            .lock()
+            .unwrap()
+            .create(
+                "key",
+                &account,
+                "from@example.test",
+                serde_json::from_value(
+                    serde_json::json!({"recipient":"a@example.test", "subject":"Hi", "body":"Hi"}),
+                )
+                .unwrap(),
+                api_keys::now(),
+            )
+            .unwrap();
+        let store = host.accounts.lock().unwrap().store(&account).unwrap();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let busy = std::thread::spawn(move || {
+            let _guard = store.lock().unwrap();
+            ready_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        ready_rx.recv().unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-colecto-extension", "host".parse().unwrap());
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            approve_send(
+                State(host.clone()),
+                axum::Extension(Principal::Owner),
+                headers,
+                Path(pending.id.clone()),
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            result,
+            Err(Failure(StatusCode::TOO_MANY_REQUESTS, _))
+        ));
+        assert!(host.accounts.try_lock().is_ok());
+        assert_eq!(
+            host.approvals
+                .lock()
+                .unwrap()
+                .get(&pending.id, api_keys::now())
+                .unwrap()
+                .status,
+            approvals::Status::Pending
+        );
+        release_tx.send(()).unwrap();
+        busy.join().unwrap();
     }
 }

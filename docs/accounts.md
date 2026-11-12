@@ -184,3 +184,17 @@ the original message's attachments on the server and also requires
 uploaded files. Delivery requests from API keys cannot include attachments or
 forwards, because owner approval shows text only. JMAP sends threading headers,
 multiple recipients and attachments.
+
+### Untrusted message and push limits
+
+Raw MIME messages are checked before recursive decoding: at most 32 nested levels
+below the root and 1000 total parts. Messages exceeding either limit fail decoding,
+including during background refresh. Body and attachment readers share this check.
+Malformed non-ASCII IMAP folder IDs return a missing-message error.
+
+Disconnect, vault lock/reset and account reconfiguration revoke push watcher
+credentials before returning. An active synchronous provider wait must finish before
+its credentials can be erased; this can delay completion by the network timeout
+(the push wait is up to ten minutes). Revoked watchers cannot start another wait.
+JMAP creation errors show fixed descriptions for recognized error types and a
+fixed generic description for unknown provider values.

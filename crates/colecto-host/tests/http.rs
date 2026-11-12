@@ -561,6 +561,8 @@ async fn api_keys_reject_missing_invalid_authentication_and_forged_host_headers(
     let id = minted["key"]["id"].as_str().unwrap();
     for (method, path, account, token, expected) in [
         ("GET", "/api/v1/messages", "demo", secret, 200),
+        ("GET", "/api/v1/folders", "demo", secret, 200),
+        ("GET", "/api/v1/folders", "other", secret, 403),
         ("GET", "/api/v1/messages", "other", secret, 403),
         ("GET", "/api/v1/drafts", "demo", secret, 403),
         ("GET", "/api/v1/api-keys", "demo", secret, 403),

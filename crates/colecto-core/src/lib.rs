@@ -20,7 +20,13 @@ use std::{
     collections::HashSet,
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, Weak},
 };
+
+/// Body truncation threshold in message lists (before the truncation notice).
+pub const MAX_BODY_BYTES: usize = 100_000;
+/// Maximum messages returned by a provider folder query.
+pub const MAX_LIST_MESSAGES: usize = 100;
 
 #[derive(Debug)]
 pub enum Error {
@@ -64,6 +70,8 @@ struct PreparedConnection {
     messages: Vec<Message>,
 }
 
+type PushCredentials = Mutex<Option<Account>>;
+
 pub struct MailStore {
     directory: PathBuf,
     database: Database,
@@ -78,6 +86,7 @@ pub struct MailStore {
     snapshot: SnapshotHandle,
     account: Option<Account>,
     account_key: Option<String>,
+    watchers: Mutex<Vec<Weak<PushCredentials>>>,
 }
 
 impl MailStore {
@@ -149,6 +158,7 @@ impl MailStore {
             _lock: lock,
             account: None,
             account_key: None,
+            watchers: Default::default(),
         };
         store.labels()?;
         Ok(store)
@@ -204,6 +214,7 @@ impl MailStore {
         })
     }
     fn apply_connection(&mut self, prepared: PreparedConnection) {
+        self.stop_watchers();
         *self.snapshot.write().unwrap() = prepared.snapshots;
         self.account_key = Some(prepared.key);
         self.reader_cache.clear();
@@ -219,7 +230,20 @@ impl MailStore {
         *self.snapshot.write().map_err(storage)? = snapshots;
         Ok(())
     }
+    fn stop_watchers(&mut self) {
+        for watcher in self
+            .watchers
+            .get_mut()
+            .unwrap()
+            .drain(..)
+            .filter_map(|w| w.upgrade())
+        {
+            // A wait holds this lock through transport use; revoke and erase before returning.
+            watcher.lock().unwrap_or_else(|e| e.into_inner()).take();
+        }
+    }
     pub fn disconnect(&mut self) {
+        self.stop_watchers();
         self.snapshot.write().unwrap().clear();
         self.account = None;
         self.account_key = None;
@@ -234,8 +258,12 @@ impl MailStore {
     }
     /// A detached handle for push notifications, so waiting never holds this store's lock.
     pub fn push_watcher(&self) -> Option<PushWatcher> {
+        let account = Arc::new(Mutex::new(Some(self.account.clone()?)));
+        let mut watchers = self.watchers.lock().ok()?;
+        watchers.retain(|w| w.strong_count() > 0);
+        watchers.push(Arc::downgrade(&account));
         Some(PushWatcher {
-            account: self.account.clone()?,
+            account,
             key: self.account_key.clone()?,
         })
     }
@@ -673,8 +701,8 @@ fn message_bytes(message: &Message) -> usize {
         + message.date.len()
 }
 fn bounded_body(mut body: String) -> String {
-    if body.len() > 100_000 {
-        let mut end = 100_000;
+    if body.len() > MAX_BODY_BYTES {
+        let mut end = MAX_BODY_BYTES;
         while !body.is_char_boundary(end) {
             end -= 1;
         }
@@ -700,7 +728,7 @@ fn validate_query(folder: &str, search: &str) -> Result<(), Error> {
 /// Parse a comma-separated address list; an empty list is allowed.
 /// Waits for the provider to report Inbox changes: IMAP IDLE or JMAP push.
 pub struct PushWatcher {
-    account: Account,
+    account: Arc<PushCredentials>,
     key: String,
 }
 impl PushWatcher {
@@ -711,7 +739,8 @@ impl PushWatcher {
     /// `Ok(true)` when new mail may have arrived, `Ok(false)` after a quiet `timeout`.
     /// `Error::Invalid` means the provider does not support push; keep polling instead.
     pub fn wait(&self, timeout: std::time::Duration) -> Result<bool, Error> {
-        match &self.account {
+        let account = self.account.lock().map_err(|_| Error::Missing)?;
+        match account.as_ref().ok_or(Error::Missing)? {
             Account::Imap(account) => account.wait_for_inbox(timeout),
             Account::Jmap(account) => account.wait_for_change(timeout),
         }
@@ -811,6 +840,21 @@ mod cache_tests {
         store.delete(&ids).unwrap();
         assert!(store.delete(&ids).is_err());
         assert!(store.set_flags(&[], None, None).is_err());
+    }
+
+    #[test]
+    fn disconnect_revokes_watcher_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = MailStore::open(dir.path()).unwrap();
+        store.account = Some(Account::Imap(account()));
+        store.account_key = Some("test".into());
+        let watcher = store.push_watcher().unwrap();
+        store.disconnect();
+        assert!(watcher.account.lock().unwrap().is_none());
+        assert!(matches!(
+            watcher.wait(std::time::Duration::ZERO),
+            Err(Error::Missing)
+        ));
     }
 
     fn account() -> MailAccount {
