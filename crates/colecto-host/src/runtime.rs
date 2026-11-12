@@ -127,7 +127,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|l| l.local_addr().map(|a| a.to_string()))
         .transpose()?
         .unwrap_or_else(|| "localhost".into());
-    let policy = match remote {
+    let mut policy = match remote {
         Some(origin) => AccessPolicy::remote(
             &origin,
             read_token(&PathBuf::from(
@@ -137,6 +137,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )?,
         None => AccessPolicy::local(authority.clone()),
     };
+    policy.daemon_socket = socket.is_some();
+    policy.service_command = Some(service_command()?);
     let accounts = open_accounts(&directory)?;
     let service = MailService::new(accounts, policy, assets)?;
     let (stop, stopped) = tokio::sync::watch::channel(false);
@@ -319,6 +321,29 @@ pub fn external_link_allowed(destination: &reqwest::Url) -> bool {
     matches!(destination.scheme(), "https" | "http" | "mailto")
         && destination.username().is_empty()
         && destination.password().is_none()
+}
+
+/// Executable and arguments used by generated user units, independent of installation layout.
+pub fn service_command() -> Result<Vec<String>, std::io::Error> {
+    let executable = env::var_os("APPIMAGE")
+        .map(PathBuf::from)
+        .unwrap_or(env::current_exe()?);
+    let name = env::current_exe()?
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let mut command = vec![executable.to_string_lossy().into_owned()];
+    if name == "colecto" {
+        command.push("daemon".into());
+    }
+    Ok(command)
+}
+pub fn notify() -> Result<(), Box<dyn std::error::Error>> {
+    crate::notifications::run_agent(
+        &env::var("COLECTO_PUBLIC_ORIGIN")?,
+        &PathBuf::from(env::var_os("COLECTO_TOKEN_FILE").ok_or("COLECTO_TOKEN_FILE is required")?),
+    )
 }
 
 #[cfg(test)]

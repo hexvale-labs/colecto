@@ -27,12 +27,18 @@ use zeroize::Zeroizing;
 #[derive(Clone)]
 pub struct AccessPolicy {
     authority: String,
+    pub service_command: Option<Vec<String>>,
+    pub daemon_socket: bool,
+    local: bool,
     origin: String,
     token: Option<Arc<Zeroizing<String>>>,
 }
 impl AccessPolicy {
     pub fn local(authority: String) -> Self {
         Self {
+            service_command: None,
+            daemon_socket: false,
+            local: true,
             origin: format!("http://{authority}"),
             authority,
             token: None,
@@ -65,6 +71,9 @@ impl AccessPolicy {
             );
         }
         Ok(Self {
+            service_command: None,
+            daemon_socket: false,
+            local: false,
             authority: origin.strip_prefix("https://").unwrap().into(),
             origin,
             token: Some(Arc::new(Zeroizing::new(token))),
@@ -185,6 +194,11 @@ impl MailService {
                 Err(_) => return Err("Cannot validate static assets directory".into()),
             }
         }
+        let control = crate::services::Control::open(
+            accounts.data_directory(),
+            policy.local && !policy.daemon_socket,
+            policy.service_command.clone(),
+        )?;
         let mut policy = policy;
         if policy.token.is_none() {
             policy.token = Some(Arc::new(Zeroizing::new(
@@ -273,6 +287,10 @@ impl MailService {
                     }
                 }),
             )
+            .layer(middleware::from_fn_with_state(
+                control,
+                crate::services::handle,
+            ))
             .layer(middleware::from_fn_with_state(auth, authenticate))
             .layer(middleware::from_fn_with_state(
                 host.clone(),

@@ -11,6 +11,8 @@ export interface MessageContent { text: string; html: string | null; attachments
 export interface MailItem { id: string; name: string; subject: string; preview: string; date: string }
 export interface AccountSettings { name: string; address: string; protocol: 'imap' | 'jmap'; imap_host: string; imap_port: number; smtp_host: string; smtp_port: number; username: string; session_url: string }
 export interface AccountInfo { id: string; settings: AccountSettings | null; connected: boolean; configured: boolean }
+export interface BackgroundService { installed: boolean; enabled: boolean; active: boolean; supported: boolean; reason?: string | null; socket?: string | null; token_file?: string | null }
+export interface Upstream { address: string; token_file: string }
 export interface SecurityInfo { cleanup_pending: boolean; protected: boolean; locked: boolean }
 
 let transientToken = '';
@@ -97,6 +99,12 @@ export const hostService = {
   disconnect: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}/disconnect`, {}),
   remove: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}`, {}, 'DELETE'),
   security: () => request<SecurityInfo>('host', 'demo', '/security'),
+  /** Linux user services this app can install (local service only). */
+  services: () => request<Record<'daemon' | 'notifications', BackgroundService>>('host', 'demo', '/services'),
+  serviceAction: (name: 'daemon' | 'notifications', input: { action: 'install'; autostart: boolean } | { action: 'autostart'; enabled: boolean } | { action: 'start' | 'stop' | 'uninstall' }) => request<boolean>('host', 'demo', `/services/${name}`, input),
+  /** The daemon socket this app forwards to, or null for its built-in service. */
+  upstream: async () => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream')).upstream,
+  setUpstream: async (value: Upstream | null) => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream', value, 'PUT')).upstream,
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 

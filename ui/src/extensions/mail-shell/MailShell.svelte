@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ServerSettings from '../../ServerSettings.svelte';
   import CommandRunner from '../../CommandRunner.svelte';
   import type { Command, MessageHit } from '../../CommandRunner.svelte';
   import type { Labels } from '../../lib/api';
@@ -494,7 +495,7 @@
           {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences} />
           {:else if settingsPage === 'notifications'}<NotificationSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
           {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
-          {:else if settingsPage === 'servers'}<section class="settings-section"><header class="section-head"><h2>Mail service</h2><p>You are connected to <strong class="selectable">{window.location.origin}</strong>. Accounts and saved drafts belong to this service.</p></header><div class="settings-card"><h3>Use another server</h3><p>Open a remote daemon’s HTTPS address. Your credentials stay on that server. Local services can also use HTTP on loopback.</p><form class="inline-form" onsubmit={visitServer}><label class="field">Server address<input type="url" bind:value={serverUrl} placeholder="https://mail.example.com" required autocomplete="url" /></label>{#if serverError}<p class="error-box" role="alert">{serverError}</p>{/if}<div class="button-row"><button class="secondary">Open server</button><button type="button" class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></div></form></div></section>
+          {:else if settingsPage === 'servers'}<ServerSettings />
           {:else if settingsPage === 'send-approvals'}<SendApprovals requestId={reviewRequest} />
           {:else if settingsPage === 'api-keys'}<ApiKeys {accounts} />
           {:else}{@render extensionSettings(workspace)}{/if}

@@ -902,6 +902,8 @@ dependencies = [
  "flate2",
  "futures-util",
  "getrandom 0.3.4",
+ "hyper",
+ "hyper-util",
  "keyring",
  "reqwest 0.12.28",
  "rmcp",

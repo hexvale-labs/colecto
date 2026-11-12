@@ -13,6 +13,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/hexvale-labs/colecto"
 
 [workspace.dependencies]
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 turso = { version = "=0.7.2", default-features = false }
 futures-executor = "0.3"
 rmcp = { version = "=3.9.0", default-features = false, features = ["server", "client", "transport-streamable-http-server", "transport-streamable-http-client-reqwest", "reqwest-native-tls"] }

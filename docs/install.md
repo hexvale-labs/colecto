@@ -36,3 +36,8 @@ An unsigned IPA cannot run as downloaded on a standard iPhone. It must first be
 signed with a suitable certificate and provisioned for the device; Apple's
 [device distribution documentation](https://developer.apple.com/documentation/xcode/distributing-your-app-to-registered-devices)
 describes those requirements. Producing an IPA is not evidence of working iOS support.
+
+On Linux, Settings → Connection can install the mail and desktop notification user
+services using the currently running executable, including an AppImage. Keep that
+file in place after installing services. See [self-hosting](self-hosting.md#install-background-services-from-the-app)
+for generated units, private socket connections and service controls.

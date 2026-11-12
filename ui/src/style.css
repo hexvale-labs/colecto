@@ -701,3 +701,29 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .reader-banner .icon { flex-shrink: 0; margin-top: 2px; color: var(--ink-3); }
 .reader-banner.warning { background: oklch(0.26 0.04 75); color: oklch(0.9 0.06 80); }
 .reader-banner.warning .icon { color: oklch(0.82 0.11 75); }
+
+/* Connection page: the current service and installable background services. */
+.service-list { margin-top: 10px; }
+.service-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; }
+.service-list .service-row + .service-row { border-top: 1px solid var(--line-soft); }
+.service-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px; background: var(--control); color: var(--ink-2); }
+.service-icon.current { background: var(--select); color: var(--mint-hi); }
+.service-text { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.service-text strong { font-size: calc(14px * var(--text-scale)); font-weight: 620; }
+.service-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.service-about { max-width: 52ch; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); line-height: 1.45; }
+.service-meta { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
+.service-meta .sep { color: var(--line); }
+.service-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.service-pill { padding: 1px 7px; border-radius: 999px; background: var(--control); color: var(--ink-3); font-size: calc(11px * var(--text-scale)); font-weight: 600; }
+.service-pill.on { background: color-mix(in oklch, var(--status-online) 16%, transparent); color: var(--status-online); }
+.service-controls { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
+.service-controls .switch { margin-right: 6px; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); }
+.service-controls .icon-button.remove:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger); }
+.address-form { display: flex; gap: 8px; margin-top: 14px; max-width: 520px; }
+.address-form .field { flex: 1; margin: 0; }
+.text-button.inline { min-height: 0; display: inline; }
+@container settings (max-width: 560px) {
+  .service-row { flex-wrap: wrap; }
+  .service-controls { width: 100%; padding-left: 50px; }
+}

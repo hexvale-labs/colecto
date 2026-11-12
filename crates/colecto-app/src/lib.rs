@@ -5,6 +5,21 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(command) = std::env::args().nth(1) {
+        colecto_host::logging::init();
+        let result = match command.as_str() {
+            "daemon" => tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(colecto_host::runtime::run()),
+            "notify" => colecto_host::runtime::notify(),
+            _ => Err("Usage: colecto [daemon|notify]".into()),
+        };
+        if let Err(error) = result {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     // Wayland compositors find the window's icon through the desktop entry named after its
     // app_id, which GTK takes from the program name. Every Linux package installs
     // `Colecto.desktop`, so match it instead of the binary name `colecto`.
@@ -39,11 +54,9 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
                     .map(|asset| (asset.bytes, asset.mime_type))
             }));
             let accounts = colecto_host::runtime::open_accounts(&directory)?;
-            let service = colecto_host::MailService::new(
-                accounts,
-                colecto_host::AccessPolicy::local(authority.clone()),
-                assets,
-            )?;
+            let mut policy = colecto_host::AccessPolicy::local(authority.clone());
+            policy.service_command = Some(colecto_host::runtime::service_command()?);
+            let service = colecto_host::MailService::new(accounts, policy, assets)?;
             let owner_token =
                 zeroize::Zeroizing::new(colecto_host::runtime::local_owner_token(&directory)?);
             let origin = format!("http://{authority}");

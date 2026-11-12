@@ -59,8 +59,9 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
     await scrollAll(); await expectNoOverscroll(page, 'composer');
     if (viewport.width < 800) await page.getByRole('button', { name: 'Back to list' }).click();
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.route('**/api/v1/services', route => route.fulfill({json: {daemon: {supported: false}, notifications: {supported: false}}}));
     const settings = page.getByRole('dialog', { name: 'Settings' });
-    for (const section of ['Accounts', 'Appearance', 'Notifications', 'Servers', 'Extensions', 'API keys', 'Send approvals']) {
+    for (const section of ['Accounts', 'Appearance', 'Notifications', 'Connection', 'Extensions', 'API keys', 'Send approvals']) {
       await settings.getByRole('button', { name: section, exact: true }).click();
       await expect(settings.getByRole('heading', { level: 2 }).first()).toBeVisible();
       await scrollAll(); await expectNoOverscroll(page, `settings: ${section}`);
