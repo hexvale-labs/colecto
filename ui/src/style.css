@@ -630,3 +630,47 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .install-warning { z-index: var(--layer-installDialog); }
 
 .command-runner { z-index: var(--layer-commandRunner); }
+
+/* Account controls stay reachable while long identities wrap. */
+.compact-accounts li { display: flex; gap: .75rem; align-items: center; }
+.compact-accounts .account-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.compact-accounts .account-actions { display: flex; flex-shrink: 0; gap: .125rem; }
+.settings-avatar { width: 2rem; height: 2rem; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%; background: var(--select); color: var(--mint); }
+.account-dot { display: inline-block; width: .4rem; height: .4rem; border-radius: 50%; background: var(--ink-3); margin-right: .4rem; }
+.account-dot.connected { background: #83cfa0; }
+.protocol-tag { display: inline !important; margin-left: .4rem; font-size: .75rem; color: var(--ink-3); white-space: nowrap; }
+.account-dialog { width: min(36rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; padding: 1.5rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--bg); color: var(--ink); }
+.account-dialog::backdrop { background: #0009; }
+.account-dialog .form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .75rem; }
+.account-dialog .wide-field { grid-column: 1 / -1; }
+.account-dialog h3 { margin: 1.25rem 0 .75rem; }
+.account-dialog input { min-width: 0; font-size: 1rem; }
+.account-dialog .segmented { width: 100%; }
+.account-dialog .segmented label { flex: 1; justify-content: center; }
+.account-dialog .field { font-size: .9rem; }
+.account-dialog .button-row { justify-content: flex-end; margin-top: 1.25rem; }
+.typography-settings { display: grid; gap: .9rem; }
+.typography-settings .segmented label { flex: 1; }
+.typography-settings small { margin-left: .35rem; color: var(--ink-3); }
+.select-group { font-size: .75rem; color: var(--ink-3); padding: .5rem .75rem; pointer-events: none; }
+.account-settings .settings-card, .settings-section .settings-card { font-size: 1rem; }
+.account-settings .settings-card p, .settings-section .settings-card p { font-size: .93rem; }
+@media (max-width: 480px) {
+  .compact-accounts li { flex-wrap: wrap; }
+  .compact-accounts .account-actions { margin-left: auto; }
+  .account-dialog { padding: 1rem; }
+  .account-dialog .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .account-dialog input { font-size: max(16px, 1rem); }
+}
+.compact-accounts .account-copy { display: grid; gap: .125rem; }
+.compact-accounts .account-copy > span, .compact-accounts .account-copy small { font-size: .86rem; }
+.typography-settings .segmented { display: flex; flex-wrap: wrap; }
+.typography-settings .segmented label { padding-inline: .5rem; }
+.account-dialog > p { color: var(--ink-2); font-size: .93rem; }
+.account-dialog .field input { width: 100%; }
+.account-dialog .segmented label { padding-inline: .5rem; font-size: .85rem; }
+:is(.account-settings, .settings-section, .account-dialog) .section-head h2 { font-size: 1.714rem; }
+:is(.account-settings, .settings-section, .account-dialog) h3 { font-size: 1.07rem; }
+:is(.account-settings, .settings-section, .account-dialog) .field { font-size: .893rem; }
+:is(.account-settings, .settings-section, .account-dialog) .field input { font-size: 1rem; min-height: 2.714rem; height: auto; padding-block: .5rem; }
+:is(.account-settings, .settings-section, .account-dialog) :is(.primary, .secondary, .text-button, .select-trigger, .select-menu) { font-size: .93rem; height: auto; min-height: 2.3rem; }

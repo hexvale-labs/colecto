@@ -189,3 +189,22 @@ paint checkpoint. It stays for at least 800 ms after that checkpoint and until a
 usable app surface exists, then fades over 200 ms with ease-out without moving the
 layout. Reduced motion removes the fade. Automated browsers can set sessionStorage
 `colecto.fastStartup` to `1` to skip timing; normal browsers ignore that hook.
+
+## Typography and settings controls
+
+Appearance offers bundled Mona Sans (default), Inter, Geist, IBM Plex Sans and
+Atkinson Hyperlegible Next. Non-default CSS and font assets load when selected.
+The font menu groups Bundled and System families and previews each option in that
+family when loaded. System detection probes common installed families; **Find
+system fonts** requests local-font access only on a user gesture where supported.
+System choices depend on fonts installed on each device.
+
+Owner preferences persist `font` (bundled id or system family, at most 64 characters)
+and `font_size` (13–18px). S/M/L/XL choose 13/14/16/18px for predictable one-click
+changes without slider precision. The root font size and settings copy scale;
+fixed workspace geometry remains compact.
+
+Keep switches for booleans, radio segments for small exclusive choices, accent
+swatches for colours and the corner picker for notification placement. Native
+account dialogs trap focus, support Escape, scroll within the viewport and keep
+destructive actions behind a confirmation.

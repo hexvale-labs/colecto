@@ -30,7 +30,8 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Extensions: Wasm panels and overlays, install-time consent, z-index layers | Done |
 | Declarative extension settings, owner controls and per-guest reads | Done |
 | Onboarding for the first account; demo account off by default | Next |
-| Font choice, loading screen, account avatars in Settings, selection polish | Next |
+| Font choice and size, account avatars and account settings dialog | Done |
+| Loading screen and selection polish | Next |
 | Custom ports in every server field | Next |
 | Install the daemon as a background service (systemd user unit, Windows logon task) | Next |
 | Stress testing with thousands of messages and very long HTML mail | Next |

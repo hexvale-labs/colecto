@@ -81,7 +81,7 @@ export type ComposerService = ReturnType<typeof createServices>['composer'];
 /** Owner preferences, stored by the Host in Turso. `workspace` is the dock layout. */
 export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right' | 'bottom' | 'bottom-left' | 'left';
 export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner }
-export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; notifications: NotificationPreferences; remote_images: boolean }
+export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; notifications: NotificationPreferences; remote_images: boolean }
 /** An empty accent restores the default. */
 export type PreferencesInput = Partial<Omit<Preferences, 'accent'>> & { accent?: string };
 export const hostService = {

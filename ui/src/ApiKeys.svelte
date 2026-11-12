@@ -67,6 +67,9 @@
 </section>
 
 <style>
+  .check-group .choice { padding: .35rem .65rem; border: 1px solid var(--line); border-radius: 999px; font-size: .9rem; overflow-wrap: anywhere; max-width: 100%; }
+  .check-group .choice:has(input:checked) { background: var(--select); border-color: var(--mint); }
+  .check-group .choice:has(input:focus-visible) { outline: 2px solid var(--mint); outline-offset: 2px; }
   .check-group { display: flex; flex-wrap: wrap; gap: 2px 18px; margin-top: 18px; }
   .check-group legend { width: 100%; margin-bottom: 6px; padding: 0; color: var(--ink-2); font-size: 12.5px; font-weight: 560; }
   .settings-card > .primary { margin-top: 20px; }
