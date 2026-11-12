@@ -31,7 +31,8 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Onboarding for the first account; demo account off by default | Next |
 | Font choice, loading screen, account avatars in Settings, selection polish | Next |
 | Custom ports in every server field | Next |
-| Install the daemon as a background service (systemd user unit, Windows logon task) | Next |
+| Install the daemon and notifier as Linux systemd user services from Connection | Done; real systemd validation pending |
+| Install the daemon as a Windows logon task | Next |
 | Stress testing with thousands of messages and very long HTML mail | Next |
 | Warning when an extension targets an API version that can no longer fully work | Later |
 
@@ -68,3 +69,9 @@ Without a daemon, an optional `specialUse` foreground service keeps the Rust cor
 IDLE/push watchers running, with a low-priority persistent notification and a request
 to ignore battery optimisation. `dataSync` is unsuitable: Android 15 limits it to six
 hours a day and blocks starting it at boot.
+
+### Local background service integration
+
+Implemented Linux user-service installation and controls from Connection, app daemon
+and notifier subcommands, and a persisted Unix-socket upstream with streaming API
+proxying. Real systemd and desktop notification delivery still need platform testing.

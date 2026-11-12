@@ -7,7 +7,7 @@ export const settingsPages = [
   { id: 'appearance', name: 'Appearance', icon: 'palette' },
   { id: 'notifications', name: 'Notifications', icon: 'bell' },
   { id: 'privacy', name: 'Privacy', icon: 'image' },
-  { id: 'servers', name: 'Servers', icon: 'server' },
+  { id: 'servers', name: 'Connection', icon: 'server' },
   { id: 'extensions', name: 'Extensions', icon: 'extension' },
   { id: 'api-keys', name: 'API keys', icon: 'key' },
   { id: 'send-approvals', name: 'Send approvals', icon: 'shield' },

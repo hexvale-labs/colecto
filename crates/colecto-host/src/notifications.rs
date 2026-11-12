@@ -2,25 +2,52 @@
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
+fn connection(
+    origin: &str,
+) -> Result<(reqwest::Url, reqwest::blocking::Client), Box<dyn std::error::Error>> {
+    let socket = origin.strip_prefix("unix:");
+    if socket.is_some_and(|p| !std::path::Path::new(p).is_absolute()) {
+        return Err("Socket path must be absolute".into());
+    }
+    let url = reqwest::Url::parse(if socket.is_some() {
+        "http://localhost"
+    } else {
+        origin
+    })?;
+    if socket.is_none()
+        && (url.scheme() != "https"
+            || url.host_str().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.path() != "/"
+            || url.query().is_some()
+            || url.fragment().is_some())
+    {
+        return Err("Notification agent requires an HTTPS server origin".into());
+    }
+    let builder = reqwest::blocking::Client::builder();
+    #[cfg(unix)]
+    let builder = if let Some(socket) = socket {
+        builder.unix_socket(socket)
+    } else {
+        builder
+    };
+    #[cfg(not(unix))]
+    if socket.is_some() {
+        return Err("Unix sockets unavailable".into());
+    }
+    let client = builder
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+    Ok((url, client))
+}
+
 pub fn run_agent(
     origin: &str,
     token_file: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let url = reqwest::Url::parse(origin)?;
-    if url.scheme() != "https"
-        || url.host_str().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.path() != "/"
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err("Notification agent requires an HTTPS server origin".into());
-    }
-    let client = reqwest::blocking::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
+    let (url, client) = connection(origin)?;
     let mut backoff = 1;
     loop {
         let result = (|| -> Result<(), Box<dyn std::error::Error>> {
@@ -120,5 +147,51 @@ mod tests {
     #[test]
     fn oversized_events_are_bounded() {
         assert!(consume_events(&vec![b'x'; 65538][..], || Ok(())).is_err());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod socket_tests {
+    use super::*;
+    #[test]
+    fn notifier_connects_over_unix_socket_with_localhost_authority() {
+        use std::{io::Write, os::unix::net::UnixListener};
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("mail.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = String::new();
+            let mut reader = BufReader::new(&mut stream);
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                if line == "\r\n" {
+                    break;
+                }
+                request.push_str(&line);
+            }
+            assert!(request.starts_with("GET /api/v1/events HTTP/1.1"));
+            assert!(request.to_ascii_lowercase().contains("host: localhost"));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .unwrap();
+        });
+        let (url, client) = connection(&format!("unix:{}", socket.display())).unwrap();
+        assert_eq!(
+            client
+                .get(url.join("api/v1/events").unwrap())
+                .send()
+                .unwrap()
+                .text()
+                .unwrap(),
+            "ok"
+        );
+        server.join().unwrap();
+        assert!(connection("unix:relative.sock").is_err());
+        assert!(connection("http://example.com").is_err());
     }
 }

@@ -3,6 +3,7 @@ pub mod api_keys;
 pub mod approvals;
 pub mod mcp;
 pub mod preferences;
+pub mod services;
 mod store;
 use api_keys::{ApiKeys, Principal};
 mod extensions;

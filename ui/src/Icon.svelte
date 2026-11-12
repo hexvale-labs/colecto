@@ -1,6 +1,8 @@
 <script lang="ts" module>
   // Paths follow Lucide (ISC licence): 24px grid, round caps, one stroke weight.
   const paths = {
+    play: '<path d="m8 5 11 7-11 7Z"/>',
+    stop: '<rect x="5" y="5" width="14" height="14" rx="1"/>',
     compose: '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.4 2.6a1 1 0 0 1 3 3l-9 9a2 2 0 0 1-.85.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.85z"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
     command: '<path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/>',

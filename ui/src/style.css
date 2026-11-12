@@ -602,3 +602,20 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .install-warning { z-index: var(--layer-installDialog); }
 
 .command-runner { z-index: var(--layer-commandRunner); }
+
+/* Connection settings: local service controls. */
+.connection-summary, .connection-service, .connection-actions { display: flex; align-items: center; gap: 12px; }
+.connection-summary { padding-block: 12px; }
+.connection-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.connection-dot.reachable { background: var(--mint); }
+.connection-summary p { overflow-wrap: anywhere; }
+.connection-service { justify-content: space-between; flex-wrap: wrap; padding-block: 12px; border-bottom: 1px solid var(--line-soft); }
+.connection-actions { flex-wrap: wrap; }
+.connection-pill { display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: 20px; background: var(--control); color: var(--ink-2); font-size: 12px; }
+.connection-pill.reachable { color: var(--mint); }
+.connection-switch { display: flex; align-items: center; gap: 6px; }
+.connection-switch input { appearance: none; width: 28px; height: 16px; border-radius: 12px; background: var(--control); border: 1px solid var(--line); cursor: pointer; }
+.connection-switch input::before { content: ''; display: block; width: 10px; height: 10px; margin: 2px; border-radius: 50%; background: var(--ink-2); }
+.connection-switch input:checked { background: var(--mint); }
+.connection-switch input:checked::before { transform: translateX(12px); background: var(--ground); }
+.connection-settings .text-button { min-height: 32px; }
