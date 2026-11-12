@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<!--
+Adapted from https://raw.githubusercontent.com/TedGoas/Cerberus/af3cec9dd12fbbea0c6e9a1b0bf82a0479726957/cerberus-responsive.html
+The MIT License (MIT)
+
+Copyright (c) 2017 Ted Goas
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+-->
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+    <meta charset="utf-8"> <!-- utf-8 works for most cases -->
+    <meta name="viewport" content="width=device-width"> <!-- Forcing initial-scale shouldn't be necessary -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"> <!-- Use the latest (edge) version of IE rendering engine -->
+    <meta name="x-apple-disable-message-reformatting">  <!-- Disable auto-scale in iOS 10 Mail entirely -->
+    <meta name="format-detection" content="telephone=no,address=no,email=no,date=no,url=no"> <!-- Tell iOS not to automatically link certain text strings. -->
+    <meta name="color-scheme" content="light dark">
+    <meta name="supported-color-schemes" content="light dark">
+    <title>The winter collection has arrived</title> <!-- The title tag shows in email notifications, like Android 4.4. -->
+
+    <!-- What it does: Makes background images in 72ppi Outlook render at correct size. -->
+    <!--[if gte mso 9]>
+    <xml>
+        <o:OfficeDocumentSettings>
+            <o:PixelsPerInch>96</o:PixelsPerInch>
+        </o:OfficeDocumentSettings>
+    </xml>
+    <![endif]-->
+
+    <!-- Web Font / @font-face : BEGIN -->
+    <!-- NOTE: If web fonts are not required, lines 23 - 41 can be safely removed. -->
+
+    <!-- Desktop Outlook chokes on web font references and defaults to Times New Roman, so we force a safe fallback font. -->
+    <!--[if mso]>
+        <style>
+            * {
+                font-family: sans-serif !important;
+            }
+        </style>
+    <![endif]-->
+
+    <!-- All other clients get the webfont reference; some will render the font and others will silently fail to the fallbacks. More on that here: https://web.archive.org/web/20190717120616/http://stylecampaign.com/blog/2015/02/webfont-support-in-email/ -->
+    <!--[if !mso]><!-->
+    <!-- insert web font reference, eg: <link href='https://fonts.googleapis.com/css?family=Roboto:400,700' rel='stylesheet' type='text/css'> -->
+    <!--<![endif]-->
+
+    <!-- Web Font / @font-face : END -->
+
+    <!-- CSS Reset : BEGIN -->
+    <style>
+
+        /* What it does: Tells the email client that both light and dark styles are provided. A duplicate of meta color-scheme meta tag above. */
+        :root {
+          color-scheme: light dark;
+          supported-color-schemes: light dark;
+        }
+
+        /* What it does: Remove spaces around the email design added by some email clients. */
+        /* Beware: It can remove the padding / margin and add a background color to the compose a reply window. */
+        html,
+        body {
+            margin: 0 auto !important;
+            padding: 0 !important;
+            height: 100% !important;
+            width: 100% !important;
+        }
+
+        /* What it does: Stops email clients resizing small text. */
+        * {
+            -ms-text-size-adjust: 100%;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        /* What it does: Centers email on Android 4.4 */
+        div[style*="margin: 16px 0"] {
+            margin: 0 !important;
+        }
+
+        /* What it does: forces Samsung Android mail clients to use the entire viewport */
+        #MessageViewBody, #MessageWebViewDiv{
+            width: 100% !important;
+        }
+
+        /* What it does: Stops Outlook from adding extra spacing to tables. */
+        table,
+        td {
+            mso-table-lspace: 0pt !important;
+            mso-table-rspace: 0pt !important;
+        }
+
+        /* What it does: Replaces default bold style. */
+        th {
+        	font-weight: normal;
+        }
+
+        /* What it does: Fixes webkit padding issue. */
+        table {
+            border-spacing: 0 !important;
+            border-collapse: collapse !important;
+            table-layout: fixed !important;
+            margin: 0 auto !important;
+        }
+
+        /* What it does: Prevents Windows 10 Mail from underlining links despite inline CSS. Styles for underlined links should be inline. */
+        a {
+            text-decoration: none;
+        }
+
+        /* What it does: Uses a better rendering method when resizing images in IE. */
+        img {
+            -ms-interpolation-mode:bicubic;
+        }
+
+        /* What it does: A work-around for email clients meddling in triggered links. */
+        a[x-apple-data-detectors],  /* iOS */
+        .unstyle-auto-detected-links a,
+        .aBn {
+            border-bottom: 0 !important;
+            cursor: default !important;
+            color: inherit !important;
+            text-decoration: none !important;
+            font-size: inherit !important;
+            font-family: inherit !important;
+            font-weight: inherit !important;
+            line-height: inherit !important;
+        }
+
+        /* What it does: Prevents Gmail from changing the text color in conversation threads. */
+        .im {
+            color: inherit !important;
+        }
+
+        /* What it does: Prevents Gmail from displaying a download button on large, non-linked images. */
+        .a6S {
+           display: none !important;
+           opacity: 0.01 !important;
+		}
+		/* If the above doesn't work, add a .g-img class to any image in question. */
+		img.g-img + div {
+		   display: none !important;
+		}
+
+        /* What it does: Removes right gutter in Gmail iOS app: https://github.com/TedGoas/Cerberus/issues/89  */
+        /* Create one of these media queries for each additional viewport size you'd like to fix */
+
+        /* iPhone 4, 4S, 5, 5S, 5C, and 5SE */
+        @media only screen and (min-device-width: 320px) and (max-device-width: 374px) {
+            u ~ div .email-container {
+                min-width: 320px !important;
+            }
+        }
+        /* iPhone 6, 6S, 7, 8, and X */
+        @media only screen and (min-device-width: 375px) and (max-device-width: 413px) {
+            u ~ div .email-container {
+                min-width: 375px !important;
+            }
+        }
+        /* iPhone 6+, 7+, and 8+ */
+        @media only screen and (min-device-width: 414px) {
+            u ~ div .email-container {
+                min-width: 414px !important;
+            }
+        }
+
+    </style>
+    <!-- CSS Reset : END -->
+
+    <!-- Progressive Enhancements : BEGIN -->
+    <style>
+
+        /* What it does: Hover styles for buttons */
+        .button-td,
+        .button-a {
+            transition: all 100ms ease-in;
+        }
+	    .button-td-primary:hover,
+	    .button-a-primary:hover {
+	        background: #555555 !important;
+	        border-color: #555555 !important;
+	    }
+
+        /* Media Queries */
+        @media screen and (max-width: 600px) {
+
+            .email-container {
+                width: 100% !important;
+                margin: auto !important;
+            }
+
+            /* What it does: Forces table cells into full-width rows. */
+            .stack-column,
+            .stack-column-center {
+                display: block !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                direction: ltr !important;
+            }
+            /* And center justify these ones. */
+            .stack-column-center {
+                text-align: center !important;
+            }
+
+            /* What it does: Generic utility class for centering. Useful for images, buttons, and nested tables. */
+            .center-on-narrow {
+                text-align: center !important;
+                display: block !important;
+                margin-left: auto !important;
+                margin-right: auto !important;
+                float: none !important;
+            }
+            table.center-on-narrow {
+                display: inline-block !important;
+            }
+
+            /* What it does: Adjust typography on small screens to improve readability */
+            .email-container p {
+                font-size: 17px !important;
+            }
+        }
+
+        /* Dark Mode Styles : BEGIN */
+        @media (prefers-color-scheme: dark) {
+            .email-bg {
+                background: #111111 !important;
+            }
+            .darkmode-bg {
+                background: #222222 !important;
+            }
+            h1,
+            h2,
+            h3,
+            p,
+            li,
+            .darkmode-text,
+            .email-container a:not([class]) {
+                color: #F7F7F9 !important;
+            }
+            td.button-td-primary,
+            td.button-td-primary a {
+                background: #ffffff !important;
+                border-color: #ffffff !important;
+                color: #222222 !important;
+            }
+            td.button-td-primary:hover,
+            td.button-td-primary a:hover {
+                background: #cccccc !important;
+                border-color: #cccccc !important;
+            }
+            .footer td {
+                color: #aaaaaa !important;
+            }
+            .darkmode-fullbleed-bg {
+                background-color: #0F3016 !important;
+            }
+        }
+        /* Dark Mode Styles : END */
+    </style>
+    <!-- Progressive Enhancements : END -->
+
+</head>
+<!--
+	The email background color (#222222) is defined in three places:
+	1. body tag: for most email clients
+	2. center tag: for Gmail and Inbox mobile apps and web versions of Gmail, GSuite, Inbox, Yahoo, AOL, Libero, Comcast, freenet, Mail.ru, Orange.fr
+	3. mso conditional: For Windows 10 Mail
+-->
+<body width="100%" style="margin: 0; padding: 0 !important; mso-line-height-rule: exactly; background-color: #222222;" class="email-bg">
+  <center role="article" aria-roledescription="email" lang="en" style="width: 100%; background-color: #222222;" class="email-bg">
+    <!--[if mso | IE]>
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #222222;" class="email-bg">
+    <tr>
+    <td>
+    <![endif]-->
+
+        <!-- Visually Hidden Preheader Text : BEGIN -->
+        <div style="max-height:0; overflow:hidden; mso-hide:all;" aria-hidden="true">
+            (Optional) This text will appear in the inbox preview, but not the email body. It can be used to supplement the email subject line or even summarize the email's contents. Extended text preheaders (~490 characters) seems like a better UX for anyone using a screenreader or voice-command apps like Siri to dictate the contents of an email. If this text is not included, email clients will automatically populate it using the text (including image alt text) at the start of the email's body.
+        </div>
+        <!-- Visually Hidden Preheader Text : END -->
+
+        <!-- Create white space after the desired preview text so email clients don’t pull other distracting text into the inbox preview. Extend as necessary. -->
+        <!-- Preview Text Spacing Hack : BEGIN -->
+        <div style="display: none; font-size: 1px; line-height: 1px; max-height: 0px; max-width: 0px; opacity: 0; overflow: hidden; mso-hide: all; font-family: sans-serif;">
+            &zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;
+        </div>
+        <!-- Preview Text Spacing Hack : END -->
+
+        <!-- Email Body : BEGIN -->
+        <table align="center" role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: auto;" class="email-container">
+	        <!-- Email Header : BEGIN -->
+            <tr>
+                <td style="padding: 20px 0; text-align: center">
+                    <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAAAyCAIAAACWMwO2AAAC3klEQVR42u3SMQoiMQCG0b3NgoVgYSFYCBYWggTBYoqAhSBEcHCQMTM4imIURRSDB8hR9wJf6XY/vCO8P3/NGrVMjtpmgzqmQF2zRT1Tor7ZoYGp0NDUaGT2aGwOaGKOaGpOaGbOKDMXZM0Vzc0NLcwdLc0DrcwT5eaFCvNGpfmgykTUmC/6o1iKpViKpViKpViKpViKpViKpViKpViK9etYdo1aNkdtu0EdW6Cu3aKeLVHf7tDAVmhoazSyezS2BzSxRzS1JzSzZ5TZC7L2iub2hhb2jpb2gVb2iXL7QoV9o9J+UGUjauwXKZZiKZZiKZZiKZZiKZZiKZZiKZZiKZZi/TyWW6OWy1HbbVDHFajrtqjnStR3OzRwFRq6Go3cHo3dAU3cEU3dCc3cGWXugqy7orm7oYW7o6V7oJV7oty9UOHeqHQfVLmIGvdFiqVYiqVYiqVYiqVYiqVYiqVYiqVYiqVYP4/l16jlc9T2G9TxBer6Ler5EvX9Dg18hYa+RiO/R2N/QBN/RFN/QjN/Rpm/IOuvaO5vaOHvaOkfaOWfKPcvVPg3Kv0HVT6ixn+RYimWYimWYimWYimWYimWYimWYimWYinWz2OFNWqFHLXDBnVCgbphi3qhRP2wQ4NQoWGo0Sjs0Tgc0CQc0TSc0CycURYuyIYrmocbWoQ7WoYHWoUnysMLFeGNyvBBVYioCV+kWIqlWIqlWIqlWIqlWIqlWIqlWIqlWIr181hxjVoxR+24QZ1YoG7col4sUT/u0CBWaBhrNIp7NI4HNIlHNI0nNItnlMULsvGK5vGGFvGOlvGBVvGJ8vhCRXyjMn5QFSNq4hcplmIplmIplmIplmIplmIplmIplmIplmL9PFZao1bKUTttUCcVqJu2qJdK1E87NEgVGqYajdIejdMBTdIRTdMJzdIZZemCbLqiebqhRbqjZXqgVXqiPL1Qkd6oTB9UpYia9EWKpVj/JdY/lx+s8FtTA98AAAAASUVORK5CYII=" width="200" height="50" alt="Alder winter collection" border="0" style="height: auto; background: #dddddd; font-family: sans-serif; font-size: 15px; line-height: 15px; color: #555555;">
+                </td>
+            </tr>
+	        <!-- Email Header : END -->
+
+            <!-- Hero Image, Flush : BEGIN -->
+            <tr>
+                <td style="background-color: #ffffff;" class="darkmode-bg">
+                    <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABLAAAAJYCAIAAAD9hIhNAAB1oElEQVR42uzXRW4sChJFwb+kNjMzMzNzMZOrXGzG/fYGMgd3+KQjxSbiv/8tByQtotbloKlN1O4KmTocnaKu5bCk29GzHJH0ivqWo6Z+0YArZhp0DImGl+OSEcfockIyJhpfTpomRJOulGnKMS2aWU5LZh1zyxnJvGhhOWtaFC25cqZlx4podTkvWXOsLxckG6LN5UfTlmjbVTTtOHZFe8slyb7jYPlJcig6Wi6bjkUnrorp1HEmOl+uSi4cl8s1yZXoerluuhHduhqmO8e96GG5KQk4gsvPkpAovPxiioiirldTzBEXJZbfJElHavldkhZllj9MWVHO9WnKOwqix+UvSdFRWv6WPInKyz+miqjq+jXVHHVRY/lP0nT8RwgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAj/zRCuBCQtotaVoKlN1O4KmTocnaKulbCk29GzEpH0ivpWoqZ+0YArZhp0DImGV+KSEcfoSkIyJhpfSZomRJOulGnKMS2aWUlLZh1zKxnJvGhhJWtaFC25cqZlx4podSUvWXOsrxQkG6LNlUfTlmjbVTTtOHZFeyslyb7jYOVJcig6WimbjkUnrorp1HEmOl+pSi4clys1yZXoeqVuuhHduhqmO8e96GGlKQk4givPkpAovPJiioiirldTzBEXJVbeJElHauVdkhZlVj5MWVHO9WnKOwqix5UvSdFRWvmWPInKKz+miqjq+jXVHHVRY+VP0nQQQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASwn80hKsBSYuodTVoahO1u0KmDkenqGs1LOl29KxGJL2ivtWoqV804IqZBh1DouHVuGTEMbqakIyJxleTpgnRpCtlmnJMi2ZW05JZx9xqRjIvWljNmhZFS66cadmxIlpdzUvWHOurBcmGaHP10bQl2nYVTTuOXdHeakmy7zhYfZIcio5Wy6Zj0YmrYjp1nInOV6uSC8flak1yJbperZtuRLeuhunOcS96WG1KAo7g6rMkJAqvvpgioqjr1RRzxEWJ1TdJ0pFafZekRZnVD1NWlHN9mvKOguhx9UtSdJRWvyVPovLqj6kiqrp+TTVHXdRY/ZM0HYSQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhITwHw3hWkDSImpdC5raRO2ukKnD0SnqWgtLuh09axFJr6hvLWrqFw24YqZBx5BoeC0uGXGMriUkY6LxtaRpQjTpSpmmHNOimbW0ZNYxt5aRzIsW1rKmRdGSK2dadqyIVtfykjXH+lpBsiHaXHs0bYm2XUXTjmNXtLdWkuw7DtaeJIeio7Wy6Vh04qqYTh1novO1quTCcblWk1yJrtfqphvRrathunPcix7WmpKAI7j2LAmJwmsvpogo6no1xRxxUWLtTZJ0pNbeJWlRZu3DlBXlXJ+mvKMgelz7khQdpbVvyZOovPZjqoiqrl9TzVEXNdb+JE0HISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhIfxHQ7gekLSIWteDpjZRuytk6nB0irrWw5JuR896RNIr6luPmvpFA66YadAxJBpej0tGHKPrCcmYaHw9aZoQTbpSpinHtGhmPS2ZdcytZyTzooX1rGlRtOTKmZYdK6LV9bxkzbG+XpBsiDbXH01bom1X0bTj2BXtrZck+46D9SfJoehovWw6Fp24KqZTx5nofL0quXBcrtckV6Lr9brpRnTrapjuHPeih/WmJOAIrj9LQqLw+ospIoq6Xk0xR1yUWH+TJB2p9XdJWpRZ/zBlRTnXpynvKIge178kRUdp/VvyJCqv/5gqoqrr11Rz1EWN9T9J00EICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgI/9EQbgQkLaLWjaCpTdTuCpk6HJ2iro2wpNvRsxGR9Ir6NqKmftGAK2YadAyJhjfikhHH6EZCMiYa30iaJkSTrpRpyjEtmtlIS2YdcxsZybxoYSNrWhQtuXKmZceKaHUjL1lzrG8UJBuizY1H05Zo21U07Th2RXsbJcm+42DjSXIoOtoom45FJ66K6dRxJjrfqEouHJcbNcmV6HqjbroR3boapjvHvehhoykJOIIbz5KQKLzxYoqIoq5XU8wRFyU23iRJR2rjXZIWZTY+TFlRzvVpyjsKoseNL0nRUdr4ljyJyhs/poqo6vo11Rx1UWPjT9J0EEJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEsJ/NISbAUmLqHUzaGoTtbtCpg5Hp6hrMyzpdvRsRiS9or7NqKlfNOCKmQYdQ6LhzbhkxDG6mZCMicY3k6YJ0aQrZZpyTItmNtOSWcfcZkYyL1rYzJoWRUuunGnZsSJa3cxL1hzrmwXJhmhz89G0Jdp2FU07jl3R3mZJsu842HySHIqONsumY9GJq2I6dZyJzjerkgvH5WZNciW63qybbkS3robpznEvethsSgKO4OazJCQKb76YIqKo69UUc8RFic03SdKR2nyXpEWZzQ9TVpRzfZryjoLocfNLUnSUNr8lT6Ly5o+pIqq6fk01R13U2PyTNB2EkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISE8B8N4VZA0iJq3Qqa2kTtrpCpw9Ep6toKS7odPVsRSa+obytq6hcNuGKmQceQaHgrLhlxjG4lJGOi8a2kaUI06UqZphzTopmttGTWMbeVkcyLFraypkXRkitnWnasiFa38pI1x/pWQbIh2tx6NG2Jtl1F045jV7S3VZLsOw62niSHoqOtsulYdOKqmE4dZ6LzrarkwnG5VZNcia636qYb0a2rYbpz3IsetpqSgCO49SwJicJbL6aIKOp6NcUccVFi602SdKS23iVpUWbrw5QV5VyfpryjIHrc+pIUHaWtb8mTqLz1Y6qIqq5fU81RFzW2/iRNByEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISH8R0O4HZC0iFq3g6Y2UbsrZOpwdIq6tsOSbkfPdkTSK+rbjpr6RQOumGnQMSQa3o5LRhyj2wnJmGh8O2maEE26UqYpx7RoZjstmXXMbWck86KF7axpUbTkypmWHSui1e28ZM2xvl2QbIg2tx9NW6JtV9G049gV7W2XJPuOg+0nyaHoaLtsOhaduCqmU8eZ6Hy7KrlwXG7XJFei6+266UZ062qY7hz3ooftpiTgCG4/S0Ki8PaLKSKKul5NMUdclNh+kyQdqe13SVqU2f4wZUU516cp7yiIHre/JEVHaftb8iQqb/+YKqKq69dUc9RFje0/SdNBCAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICP/REO4EJC2i1p2gqU3U7gqZOhydoq6dsKTb0bMTkfSK+naipn7RgCtmGnQMiYZ34pIRx+hOQjImGt9JmiZEk66UacoxLZrZSUtmHXM7Gcm8aGEna1oULblypmXHimh1Jy9Zc6zvFCQbos2dR9OWaNtVNO04dkV7OyXJvuNg50lyKDraKZuORSeuiunUcSY636lKLhyXOzXJleh6p266Ed26GqY7x73oYacpCTiCO8+SkCi882KKiKKuV1PMERcldt4kSUdq512SFmV2PkxZUc71aco7CqLHnS9J0VHa+ZY8ico7P6aKqOr6NdUcdVFj50/SdBBCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBLCfzSEuwFJi6h1N2hqE7W7QqYOR6eoazcs6Xb07EYkvaK+3aipXzTgipkGHUOi4d24ZMQxupuQjInGd5OmCdGkK2WackyLZnbTklnH3G5GMi9a2M2aFkVLrpxp2bEiWt3NS9Yc67sFyYZoc/fRtCXadhVNO45d0d5uSbLvONh9khyKjnbLpmPRiatiOnWcic53q5ILx+VuTXIlut6tm25Et66G6c5xL3rYbUoCjuDusyQkCu++mCKiqOvVFHPERYndN0nSkdp9l6RFmd0PU1aUc32a8o6C6HH3S1J0lHa/JU+i8u6PqSKqun5NNUdd1Nj9kzQdhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhPAfDeFeQNIiat0LmtpE7a6QqcPRKeraC0u6HT17EUmvqG8vauoXDbhipkHHkGh4Ly4ZcYzuJSRjovG9pGlCNOlKmaYc06KZvbRk1jG3l5HMixb2sqZF0ZIrZ1p2rIhW9/KSNcf6XkGyIdrcezRtibZdRdOOY1e0t1eS7DsO9p4kh6KjvbLpWHTiqphOHWei872q5MJxuVeTXImu9+qmG9Gtq2G6c9yLHvaakoAjuPcsCYnCey+miCjqejXFHHFRYu9NknSk9t4laVFm78OUFeVcn6a8oyB63PuSFB2lvW/Jk6i892OqiKquX1PNURc19v4kTQchJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEh/EdDuB+QtIha94OmNlG7K2TqcHSKuvbDkm5Hz35E0ivq24+a+kUDrphp0DEkGt6PS0Yco/sJyZhofD9pmhBNulKmKce0aGY/LZl1zO1nJPOihf2saVG05MqZlh0rotX9vGTNsb5fkGyINvcfTVuibVfRtOPYFe3tlyT7joP9J8mh6Gi/bDoWnbgqplPHmeh8vyq5cFzu1yRXouv9uulGdOtqmO4c96KH/aYk4AjuP0tCovD+iykiirpeTTFHXJTYf5MkHan9d0lalNn/MGVFOdenKe8oiB73vyRFR2n/W/IkKu//mCqiquvXVHPURY39P0nTQQgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAj/0RAeBCQtotaDoKlN1O4KmTocnaKug7Ck29FzEJH0ivoOoqZ+0YArZhp0DImGD+KSEcfoQUIyJho/SJomRJOulGnKMS2aOUhLZh1zBxnJvGjhIGtaFC25cqZlx4po9SAvWXOsHxQkG6LNg0fTlmjbVTTtOHZFewclyb7j4OBJcig6OiibjkUnrorp1HEmOj+oSi4clwc1yZXo+qBuuhHduhqmO8e96OGgKQk4ggfPkpAofPBiioiirldTzBEXJQ7eJElH6uBdkhZlDj5MWVHO9WnKOwqix4MvSdFROviWPInKBz+miqjq+jXVHHVR4+BP0nQQQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASwn80hIcBSYuo9TBoahO1u0KmDkenqOswLOl29BxGJL2ivsOoqV804IqZBh1DouHDuGTEMXqYkIyJxg+TpgnRpCtlmnJMi2YO05JZx9xhRjIvWjjMmhZFS66cadmxIlo9zEvWHOuHBcmGaPPw0bQl2nYVTTuOXdHeYUmy7zg4fJIcio4Oy6Zj0YmrYjp1nInOD6uSC8flYU1yJbo+rJtuRLeuhunOcS96OGxKAo7g4bMkJAofvpgioqjr1RRzxEWJwzdJ0pE6fJekRZnDD1NWlHN9mvKOgujx8EtSdJQOvyVPovLhj6kiqrp+TTVHXdQ4/JM0HYSQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhITwHw3hcUDSImo9DpraRO2ukKnD0SnqOg5Luh09xxFJr6jvOGrqFw24YqZBx5Bo+DguGXGMHickY6Lx46RpQjTpSpmmHNOimeO0ZNYxd5yRzIsWjrOmRdGSK2dadqyIVo/zkjXH+nFBsiHaPH40bYm2XUXTjmNXtHdckuw7Do6fJIeio+Oy6Vh04qqYTh1novPjquTCcXlck1yJro/rphvRrathunPcix6Om5KAI3j8LAmJwscvpogo6no1xRxxUeL4TZJ0pI7fJWlR5vjDlBXlXJ+m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8+rRtCXadhVNO45d0d5VSbLvOLh6khyKjq7KpmPRiatiOnWcic6vqpILx+VVTXIlur6qm25Et66G6c5xL3q4akoCjuDVsyQkCl+9mCKiqOvVFHPERYmrN0nSkbp6l6RFmasPU1aUc32a8o6C6PHqS1J0lK6+JU+i8tWPqSKqun5NNUdd1Lj6kzQdhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhPAfDeF1QNIiar0OmtpE7a6QqcPRKeq6Dku6HT3XEUmvqO86auoXDbhipkHHkGj4Oi4ZcYxeJyRjovHrpGlCNOlKmaYc06KZ67Rk1jF3nZHMixaus6ZF0ZIrZ1p2rIhWr/OSNcf6dUGyIdq8fjRtibZdRdOOY1e0d12S7DsOrp8kh6Kj67LpWHTiqphOHWei8+uq5MJxeV2TXImur+umG9Gtq2G6c9yLHq6bkoAjeP0sCYnC1y+miCjqejXFHHFR4vpNknSkrt8laVHm+sOUFeVcn6a8oyB6vP6SFB2l62/Jk6h8/WOqiKquX1PNURc1rv8kTQchJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEh/EdDeBOQtIhab4KmNlG7K2TqcHSKum7Ckm5Hz01E0ivqu4ma+kUDrphp0DEkGr6JS0YcozcJyZho/CZpmhBNulKmKce0aOYmLZl1zN1kJPOihZusaVG05MqZlh0rotWbvGTNsX5TkGyINm8eTVuibVfRtOPYFe3dlCT7joObJ8mh6OimbDoWnbgqplPHmej8piq5cFze1CRXouubuulGdOtqmO4c96KHm6Yk4AjePEtCovDNiykiirpeTTFHXJS4eZMkHambd0lalLn5MGVFOdenKe8oiB5vviRFR+nmW/IkKt/8mCqiquvXVHPURY2bP0nTQQgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAj/0RDeBiQtotbboKlN1O4KmTocnaKu27Ck29FzG5H0ivpuo6Z+0YArZhp0DImGb+OSEcfobUIyJhq/TZomRJOulGnKMS2auU1LZh1ztxnJvGjhNmtaFC25cqZlx4po9TYvWXOs3xYkG6LN20fTlmjbVTTtOHZFe7clyb7j4PZJcig6ui2bjkUnrorp1HEmOr+tSi4cl7c1yZXo+rZuuhHduhqmO8e96OG2KQk4grfPkpAofPtiioiirldTzBEXJW7fJElH6vZdkhZlbj9MWVHO9WnKOwqix9svSdFRuv2WPInKtz+miqjq+jXVHHVR4/ZP0nQQQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASwn80hHcBSYuo9S5oahO1u0KmDkenqOsuLOl29NxFJL2ivruoqV804IqZBh1DouG7uGTEMXqXkIyJxu+SpgnRpCtlmnJMi2bu0pJZx9xdRjIvWrjLmhZFS66cadmxIlq9y0vWHOt3BcmGaPPu0bQl2nYVTTuOXdHeXUmy7zi4e5Icio7uyqZj0YmrYjp1nInO76qSC8flXU1yJbq+q5tuRLeuhunOcS96uGtKAo7g3bMkJArfvZgioqjr1RRzxEWJuzdJ0pG6e5ekRZm7D1NWlHN9mvKOgujx7ktSdJTuviVPovLdj6kiqrp+TTVHXdS4+5M0HYSQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhITwHw3hfUDSImq9D5raRO2ukKnD0Snqug9Luh099xFJr6jvPmrqFw24YqZBx5Bo+D4uGXGM3ickY6Lx+6RpQjTpSpmmHNOimfu0ZNYxd5+RzIsW7rOmRdGSK2dadqyIVu/zkjXH+n1BsiHavH80bYm2XUXTjmNXtHdfkuw7Du6fJIeio/uy6Vh04qqYTh1novP7quTCcXlfk1yJru/rphvRrathunPcix7um5KAI3j/LAmJwvcvpogo6no1xRxxUeL+TZJ0pO7fJWlR5v7DlBXlXJ+mvKMgerz/khQdpftvyZOofP9jqoiqrl9TzVEXNe7/JE0HISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhIfxHQ/gQkLSIWh+CpjZRuytk6nB0iroewpJuR89DRNIr6nuImvpFA66YadAxJBp+iEtGHKMPCcmYaPwhaZoQTbpSpinHtGjmIS2Zdcw9ZCTzooWHrGlRtOTKmZYdK6LVh7xkzbH+UJBsiDYfHk1bom1X0bTj2BXtPZQk+46DhyfJoejooWw6Fp24KqZTx5no/KEquXBcPtQkV6Lrh7rpRnTrapjuHPeih4emJOAIPjxLQqLww4spIoq6Xk0xR1yUeHiTJB2ph3dJWpR5+DBlRTnXpynvKIgeH74kRUfp4VvyJCo//Jgqoqrr11Rz1EWNhz9J00EICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgI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E1fFdOo4E51nqpILx2WmJrkSXWfqphvRrathunPcix4yTUnAEcw8S0KicObFFBFFXa+mmCMuSmTeJElHKvMuSYsymQ9TVpRzfZryjoLoMfMlKTpKmW/Jk6ic+TFVRFXXr6nmqIsamT9J00EICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgI/9EQZgOSFlFrNmhqE7W7QqYOR6eoKxuWdDt6shFJr6gvGzX1iwZcMdOgY0g0nI1LRhyj2YRkTDSeTZomRJOulGnKMS2ayaYls465bEYyL1rIZk2LoiVXzrTsWBGtZvOSNcd6tiDZEG1mH01bom1X0bTj2BXtZUuSfcdB9klyKDrKlk3HohNXxXTqOBOdZ6uSC8dltia5El1n66Yb0a2rYbpz3Isesk1JwBHMPktConD2xRQRRV2vppgjLkpk3yRJRyr7LkmLMtkPU1aUc32a8o6C6DH7JSk6StlvyZOonP0xVURV16+p5qiLGtk/SdNBCAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICP/REOYCkhZRay5oahO1u0KmDkenqCsXlnQ7enIRSa+oLxc19YsGXDHToGNINJyLS0Yco7mEZEw0nkuaJkSTrpRpyjEtmsmlJbOOuVxGMi9ayGVNi6IlV8607FgRrebykjXHeq4g2RBt5h5NW6JtV9G049gV7eVKkn3HQe5Jcig6ypVNx6ITV8V06jgTneeqkgvHZa4muRJd5+qmG9Gtq2G6c9yLHnJNScARzD1LQqJw7sUUEUVdr6aYIy5K5N4kSUcq9y5JizK5D1NWlHN9mvKOgugx9yUpOkq5b8mTqJz7MVVEVdevqeaoixq5P0nT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hJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQvhEQ1jckzwTPS/um16IulwBU7fjpainGJT0OvqKIUm/aKAYNr0SDboipteOIdGb4oFk2DFSPJSMisaKR6Zx0YTr2PTWMSl6VzyRvHdMFU8l06IPxTPTR9En17lpxvFZNFuMSuYc88WYZEG0WIyblkTLroRpxbEqWismJeuOjWJKsin6Ukybvoq2XBnTtmNH9K2YlXx3/CjmJD9Fv4p502/Rrqtg+uP4K/pXLEr2HPvFkiQgChbLppAo7KqYIo4D0WGxKjlyHBdrkhPRafHCdCY6d9VNUUdMFC82JAlHstiUpETpYsuUEWVdbVPOkRcVih1J0UEICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgIn2gIS3uSZ6LnpX3TC1GXK2DqdrwU9ZSCkl5HXykk6RcNlMKmV6JBV8T02jEkelM6kAw7RkqHklHRWOnINC6acB2b3jomRe9KJ5L3jqnSqWRa9KF0Zvoo+uQ6N804PotmS1HJnGO+FJMsiBZLcdOSaNmVMK04VkVrpaRk3bFRSkk2RV9KadNX0ZYrY9p27Ii+lbKS744fpZzkp+hXKW/6Ldp1FUx/HH9F/0pFyZ5jv1SSBETBUtkUEoVdFVPEcSA6LFUlR47jUk1yIjotXZjOROeuuinqiInipYYk4UiWmpKUKF1qmTKirKttyjnyokKpIyk6CCEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICeETDWF5T/JM9Ly8b3oh6nIFTN2Ol6KeclDS6+grhyT9ooFy2PRKNOiKmF47hkRvygeSYcdI+VAyKhorH5nGRROuY9Nbx6ToXflE8t4xVT6VTIs+lM9MH0WfXOemGcdn0Ww5KplzzJdjkgXRYjluWhItuxKmFceqaK2clKw7NsopyaboSzlt+iracmVM244d0bdyVvLd8aOck/wU/SrnTb9Fu66C6Y/jr+hfuSjZc+yXS5KAKFgum0KisKtiijgORIflquTIcVyuSU5Ep+UL05no3FU3RR0xUbzckCQcyXJTkhKlyy1TRpR1tU05R15UKHckRQchJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhfKIhrOxJnomeV/ZNL0RdroCp2/FS1FMJSnodfZWQpF80UAmbXokGXRHTa8eQ6E3lQDLsGKkcSkZFY5Uj07hownVseuuYFL2rnEjeO6Yqp5Jp0YfKmemj6JPr3DTj+CyarUQlc475SkyyIFqsxE1LomVXwrTiWBWtVZKSdcdGJSXZFH2ppE1fRVuujGnbsSP6VslKvjt+VHKSn6Jflbzpt2jXVTD9cfwV/asUJXuO/UpJEhAFK2VTSBR2VUwRx4HosFKVHDmOKzXJiei0cmE6E5276qaoIyaKVxqShCNZaUpSonSlZcqIsq62KefIiwqVjqToIISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJIRPNITVPckz0fPqvumFqMsVMHU7Xop6qkFJr6OvGpL0iwaqYdMr0aArYnrtGBK9qR5Ihh0j1UPJqGisemQaF024jk1vHZOid9UTyXvHVPVUMi36UD0zfRR9cp2bZhyfRbPVqGTO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ISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICJ9oCFt7kmei56190wtRlytg6na8FPW0gpJeR18rJOkXDbTCpleiQVfE9NoxJHrTOpAMO0Zah5JR0VjryDQumnAdm946JkXvWieS946p1qlkWvShdWb6KPrkOjfNOD6LZltRyZxjvhWTLIgWW3HTkmjZlTCtOFZFa62kZN2x0UpJNkVfWmnTV9GWK2PaduyIvrWyku+OH62c5KfoVytv+i3adRVMfxx/Rf9aRcmeY79VkgREwVbZFBKFXRVTxHEgOmxVJUeO41ZNciI6bV2YzkTnrrop6oiJ4q2GJOFItpqSlCjdapkyoqyrbco58qJCqyMpOgghISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAnhEw1he0/yTPS8vW96IepyBUzdjpeinnZQ0uvoa4ck/aKBdtj0SjToipheO4ZEb9oHkmHHSPtQMioaax+ZxkUTrmPTW8ek6F37RPLeMdU+lUyLPrTPTB9Fn1znphnHZ9FsOyqZc8y3Y5IF0WI7bloSLbsSphXHqmitnZSsOzbaKcmm6Es7bfoq2nJlTNuOHdG3dlby3fGjnZP8FP1q502/RbuugumP46/oX7so2XPst0uSgCjYLptCorCrYoo4DkSH7arkyHHcrklORKftC9OZ6NxVN0UdMVG83ZAkHMl2U5ISpdstU0aUdbVNOUdeVGh3JEUHISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJI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EBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBA+0RDe70meiZ7f75teiLpcAVO346Wo5z4o6XX03Yck/aKB+7DplWjQFTG9dgyJ3twfSIYdI/eHklHR2P2RaVw04To2vXVMit7dn0jeO6buTyXTog/3Z6aPok+uc9OM47No9j4qmXPM38ckC6LF+7hpSbTsSphWHKuitfukZN2xcZ+SbIq+3KdNX0Vbroxp27Ej+naflXx3/LjPSX6Kft3nTb9Fu66C6Y/jr+jffVGy59i/L0kCouB92RQShV0VU8RxIDq8r0qOHMf3NcmJ6PT+wnQmOnfVTVFHTBS/b0gSjuR9U5ISpe9bpowo62qbco68qHDfkRQdhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhPCJhvBhT/JM9Pxh3/RC1OUKmLodL0U9D0FJr6PvISTpFw08hE2vRIOuiOm1Y0j05uFAMuwYeTiUjIrGHo5M46IJ17HprWNS9O7hRPLeMfVwKpkWfXg4M30UfXKdm2Ycn0WzD1HJnGP+ISZZEC0+xE1LomVXwrTiWBWtPSQl646Nh5RkU/TlIW36KtpyZUzbjh3Rt4es5Lvjx0NO8lP06yFv+i3adRVMfxx/Rf8eipI9x/5DSRIQBR/KppAo7KqYIo4D0eFDVXLkOH6oSU5Epw8XpjPRuatuijpiovhDQ5JwJB+akpQo/dAyZURZV9uUc+RFhYeOpOgghISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhE80hI97kmei54/7pheiLlfA1O14Kep5DEp6HX2PIUm/aOAxbHolGnRFTK8dQ6I3jweSYcfI46FkVDT2eGQaF024jk1vHZOid48nkveOqcdTybTow+OZ6aPok+vcNOP4LJp9jErmHPOPMcmCaPExbloSLbsSphXHqmjtMSlZd2w8piSboi+PadNX0ZYrY9p27Ii+PWYl3x0/HnOSn6Jfj3nTb9Guq2D64/gr+vdYlOw59h9LkoAo+Fg2hURhV8UUcRyIDh+rkiPH8WNNciI6fbwwnYnOXXVT1BETxR8bkoQj+diUpETpx5YpI8q62qacIy8qPHYkRQchJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhJISEkBASQkJICAkhISSEhJAQEkJCSAgJISEkhISQEBJCQkgICSEhfJIh/A8+4OYS4pr0HgAAAABJRU5ErkJggg==" width="600" height="" alt="Alder winter collection" border="0" style="width: 100%; max-width: 600px; height: auto; background: #dddddd; font-family: sans-serif; font-size: 15px; line-height: 15px; color: #555555; margin: auto; display: block;" class="g-img">
+                </td>
+            </tr>
+            <!-- Hero Image, Flush : END -->
+
+            <!-- 1 Column Text + Button : BEGIN -->
+            <tr>
+                <td style="background-color: #ffffff;" class="darkmode-bg">
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                        <tr>
+                            <td style="padding: 20px; font-family: sans-serif; font-size: 15px; line-height: 20px; color: #555555;">
+                                <h1 style="margin: 0 0 10px; font-size: 25px; line-height: 30px; color: #333333; font-weight: normal;">Praesent laoreet malesuada&nbsp;cursus.</h1>
+                                <p style="font:16px/1.6 Arial,sans-serif;">Discover warm layers and thoughtful essentials for the colder days ahead.</p><div><img src="https://remote.test/cerberus-marketing/hero.png" width="240" height="80" alt="Remote campaign banner" style="max-width:100%;height:auto;" />
+<img src="https://remote.test/cerberus-marketing/open.gif" width="1" height="1" alt="" /></div><p style="margin: 0 0 10px;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+                                <ul style="padding: 0; margin: 0; list-style-type: disc;">
+									<li style="margin:0 0 10px 20px;" class="list-item-first">A list item.</li>
+									<li style="margin:0 0 10px 20px;">Another list item here.</li>
+									<li style="margin: 0 0 0 20px;" class="list-item-last">Everyone gets a list item, list items for everyone!</li>
+								</ul>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 0 20px 20px;">
+                                <!-- Button : BEGIN -->
+                                <table align="center" role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin: auto;">
+                                    <tr>
+                                        <td class="button-td button-td-primary" style="border-radius: 4px; background: #222222;">
+											<a class="button-a button-a-primary" href="https://alder.test/collections/winter" style="background: #222222; border: 1px solid #000000; font-family: sans-serif; font-size: 15px; line-height: 15px; text-decoration: none; padding: 13px 17px; color: #ffffff; display: block; border-radius: 4px;">Explore the winter collection</a>
+										</td>
+                                    </tr>
+                                </table>
+                                <!-- Button : END -->
+                            </td>
+                        </tr>
+
+                    </table>
+                </td>
+            </tr>
+            <!-- 1 Column Text + Button : END -->
+
+            <!-- Background Image with Text : BEGIN -->
+            <tr>
+                <!-- Bulletproof Background Images c/o https://backgrounds.cm -->
+                <td valign="middle" style="text-align: center; background-image: url('https://via.placeholder.com/600x230/222222/666666'); background-color: #222222; background-position: center center !important; background-size: cover !important;">
+	                <!--[if gte mso 9]>
+	                <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:600px;height:175px; background-position: center center !important;">
+	                <v:fill type="tile" src="https://via.placeholder.com/600x230/222222/666666" color="#222222" />
+	                <v:textbox inset="0,0,0,0">
+	                <![endif]-->
+	                <div>
+	                    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+	                        <tr>
+	                            <td valign="middle" style="text-align: center; padding: 40px; font-family: sans-serif; font-size: 15px; line-height: 20px; color: #ffffff;">
+	                                <p style="margin: 0;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+	                            </td>
+	                        </tr>
+	                    </table>
+	                </div>
+	                <!--[if gte mso 9]>
+	                </v:textbox>
+	                </v:rect>
+	                <![endif]-->
+	            </td>
+	        </tr>
+	        <!-- Background Image with Text : END -->
+
+	        <!-- 2 Even Columns : BEGIN -->
+	        <tr>
+	            <td style="padding: 10px; background-color: #ffffff;" class="darkmode-bg">
+	                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+	                    <tr>
+	                        <!-- Column : BEGIN -->
+	                        <th valign="top" width="50%" class="stack-column-center">
+	                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+	                                <tr>
+	                                    <td style="padding: 10px; text-align: center">
+	                                        <img src="data:image/png;base64,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" width="270" height="" alt="Alder winter collection" border="0" style="width: 100%; max-width: 270px; height: auto; background: #dddddd; font-family: sans-serif; font-size: 15px; line-height: 15px; color: #555555;">
+	                                    </td>
+	                                </tr>
+	                                <tr>
+	                                    <td style="font-family: sans-serif; font-size: 15px; line-height: 20px; color: #555555; padding: 0 10px 10px; text-align: left;" class="center-on-narrow">
+	                                        <p style="margin: 0;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+	                                    </td>
+	                                </tr>
+	                            </table>
+	                        </th>
+	                        <!-- Column : END -->
+	                        <!-- Column : BEGIN -->
+	                        <th valign="top" width="50%" class="stack-column-center">
+	                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+	                                <tr>
+	                                    <td style="padding: 10px; text-align: center">
+	                                        <img src="data:image/png;base64,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" width="270" height="" alt="Alder winter collection" border="0" style="width: 100%; max-width: 270px; height: auto; background: #dddddd; font-family: sans-serif; font-size: 15px; line-height: 15px; color: #555555;">
+	                                    </td>
+	                                </tr>
+	                                <tr>
+	                                    <td style="font-family: sans-serif; font-size: 15px; line-height: 20px; color: #555555; padding: 0 10px 10px; text-align: left;" class="center-on-narrow">
+	                                        <p style="margin: 0;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+	                                    </td>
+	                                </tr>
+	                            </table>
+	                        </th>
+	                        <!-- Column : END -->
+	                    </tr>
+	                </table>
+	            </td>
+	        </tr>
+	        <!-- 2 Even Columns : END -->
+
+	        <!-- 3 Even Columns : BEGIN -->
+	        <tr>
+	            <td style="padding: 10px; background-color: #ffffff;" class="darkmode-bg">
+	                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+	                    <tr>
+	                        <!-- Column : BEGIN -->
+	                        <th valign="top" width="33.33%" class="stack-column-center">
+	                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+	                                <tr>
+	                                    <td style="padding: 10px; text-align: center">
+	                                        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKoAAACqCAIAAACyFEPVAAAHjklEQVR42u3RTQqiAACG4bnfLApcuEgoKASFDAsLCxMltR9RKREXLtx0z/EA7wmaD54bPH/+zj00m++QMfeROT8gax6g1fyENvMQOfML2s4j5M9jFMwTdJ6n6Dq/oXSeo2J+R6/5E9XzEn3mFernDRrmbzTOW/Sdd5M/6le/+tWvfvWrX/3qV7/61a/+X+83PDQzdsgwfGQaB2QZAVoZJ7QxQuQYF7Q1IuQbMQqMBJ2NFF2NG0qNHBXGHb2MJ6qNEn2MCvVGgwbjjUajRV+jm6hf/epXv/rVr371q1/96le/+n++3/TQzNwhw/SRaR6QZQZoZZ7QxgyRY17Q1oyQb8YoMBN0NlN0NW8oNXNUmHf0Mp+oNkv0MSvUmw0azDcazRZ9zW6ifvWrX/3qV7/61a9+9atf/er/+f6Fh2aLHTIWPjIXB2QtArRanNBmESJncUHbRYT8RYyCRYLOixRdFzeULnJULO7otXiielGiz6JC/aJBw+KNxkWLvotuon71q1/96le/+tWvfvWrX/3q//n+pYdmyx0ylj4ylwdkLQO0Wp7QZhkiZ3lB22WE/GWMgmWCzssUXZc3lC5zVCzv6LV8onpZos+yQv2yQcPyjcZli77LbqJ+9atf/epXv/rVr371q1/96v/5/rWHZusdMtY+MtcHZK0DtFqf0GYdImd9Qdt1hPx1jIJ1gs7rFF3XN5Suc1Ss7+i1fqJ6XaLPukL9ukHD+o3GdYu+626ifvWrX/3qV7/61a9+9atf/er/+X7bQzN7hwzbR6Z9QJYdoJV9Qhs7RI59QVs7Qr4do8BO0NlO0dW+odTOUWHf0ct+otou0ceuUG83aLDfaLRb9LW7ifrVr371q1/96le/+tWvfvWr/+f7XQ/N3B0yXB+Z7gFZboBW7glt3BA57gVt3Qj5bowCN0FnN0VX94ZSN0eFe0cv94lqt0Qft0K926DBfaPRbdHX7SbqV7/61a9+9atf/epXv/rVr/6f7/c8NPN2yPB8ZHoHZHkBWnkntPFC5HgXtPUi5HsxCrwEnb0UXb0bSr0cFd4dvbwnqr0SfbwK9V6DBu+NRq9FX6+bqF/96le/+tWvfvWrX/3qV7/6f75/76HZfoeMvY/M/QFZ+wCt9ie02YfI2V/Qdh8hfx+jYJ+g8z5F1/0NpfscFfs7eu2fqN6X6LOvUL9v0LB/o3Hfou++m6hf/epXv/rVr371q1/96le/+n++/+ih2XGHjKOPzOMBWccArY4ntDmGyDle0PYYIf8Yo+CYoPMxRdfjDaXHHBXHO3odn6g+luhzrFB/bNBwfKPx2KLvsZuoX/3qV7/61a9+9atf/epXv/p/vj/00CzcISP0kRkekBUGaBWe0CYMkRNe0DaMkB/GKAgTdA5TdA1vKA1zVIR39AqfqA5L9Akr1IcNGsI3GsMWfcNuon71q1/96le/+tWvfvWrX/3q//n+yEOzaIeMyEdmdEBWFKBVdEKbKEROdEHbKEJ+FKMgStA5StE1uqE0ylER3dEreqI6KtEnqlAfNWiI3miMWvSNuon61a9+9atf/epXv/rVr371q//n+xMPzZIdMhIfmckBWUmAVskJbZIQOckFbZMI+UmMgiRB5yRF1+SG0iRHRXJHr+SJ6qREn6RCfdKgIXmjMWnRN+km6le/+tWvfvWrX/3qV7/61a/+n+/PPDTLdsjIfGRmB2RlAVplJ7TJQuRkF7TNIuRnMQqyBJ2zFF2zG0qzHBXZHb2yJ6qzEn2yCvVZg4bsjcasRd+sm6hf/epXv/rVr371q1/96le/+n++/+Gh2WOHjIePzMcBWY8ArR4ntHmEyHlc0PYRIf8Ro+CRoPMjRdfHDaWPHBWPO3o9nqh+lOjzqFD/aNDweKPx0aLvo5uoX/3qV7/61a9+9atf/epXv/p/vr/00KzcIaP0kVkekFUGaFWe0KYMkVNe0LaMkF/GKCgTdC5TdC1vKC1zVJR39CqfqC5L9Ckr1JcNGso3GssWfctuon71q1/96le/+tWvfvWrX/3q//n+xkOzZoeMxkdmc0BWE6BVc0KbJkROc0HbJkJ+E6OgSdC5SdG1uaG0yVHR3NGreaK6KdGnqVDfNGho3mhsWvRtuon61a9+9atf/epXv/rVr371q//n+1sPzdodMlofme0BWW2AVu0JbdoQOe0FbdsI+W2MgjZB5zZF1/aG0jZHRXtHr/aJ6rZEn7ZCfdugoX2jsW3Rt+0m6le/+tWvfvWrX/3qV7/61a/+n+/vPTTrd8jofWT2B2T1AVr1J7TpQ+T0F7TtI+T3MQr6BJ37FF37G0r7HBX9Hb36J6r7En36CvV9g4b+jca+Rd++m6hf/epXv/rVr371q1/96le/+n++f/DQbNghY/CRORyQNQRoNZzQZgiRM1zQdoiQP8QoGBJ0HlJ0HW4oHXJUDHf0Gp6oHkr0GSrUDw0ahjcahxZ9h26ifvWrX/3qV7/61a9+9atf/er/+f7RQ7Nxh4zRR+Z4QNYYoNV4QpsxRM54QdsxQv4Yo2BM0HlM0XW8oXTMUTHe0Wt8onos0WesUD82aBjfaBxb9B27ifr/6/5/PrL2fT9jNvEAAAAASUVORK5CYII=" width="170" height="" alt="Alder winter collection" border="0" style="width: 100%; max-width: 170px; height: auto; background: #dddddd; font-family: sans-serif; font-size: 15px; line-height: 15px; color: #555555;">
+	                                    </td>
+	                                </tr>
+	                                <tr>
+	                                    <td style="font-family: sans-serif; font-size: 15px; line-height: 20px; color: #555555; padding: 0 10px 10px; text-align: left;" class="center-on-narrow">
+	                                        <p style="margin: 0;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+	                                    </td>
+	                                </tr>
+	                            </table>
+	                        </th>
+	                        <!-- Column : END -->
+	                        <!-- Column : BEGIN -->
+	                        <th valign="top" width="33.33%" class="stack-column-center">
+	                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+	                                <tr>
+	                                    <td style="padding: 10px; text-align: center">
+	                                        <img src="data:image/png;base64,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" width="170" height="" alt="Alder winter collection" border="0" style="width: 100%; max-width: 170px; height: auto; background: #dddddd; font-family: sans-serif; font-size: 15px; line-height: 15px; color: #555555;">
+	                                    </td>
+	                                </tr>
+	                                <tr>
+	                                    <td style="font-family: sans-serif; font-size: 15px; line-height: 20px; color: #555555; padding: 0 10px 10px; text-align: left;" class="center-on-narrow">
+	                                        <p style="margin: 0;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+	                                    </td>
+	                                </tr>
+	                            </table>
+	                        </th>
+	                        <!-- Column : END -->
+	                        <!-- Column : BEGIN -->
+	                        <th valign="top" width="33.33%" class="stack-column-center">
+	                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+	                                <tr>
+	                                    <td style="padding: 10px; text-align: center">
+	                                        <img src="data:image/png;base64,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" width="170" height="" alt="Alder winter collection" border="0" style="width: 100%; max-width: 170px; height: auto; background: #dddddd; font-family: sans-serif; font-size: 15px; line-height: 15px; color: #555555;">
+	                                    </td>
+	                                </tr>
+	                                <tr>
+	                                    <td style="font-family: sans-serif; font-size: 15px; line-height: 20px; color: #555555; padding: 0 10px 10px; text-align: left;" class="center-on-narrow">
+	                                        <p style="margin: 0;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+	                                    </td>
+	                                </tr>
+	                            </table>
+	                        </th>
+	                        <!-- Column : END -->
+	                    </tr>
+	                </table>
+	            </td>
+	        </tr>
+	        <!-- 3 Even Columns : END -->
+
+	        <!-- Thumbnail Left, Text Right : BEGIN -->
+	        <tr>
+	            <td dir="ltr" width="100%" style="padding: 10px; background-color: #ffffff;" class="darkmode-bg">
+	                <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+	                    <tr>
+	                        <!-- Column : BEGIN -->
+	                        <th width="33.33%" class="stack-column-center">
+	                            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+	                                <tr>
+	                                    <td dir="ltr" valign="top" style="padding: 0 10px;">
+	                                        <img src="data:image/png;base64,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" width="170" height="170" alt="Alder winter collection" border="0" class="center-on-narrow" style="height: auto; background: #dddddd; font-family: sans-serif; font-size: 15px; line-height: 15px; color: #555555;">
+	                                    </td>
+	                                </tr>
+	                            </table>
+	                        </th>
+	                        <!-- Column : END -->
+	                        <!-- Column : BEGIN -->
+	                        <th width="66.66%" class="stack-column-center">
+	                            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+	                                <tr>
+	                                    <td dir="ltr" valign="top" style="font-family: sans-serif; font-size: 15px; line-height: 20px; color: #555555; padding: 10px; text-align: left;" class="center-on-narrow">
+	                                        <h2 style="margin: 0 0 10px 0; font-family: sans-serif; font-size: 18px; line-height: 22px; color: #333333; font-weight: bold;">Class aptent taciti sociosqu</h2>
+	                                        <p style="margin: 0 0 10px 0;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+	                                        <!-- Button : BEGIN -->
+	                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" class="center-on-narrow" style="float:left;">
+	                                            <tr>
+		                                            <td class="button-td button-td-primary" style="border-radius: 4px; background: #222222;">
+														<a class="button-a button-a-primary" href="https://alder.test/collections/winter" style="background: #222222; border: 1px solid #000000; font-family: sans-serif; font-size: 15px; line-height: 15px; text-decoration: none; padding: 13px 17px; color: #ffffff; display: block; border-radius: 4px;">Shop the collection</a>
+													</td>
+	                                          </tr>
+	                                      </table>
+	                                      <!-- Button : END -->
+	                                    </td>
+	                                </tr>
+	                            </table>
+	                        </th>
+	                        <!-- Column : END -->
+	                    </tr>
+	                </table>
+	            </td>
+	        </tr>
+	        <!-- Thumbnail Left, Text Right : END -->
+
+	        <!-- Thumbnail Right, Text Left : BEGIN -->
+	        <tr>
+	            <td dir="rtl" width="100%" style="padding: 10px; background-color: #ffffff;" class="darkmode-bg">
+	                <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+	                    <tr>
+	                        <!-- Column : BEGIN -->
+	                        <th width="33.33%" class="stack-column-center">
+	                            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+	                                <tr>
+	                                    <td dir="ltr" valign="top" style="padding: 0 10px;">
+	                                        <img src="data:image/png;base64,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" width="170" height="170" alt="Alder winter collection" border="0" class="center-on-narrow" style="height: auto; background: #dddddd; font-family: sans-serif; font-size: 15px; line-height: 15px; color: #555555;">
+	                                    </td>
+	                                </tr>
+	                            </table>
+	                        </th>
+	                        <!-- Column : END -->
+	                        <!-- Column : BEGIN -->
+	                        <th width="66.66%" class="stack-column-center">
+	                            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+	                                <tr>
+	                                    <td dir="ltr" valign="top" style="font-family: sans-serif; font-size: 15px; line-height: 20px; color: #555555; padding: 10px; text-align: left;" class="center-on-narrow">
+	                                        <h2 style="margin: 0 0 10px 0; font-family: sans-serif; font-size: 18px; line-height: 22px; color: #333333; font-weight: bold;">Class aptent taciti sociosqu</h2>
+	                                        <p style="margin: 0 0 10px 0;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+	                                        <!-- Button : BEGIN -->
+	                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" class="center-on-narrow" style="float:left;">
+	                                            <tr>
+		                                            <td class="button-td button-td-primary" style="border-radius: 4px; background: #222222;">
+														<a class="button-a button-a-primary" href="https://alder.test/collections/winter" style="background: #222222; border: 1px solid #000000; font-family: sans-serif; font-size: 15px; line-height: 15px; text-decoration: none; padding: 13px 17px; color: #ffffff; display: block; border-radius: 4px;">Shop the collection</a>
+													</td>
+	                                            </tr>
+	                                        </table>
+	                                        <!-- Button : END -->
+	                                    </td>
+	                                </tr>
+	                            </table>
+	                        </th>
+	                        <!-- Column : END -->
+	                    </tr>
+	                </table>
+	            </td>
+	        </tr>
+	        <!-- Thumbnail Right, Text Left : END -->
+
+	        <!-- Clear Spacer : BEGIN -->
+	        <tr>
+	            <td aria-hidden="true" height="40" style="font-size: 0px; line-height: 0px;">
+	                &nbsp;
+	            </td>
+	        </tr>
+	        <!-- Clear Spacer : END -->
+
+	        <!-- 1 Column Text : BEGIN -->
+	        <tr>
+	            <td style="background-color: #ffffff;" class="darkmode-bg">
+	                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+	                    <tr>
+	                        <td style="padding: 20px; font-family: sans-serif; font-size: 15px; line-height: 20px; color: #555555;">
+	                            <p style="margin: 0;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+	                        </td>
+	                    </tr>
+	                </table>
+	            </td>
+	        </tr>
+	        <!-- 1 Column Text : END -->
+
+	    </table>
+	    <!-- Email Body : END -->
+
+	    <!-- Email Footer : BEGIN -->
+        <table align="center" role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: auto;" class="footer">
+	        <tr>
+	            <td style="padding: 20px; font-family: sans-serif; font-size: 12px; line-height: 15px; text-align: center; color: #ffffff;">
+	                <webversion style="color: #ffffff; text-decoration: underline; font-weight: bold;">View as a Web Page</webversion>
+	                <br><br>
+	                Company Name<br><span class="unstyle-auto-detected-links">123 Fake Street, SpringField, OR, 97477 US<br>(123) 456-7890</span>
+	                <br><br>
+	                <unsubscribe style="color: #ffffff; text-decoration: underline;">unsubscribe</unsubscribe>
+	            </td>
+	        </tr>
+	    </table>
+	    <!-- Email Footer : END -->
+
+	    <!-- Full Bleed Background Section : BEGIN -->
+	    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #709f2b;" class="darkmode-fullbleed-bg">
+	        <tr>
+	            <td>
+	                <div align="center" style="max-width: 600px; margin: auto;" class="email-container">
+	                    <!--[if mso]>
+	                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" align="center">
+	                    <tr>
+	                    <td>
+	                    <![endif]-->
+	                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+	                        <tr>
+	                            <td style="padding: 20px; text-align: left; font-family: sans-serif; font-size: 15px; line-height: 20px; color: #ffffff;">
+	                                <p style="margin: 0;">Thoughtful details, useful ideas, and a fresh perspective for your week.</p>
+	                            </td>
+	                        </tr>
+	                    </table>
+	                    <!--[if mso]>
+	                    </td>
+	                    </tr>
+	                    </table>
+	                    <![endif]-->
+	                </div>
+	            </td>
+	        </tr>
+	    </table>
+	    <!-- Full Bleed Background Section : END -->
+
+    <!--[if mso | IE]>
+    </td>
+    </tr>
+    </table>
+    <![endif]-->
+    </center>
+</body>
+</html>

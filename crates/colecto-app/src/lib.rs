@@ -73,7 +73,20 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
                 colecto_host::runtime::native_navigation_allowed(&navigation_authority, destination)
             });
             #[cfg(desktop)]
-            let window = window.title("Colecto").inner_size(1200.0, 800.0);
+            let window = window
+                .title("Colecto")
+                .inner_size(1200.0, 800.0)
+                // Mail opens links in a new window (`<base target="_blank">`). Without a
+                // handler WebKitGTK drops the request, so every link and button in a mail
+                // did nothing; send them to the system browser instead.
+                .on_new_window(|url, _| {
+                    if colecto_host::runtime::external_link_allowed(&url) {
+                        if let Err(error) = open::that_detached(url.as_str()) {
+                            tracing::warn!(%error, "Could not open a link in the system browser");
+                        }
+                    }
+                    tauri::webview::NewWindowResponse::Deny
+                });
             window.build()?;
             Ok(())
         })

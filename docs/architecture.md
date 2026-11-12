@@ -61,7 +61,10 @@ emits a `mail` event. Servers without IDLE or push stay on polling.
 Opening a message fetches the raw message from the provider without marking it seen.
 HTML is untrusted: it renders in an `<iframe sandbox>` with no scripts, forms or
 same-origin access, and remote images wait for the owner unless Settings → Privacy
-allows them. Attachments download as `application/octet-stream` so they never render
+allows them. Links in mail open in a new window (`<base target="_blank">`); the
+desktop app hands `http`, `https` and `mailto` links to the system browser
+(`external_link_allowed` in `colecto-host/src/runtime.rs`) and never opens its own
+windows for them. Attachments download as `application/octet-stream` so they never render
 in the app origin. Details and limits are in [accounts and credentials](accounts.md).
 
 ## Storage
@@ -87,6 +90,11 @@ and untested (see [installing](install.md#experimental-apple-builds)).
 On Linux the app sets its GTK program name to `Colecto` so the Wayland `app_id`
 matches the `Colecto.desktop` entry every package installs; compositors use that
 match to find the window icon.
+
+Wayland is the Linux target. X11 works only as far as Tauri and GTK provide it
+without extra code: do not add X11-specific glue, and verify native Linux behaviour
+on Wayland first. The `just test native` smoke test runs under Xvfb because CI has
+no Wayland compositor; that is test tooling, not X11 support.
 
 ## Daemon and devices
 
