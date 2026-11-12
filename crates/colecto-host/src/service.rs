@@ -209,6 +209,7 @@ impl MailService {
         let (events, _) = tokio::sync::broadcast::channel(64);
         let host = Host {
             events: events.clone(),
+            bus_replies: Default::default(),
             approvals,
             preferences,
             status_polls: Arc::default(),

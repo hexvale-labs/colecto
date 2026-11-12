@@ -1,6 +1,18 @@
 <script lang="ts">
   import { initial, hue } from '../../lib/initial';
   import { when } from '../../lib/when';
+  import { extensionBus, extensionName } from '../../lib/bus';
+  const bus = extensionBus('reader');
+  let changedBy = $state('');
+  let banners = $state<{text:string; tone:string}[]>([]);
+  onMount(() => {
+    const cleanup = [
+      bus.handle('v1/get_html', p => p?.message_id === id ? content?.html ?? null : null),
+      bus.handle('v1/set_html', async (p, from) => { if (p?.message_id === id && content && typeof p.html === 'string') { content = {...content, html:p.html}; changedBy = await extensionName(from); } return null; }),
+      bus.handle('v1/add_banner', p => { if (p?.message_id === id && typeof p.text === 'string' && ['info','warning'].includes(p.tone)) banners = [...banners,{text:p.text,tone:p.tone}]; return null; }),
+    ];
+    return () => cleanup.forEach(fn => fn());
+  });
   import Icon from '../../Icon.svelte';
   import type { Labels } from '../../lib/api';
   import { onMount } from 'svelte';
@@ -41,7 +53,10 @@
     if (message) {
       try { content = await body; contentError = ''; }
       catch (e) { contentError = (e as Error).message; }
-      finally { contentLoading = false; }
+      finally {
+        await bus.emit('v1/message_opened', {message_id:id,subject:message.subject,from:message.address || message.sender,html:content?.html ?? null,text:content?.text || message.body}).catch(() => {});
+        contentLoading = false;
+      }
     }
   }
   let copied = $state<boolean | null>(null);
@@ -80,6 +95,8 @@
   {:else if error}<div class="detail-state"><p role="alert">{error}</p><button class="secondary" onclick={load}>Try again</button></div>
   {:else if message}
     <article class="letter">
+      {#if changedBy}<p class="content-note" role="status">Changed by {changedBy}</p>{/if}
+      {#each banners as banner}<p class="content-note" role={banner.tone === 'warning' ? 'alert' : 'status'}>{banner.text}</p>{/each}
       <h2>{message.subject || '(No subject)'}</h2>
       <div class="sender-row">
         <span class="avatar" style:--hue={hue(message.address || message.sender)} aria-hidden="true">{initial(message.sender || message.address)}</span>

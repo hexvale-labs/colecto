@@ -205,6 +205,8 @@ pub struct SecurityInput {
 /// Service permissions are separate from native platform permissions.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Capability {
+    #[serde(rename = "extensions.bus")]
+    ExtensionsBus,
     #[serde(rename = "account.read")]
     AccountRead,
     #[serde(rename = "messages.list")]
@@ -249,6 +251,8 @@ pub const NAVIGATION_TARGETS: &[&str] = &[
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtensionManifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bus: Option<BusSubscriptions>,
     pub description: String,
     pub author: String,
     pub id: String,
@@ -303,4 +307,10 @@ pub struct LabelInput {
     pub message_id: Option<String>,
     #[serde(default)]
     pub remove: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BusSubscriptions {
+    pub subscribe: Vec<String>,
 }

@@ -1,6 +1,7 @@
 //! Trusted HTTP adapter for bundled UI and isolated Wasm extensions.
 pub mod api_keys;
 pub mod approvals;
+mod bus;
 pub mod mcp;
 pub mod preferences;
 mod store;
@@ -57,6 +58,7 @@ pub(crate) type Events = tokio::sync::broadcast::Sender<(&'static str, String)>;
 #[derive(Clone)]
 struct Host {
     events: Events,
+    bus_replies: bus::Replies,
     keys: Arc<Mutex<ApiKeys>>,
     preferences: Arc<Mutex<preferences::PreferenceStore>>,
     approvals: Arc<Mutex<approvals::Approvals>>,
@@ -170,6 +172,9 @@ fn build_app(host: Host, assets: Assets) -> Router {
             axum::routing::post(review_extension)
                 .layer(DefaultBodyLimit::max(package::MAX_UPLOAD_BODY)),
         )
+        .route("/bus/{bus}/request", axum::routing::post(bus::request_http))
+        .route("/bus/events", axum::routing::post(bus::emit_http))
+        .route("/bus/replies/{id}", axum::routing::post(bus::reply_http))
         .route("/extensions/{id}/run", axum::routing::post(run_extension))
         .route("/accounts", get(list_accounts).post(upsert_account))
         .route(
@@ -529,6 +534,12 @@ fn extension_service(
     epoch: u64,
     request: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    if matches!(
+        request["operation"].as_str(),
+        Some("bus.request" | "bus.emit")
+    ) {
+        return bus::service(host, extension, account, epoch, request);
+    }
     let request: ServiceRequest =
         serde_json::from_value(request).map_err(|_| "Invalid service request")?;
     // Identity and account come from the Host invocation, never from guest input.
@@ -613,7 +624,7 @@ fn extension_service(
                 .map_err(|_| "Mail delivery failed")?;
             serde_json::to_value(true)
         }
-        MessagesOrganize | AppNavigate | WindowOverlay => {
+        MessagesOrganize | AppNavigate | WindowOverlay | ExtensionsBus => {
             return Err("Capability not granted".into());
         }
     };
@@ -1358,6 +1369,7 @@ mod extension_service_tests {
         extensions.update("connection-panel", true).unwrap();
         let host = Host {
             events: tokio::sync::broadcast::channel(1).0,
+            bus_replies: Default::default(),
             keys: Arc::new(Mutex::new(ApiKeys::open(database.clone()).unwrap())),
             preferences: Arc::new(Mutex::new(
                 preferences::PreferenceStore::open(database.clone()).unwrap(),

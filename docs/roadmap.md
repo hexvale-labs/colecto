@@ -28,6 +28,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | --- | --- |
 | Dockable workspace, command runner, notifications, accent colour | Done |
 | Extensions: Wasm panels and overlays, install-time consent, z-index layers | Done |
+| Named extension bus: guest requests/events and bundled integrations | Done |
 | Onboarding for the first account; demo account off by default | Next |
 | Font choice, loading screen, account avatars in Settings, selection polish | Next |
 | Custom ports in every server field | Next |

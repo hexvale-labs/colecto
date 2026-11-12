@@ -27,7 +27,7 @@ async function download(extension: string, account: string, path: string): Promi
   if (!response.ok) { const data = await response.json().catch(() => null); throw new ServiceError(typeof data?.error === 'string' ? data.error : `Download failed (HTTP ${response.status}).`, typeof data?.category === 'string' ? data.category : 'server', response.status); }
   return response.blob();
 }
-async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE'): Promise<T> {
+export async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE'): Promise<T> {
   const delivery = path === '/send' || (path.startsWith('/send-requests/') && path.endsWith('/approve'));
   const deliveryWarning = 'Delivery status is unknown. Check Sent and delivery requests before sending again.';
   let response: Response;
@@ -99,7 +99,7 @@ export const hostService = {
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 
-export type Capability = 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate' | 'window.overlay';
+export type Capability = 'extensions.bus' | 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate' | 'window.overlay';
 export interface ExtensionState {
   manifest: { id: string; name: string; description: string; author: string; api_version: number; slot: string; z_index?: number; capabilities: Capability[] };
   bundled: boolean;

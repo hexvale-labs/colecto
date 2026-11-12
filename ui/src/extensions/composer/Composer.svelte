@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import type { Draft, ComposerService, OutgoingAttachment } from '../../lib/api';
+  import { extensionBus } from '../../lib/bus';
+  const bus = extensionBus('composer');
   import Icon from '../../Icon.svelte';
   import { copyText } from '../../lib/copy';
   let { connected, sender, draft, service, onback, ondirty, onbusy, onsaved }: {
@@ -14,6 +16,32 @@
   let cc = $state(initial?.cc ?? '');
   let subject = $state(initial?.subject ?? '');
   let body = $state(initial?.body ?? '');
+  let buttons = $state<{id: string; label: string; request: string; owner: string}[]>([]);
+  const currentDraft = () => ({recipient, subject, body});
+  function applyDraft(value: any) {
+    if (typeof value?.recipient === 'string') recipient = value.recipient;
+    if (typeof value?.subject === 'string') subject = value.subject;
+    if (typeof value?.body === 'string') body = value.body;
+  }
+  onMount(() => {
+    const cleanups = [
+      bus.handle('v1/get_draft', () => currentDraft()),
+      bus.handle('v1/set_draft', value => { applyDraft(value); return null; }),
+      bus.handle('v1/remove_button', (value, owner) => { buttons = buttons.filter(b => b.owner !== owner || b.id !== value?.id); return null; }),
+      bus.handle('v1/add_button', (value, owner) => {
+        if (typeof value?.id !== 'string' || typeof value?.label !== 'string' || !value.label || [...value.label].length > 32 || typeof value?.request !== 'string') return null;
+        const others = buttons.filter(b => b.owner !== owner || b.id !== value.id);
+        if (others.filter(b => b.owner === owner).length >= 4) return null;
+        buttons = [...others, {id:value.id,label:value.label,request:value.request,owner}]; return null;
+      }),
+    ];
+    void bus.emit('v1/opened', {}).catch(() => {});
+    return () => cleanups.forEach(fn => fn());
+  });
+  async function clickButton(button: typeof buttons[number]) {
+    try { const response = await bus.request(button.owner, button.request, {draft: currentDraft()}); applyDraft((response as any)?.draft); }
+    catch (e) { error = (e as Error).message; }
+  }
   // Threading and forward references come from the original message and are not edited.
   const thread = { ...(initial?.in_reply_to ? { in_reply_to: initial.in_reply_to, references: initial.references ?? '' } : {}), ...(initial?.forward_of ? { forward_of: initial.forward_of } : {}) };
   const heading = initial?.in_reply_to ? 'REPLY' : initial?.forward_of || initial?.subject?.startsWith('Fwd:') ? 'FORWARD' : 'NEW MESSAGE';
@@ -70,6 +98,7 @@
     if (saving || sent || pending.length || readFailed) return;
     saving = true; sending = true; onbusy(true); error = '';
     try {
+      await bus.emit('v1/sending', {}).catch(() => {});
       await service.send({ recipient, ...(cc ? { cc } : {}), subject, body, ...thread, ...(files.length ? { attachments: files.map(({ name, content_type, data }) => ({ name, content_type, data })) } : {}) });
       sent = true; baseline = snapshot(); files = []; ondirty(false);
     } catch (e) { error = (e as Error).message; }
@@ -83,6 +112,7 @@
     <header class="detail-toolbar">
       <button class="icon-button back" type="button" aria-label="Back to list" disabled={saving} onclick={onback}><Icon name="back" size={18} /></button>
       <h2>{id ? 'Your draft' : heading === 'REPLY' ? 'Reply' : heading === 'FORWARD' ? 'Forward' : 'New message'}</h2>
+      {#if buttons.length}<div class="bus-actions" role="toolbar" aria-label="Extension actions">{#each buttons as button (`${button.owner}/${button.id}`)}<button type="button" class="tool" disabled={saving || sent} onclick={() => clickButton(button)}>{button.label}</button>{/each}</div>{/if}
     </header>
     <fieldset class="compose-fields" disabled={saving || sent}>
       <div class="input-row"><span class="row-label">From</span><strong class="sender">{sender}</strong></div>
@@ -107,3 +137,8 @@
     </footer>
   </form>
 </section>
+
+<style>
+  .bus-actions { display: flex; gap: 6px; min-width: 0; overflow-x: auto; }
+  .bus-actions button { flex-shrink: 0; }
+</style>

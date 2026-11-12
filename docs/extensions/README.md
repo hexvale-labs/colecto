@@ -251,3 +251,78 @@ The UI uploads binary bodies; legacy JSON byte-array uploads are still accepted.
 
 Guest `messages.send` requests with `forward_of` also require `messages.read` for
 the selected account, because forwarding reads the original and its attachments.
+
+## Extension bus
+
+`extensions.bus` lets enabled extensions talk by name. Each extension owns the bus
+matching its ID; disabled extensions have no bus. There is no discovery operation
+for buses, subscribers, events or request names. Installing an ID already present,
+including a bundled ID, is refused; remove a package before installing a replacement.
+
+Declare event subscriptions only with this capability:
+
+```toml
+capabilities = ["extensions.bus"]
+[bus]
+subscribe = ["reader/v1/message_opened"]
+```
+
+Bundled extensions version every event and request name, e.g. `v1/add_button`, never
+`add_button`; a breaking change adds `v2/...` alongside the old version.
+
+Guests call `colecto.request` with these JSON operations:
+
+```json
+{"operation":"bus.request","bus":"composer","name":"v1/get_draft","payload":null}
+{"operation":"bus.emit","name":"v1/finished","payload":{"done":true}}
+```
+
+Responses retain the ABI envelope `{ "ok": true, "data": ... }`. Missing buses,
+failed invocations and unanswered requests all return null, without distinguishing
+why. Emit publishes only on the caller's bus and returns null immediately; a Tokio
+task delivers events asynchronously to enabled manifest subscribers.
+
+Delivery creates a fresh fuel- and memory-limited guest invocation. Request actions
+are `{event:"bus.request",from,name,payload}`; answer through `colecto.emit` with
+`{"bus":{"response":...}}`. Other output means no answer. Event actions are
+`{event:"bus.event",bus,name,payload}` and their output is ignored. Nested requests
+run synchronously on the blocking guest thread without acquiring another execution
+permit. Ordinary panel and overlay output validation remains separate.
+
+Bundled UI callers use their authenticated extension header with
+`POST /api/v1/bus/{bus}/request` (`{name,payload}`, returns `{data}`),
+`POST /api/v1/bus/events` (`{name,payload}`, returns `{}`), and
+`POST /api/v1/bus/replies/{id}` (`{data}`, returns `{}`). Guest requests to bundled
+buses send SSE `bus.request` with `{id,bus,from,name,payload}`. Only the target bus
+may reply; the first reply wins. `extensionBus(id)` in `ui/src/lib/bus.ts` binds a
+bundled caller and supplies `request(bus,name,payload)`, `emit(name,payload)` and
+`handle(name,fn)`; handlers receive `(payload,from)` and return null if inapplicable.
+Unregister handlers on component destruction.
+
+| Limit | Value |
+| --- | --- |
+| Subscriptions per manifest | 32 |
+| Request/event name | 1–64 bytes: lowercase ASCII, digits, `-`, `_`, `/` |
+| Payload | 32 KiB serialized JSON |
+| Bus action envelope | 64 KiB (room for a 32 KiB payload) |
+| Nested guest requests | 4; deeper requests return null |
+| Bundled request reply wait | 2 seconds; timeout returns null |
+| HTTP event delivery wait | All subscribers finish or 1.5 seconds; delivery may continue |
+| Guest memory / fuel | 32 MiB / 10,000,000 per invocation |
+
+### Bundled bus surfaces
+
+| Bus | Requests | Events |
+| --- | --- | --- |
+| `composer` | `v1/add_button` `{id,label,request}`; `v1/remove_button` `{id}`; `v1/get_draft`; `v1/set_draft` `{recipient?,subject?,body?}` | `v1/opened` `{}`; `v1/sending` `{}` (informational) |
+| `reader` | `v1/get_html` `{message_id}`; `v1/set_html` `{message_id,html}`; `v1/add_banner` `{message_id,text,tone:"info"\|"warning"}` | `v1/message_opened` `{message_id,subject,from,html,text}` |
+| `inbox` | — | `v1/selected` `{message_id}` |
+| `notifications` | `v1/notify` `{title,body}` | — |
+
+Composer buttons belong to their caller (four per caller, labels at most 32
+characters, rendered as text). Clicking requests the caller's named operation with
+`{draft:{recipient,subject,body}}`; returned `{draft:{...}}` fields update the editor.
+Draft requests return null when the composer is closed. Reader awaits event delivery
+before displaying the body. HTML replacements stay in its sandboxed iframe and show
+“Changed by <extension name>”; banners are text only. Notifications label the calling
+extension. Mail shell and accounts have no bus exposure.
