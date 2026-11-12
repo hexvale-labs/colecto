@@ -2,6 +2,7 @@
 # A module name on its own runs its `all` recipe, so `just build` builds everything.
 
 mod install 'scripts/just/install.just'
+mod cleanup 'scripts/just/cleanup.just'
 mod build 'scripts/just/build.just'
 mod check 'scripts/just/check.just'
 mod test 'scripts/just/test.just'
@@ -34,26 +35,3 @@ icons:
     out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
     bunx --bun @tauri-apps/cli@2.9.4 icon crates/colecto-app/icons/icon.svg -o "$out" > /dev/null
     cp "$out"/{32x32.png,128x128.png,128x128@2x.png,icon.png,icon.ico,icon.icns} crates/colecto-app/icons/
-
-# Install the Linux desktop entry and icons. Pass `release` to point it at the release build.
-desktop-install profile='debug':
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case "{{profile}}" in
-      debug) {{just_executable()}} --justfile {{justfile()}} build native ;;
-      release) {{just_executable()}} --justfile {{justfile()}} build release ;;
-      *) echo "Use: just desktop-install [debug|release]" >&2; exit 2 ;;
-    esac
-    target=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')
-    data="${XDG_DATA_HOME:-$HOME/.local/share}"
-    # Earlier versions installed the entry as app.colecto.mail; remove it so the menu shows one Colecto.
-    rm -f "$data/applications/app.colecto.mail.desktop" "$data"/icons/hicolor/*/apps/app.colecto.mail.{png,svg}
-    for size in 32x32 128x128 256x256; do
-      file=crates/colecto-app/icons/$size.png; [ "$size" = 256x256 ] && file=crates/colecto-app/icons/128x128@2x.png
-      install -Dm644 "$file" "$data/icons/hicolor/$size/apps/colecto.png"
-    done
-    install -Dm644 crates/colecto-app/icons/icon.svg "$data/icons/hicolor/scalable/apps/colecto.svg"
-    mkdir -p "$data/applications"
-    sed "s|^Exec=.*|Exec=$target/{{profile}}/colecto|" packaging/linux/Colecto.desktop > "$data/applications/Colecto.desktop"
-    command -v update-desktop-database >/dev/null && update-desktop-database -q "$data/applications" || true
-    echo "Installed Colecto ({{profile}}) desktop entry in $data/applications"
