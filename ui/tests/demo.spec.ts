@@ -1,8 +1,12 @@
 async function openExtensions(page: import('@playwright/test').Page) {
   // Settings is a card over the workspace; open it unless it is open, or the workspace is off and Extensions shows on its own.
   const settings = page.getByRole('button', { name: 'Settings', exact: true });
-  if (!await page.getByRole('dialog', { name: 'Settings' }).count() && await settings.count()) await settings.click();
-  await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const extensions = page.getByRole('button', { name: 'Extensions', exact: true });
+  // Counting does not wait, so first let the app mount one of the three.
+  await expect(settings.or(dialog).or(extensions).first()).toBeVisible();
+  if (!await dialog.count() && await settings.count()) await settings.click();
+  await extensions.click();
 }
 import { test, expect, ownerToken, chooseAccount } from './fixtures';
 
