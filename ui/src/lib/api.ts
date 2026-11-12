@@ -98,7 +98,6 @@ export const hostService = {
   save: (input: AccountSettings & { id?: string; secret: string }) => request<AccountInfo>('host', 'demo', '/accounts', input),
   remove: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}`, {}, 'DELETE'),
   disconnect: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}/disconnect`, {}),
-  remove: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}`, {}, 'DELETE'),
   security: () => request<SecurityInfo>('host', 'demo', '/security'),
   /** Linux user services this app can install (local service only). */
   services: () => request<Record<'daemon' | 'notifications', BackgroundService>>('host', 'demo', '/services'),
