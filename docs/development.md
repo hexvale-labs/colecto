@@ -135,8 +135,9 @@ dependency tree is never rebuilt from scratch.
   restoring caches built for the old profile, which Cargo cannot use, and never saves
   new ones.
 - Only dependencies are cached (Swatinem/rust-cache drops workspace crates), so every
-  run still compiles Colecto itself.
-- The repository has 10 GB of cache. CI's `prune-caches` job deletes Rust caches
+  run still compiles Colecto itself. Failed release jobs do not save: this loses
+  partial progress, but prevents an immutable final key from retaining an incomplete cache.
+- The repository has 10 GB of cache. CI and Release's shared `prune-caches` workflow deletes Rust caches
   superseded by a newer toolchain or lockfile. GitHub also evicts anything unused for
   7 days, which is why `release.yml` runs twice a week.
 - `just test jmap` runs workspace-wide (`cargo test --test jmap_server`), not with
@@ -153,7 +154,10 @@ dependency tree is never rebuilt from scratch.
   was larger.
 - The daemon image has no layer cache. Its job (about 5 minutes) is never the slowest
   in a release, and the Rust caches (750 to 850 MB per release target) already fill
-  most of the budget.
+  most of the budget. Hosted jobs create a fresh Buildx builder, so the Dockerfile
+  registry and target cache mounts only help within that builder; every new job
+  pays the cold dependency-build cost. A future `type=gha` layer cache would not
+  export those cache-mount contents.
 
 ### Measured timings
 

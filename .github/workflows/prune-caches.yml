@@ -1,0 +1,32 @@
+name: Prune Rust caches
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  prune-caches:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete superseded Rust caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          seen=" "
+          gh cache list --key v0-rust- --limit 200 --sort created_at --order desc --json id,key \
+            --jq '.[] | "\(.id) \(.key)"' |
+          while read -r id key; do
+            family=$(sed -E 's/-[0-9a-f]{8,}//g' <<< "$key") # without the profile, toolchain and lockfile hashes
+            if [[ "$seen" == *" $family "* ]]; then
+              echo "Deleting $key"; gh cache delete "$id"
+            else
+              seen+="$family "
+            fi
+          done

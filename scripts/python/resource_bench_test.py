@@ -3,6 +3,8 @@ from pathlib import Path
 import unittest
 import subprocess
 import sys
+import tempfile
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('resource_bench', Path(__file__).with_name('resource_bench.py'))
 bench = importlib.util.module_from_spec(spec)
@@ -28,6 +30,34 @@ class ResourceBenchTests(unittest.TestCase):
         self.assertEqual(bench.compare(current, previous)['daemon_cpu_seconds']['median_percent'], 100)
         zero = {**current, 'summary': {'daemon_cpu_seconds': {'mean': 0, 'median': 0}}}
         self.assertIsNone(bench.compare(current, zero)['daemon_cpu_seconds']['median_percent'])
+
+    def test_build_and_resource_changes_prevent_comparison(self):
+        compatibility = {'build_settings': {'rustc': 'one', 'environment': {}},
+                         'resource_limits': {'cgroup_version': 2, 'cpu_affinity': [0],
+                                             'cgroup_limits': [{'memory.max': '100'}]}}
+        current = {'compatibility': compatibility, 'summary': {}}
+        self.assertEqual(bench.compare(current, current), {})
+        for key in ('build_settings', 'resource_limits'):
+            previous = {**current, 'compatibility': {**compatibility, key: {}}}
+            self.assertIsNone(bench.compare(current, previous))
+        unknown = {**current, 'compatibility': {**compatibility, 'resource_limits': {
+            'cgroup_version': 'unknown', 'cgroup_limits': []}}}
+        self.assertIsNone(bench.compare(unknown, unknown))
+
+    def test_resource_limits_include_constraining_ancestors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'parent/leaf').mkdir(parents=True)
+            (root / 'parent/leaf/memory.max').write_text('max')
+            (root / 'parent/memory.max').write_text('6000000000')
+            (root / 'cpu.max').write_text('200000 100000')
+            membership = root / 'membership'
+            membership.write_text('0::/parent/leaf\n')
+            with patch.object(bench.os, 'sched_getaffinity', return_value={2, 1}):
+                result = bench.resource_limits(root, membership)
+            self.assertEqual(result['cpu_affinity'], [1, 2])
+            self.assertEqual(result['cgroup_limits'], [{'memory.max': 'max'},
+                {'memory.max': '6000000000'}, {'cpu.max': '200000 100000'}])
 
     def test_environment_cannot_connect_real_accounts_or_existing_data(self):
         env = bench.isolated_environment({'PATH': '/bin', 'COLECTO_MAIL_PASSWORD': 'secret',

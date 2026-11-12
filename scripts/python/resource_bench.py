@@ -28,6 +28,9 @@ def summarize(samples):
 
 
 def compare(current, previous):
+    limits = current['compatibility'].get('resource_limits')
+    if limits is not None and (limits['cgroup_version'] != 2 or not limits['cgroup_limits']):
+        return None
     if current['compatibility'] != previous['compatibility']:
         return None
     result = {}
@@ -224,6 +227,45 @@ def command(*args):
     return subprocess.check_output(args, cwd=ROOT, text=True).strip()
 
 
+def resource_limits(cgroup_root=Path('/sys/fs/cgroup'), membership=Path('/proc/self/cgroup')):
+    # Ancestors can constrain a leaf whose own limits say "max".
+    relative = next((line.split(':', 2)[2] for line in membership.read_text().splitlines()
+                     if line.startswith('0::')), None)
+    limits = []
+    if relative is not None:
+        leaf = cgroup_root / relative.lstrip('/')
+        for directory in [leaf, *leaf.parents]:
+            if not directory.is_relative_to(cgroup_root):
+                break
+            values = {}
+            for name in ('cpu.max', 'cpuset.cpus.effective', 'memory.max', 'memory.high'):
+                path = directory / name
+                if path.exists():
+                    values[name] = path.read_text().strip()
+            if values:
+                limits.append(values)
+    return {'cpu_affinity': sorted(os.sched_getaffinity(0)),
+            'cgroup_version': 2 if relative is not None else 'unknown',
+            'cgroup_limits': limits}
+
+
+def build_settings():
+    # These describe the build invocation environment, not provenance embedded in a binary.
+    prefixes = ('CARGO_PROFILE_', 'CARGO_TARGET_', 'CARGO_BUILD_')
+    names = {'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTDOCFLAGS', 'RUSTC',
+             'RUSTC_WRAPPER', 'RUSTC_WORKSPACE_WRAPPER', 'RUSTUP_TOOLCHAIN', 'CARGO_INCREMENTAL'}
+    configs = [ROOT / name for name in ('Cargo.toml', 'Cargo.lock', 'rust-toolchain', 'rust-toolchain.toml')]
+    for directory in [ROOT, *ROOT.parents]:
+        configs.extend(directory / suffix for suffix in ('.cargo/config', '.cargo/config.toml'))
+    cargo_home = Path(os.environ.get('CARGO_HOME', Path.home() / '.cargo'))
+    configs.extend(cargo_home / name for name in ('config', 'config.toml'))
+    return {'rustc': command('rustc', '-vV'), 'cargo': command('cargo', '-V'),
+            'environment': {key: value for key, value in sorted(os.environ.items())
+                            if key in names or key.startswith(prefixes)},
+            'configuration': {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+                              for path in configs if path.is_file()}}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path)
@@ -253,6 +295,7 @@ def main():
               'compatibility': {'machine': machine, 'workload': WORKLOAD, 'cycles': args.cycles,
                                 'ui': not args.skip_ui, 'profile': binary.parent.name, 'binary': binary.name,
                                 'browser_driver': browser_version, 'cpu_count': os.cpu_count(),
+                                'build_settings': build_settings(), 'resource_limits': resource_limits(),
                                 'worker_sha256': hashlib.sha256((ROOT / 'scripts/javascript/resource_workload.mjs').read_bytes()).hexdigest() if not args.skip_ui else None, 'node': command('node', '--version') if not args.skip_ui else None},
               'samples': []}
     for run in range(args.runs):

@@ -140,7 +140,7 @@ service requests use `{"operation":"messages.label","label":{...}}` with the sam
 input. All operations bind to the invocation account and require an enabled extension
 that declares the capability.
 
-Labels persist in a versioned `labels.json` next to each account's mail store.
+Labels persist in the data directory's `colecto.db`, scoped to each account.
 Names are trimmed, case-sensitive, 1–80 UTF-8 bytes, without control characters;
 each account permits 50 labels and 1000 message IDs per label, with a 2 MB file
 limit. Writes are atomic; invalid or unreadable stores are never silently reset.

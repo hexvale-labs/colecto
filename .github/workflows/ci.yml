@@ -154,31 +154,9 @@ jobs:
 
       - run: just test jmap
 
-  # Each Cargo.lock or toolchain change saves a new Rust cache (700 MB for verify, more per
-  # release target) while the superseded one lingers for a week. Keep only the newest of
-  # each so the 10 GB repository budget holds CI and release caches together.
   prune-caches:
     if: github.ref == 'refs/heads/main'
     needs: verify
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
     permissions:
       actions: write
-    steps:
-      - name: Delete superseded Rust caches
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          seen=" "
-          gh cache list --key v0-rust- --limit 200 --sort created_at --order desc --json id,key \
-            --jq '.[] | "\(.id) \(.key)"' |
-          while read -r id key; do
-            family=$(sed -E 's/-[0-9a-f]{8,}//g' <<< "$key") # without the profile, toolchain and lockfile hashes
-            if [[ "$seen" == *" $family "* ]]; then
-              echo "Deleting $key"; gh cache delete "$id"
-            else
-              seen+="$family "
-            fi
-          done
+    uses: ./.github/workflows/prune-caches.yml
