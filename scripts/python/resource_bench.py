@@ -262,7 +262,9 @@ def build_settings():
     return {'rustc': command('rustc', '-vV'), 'cargo': command('cargo', '-V'),
             'environment': {key: value for key, value in sorted(os.environ.items())
                             if key in names or key.startswith(prefixes)},
-            'configuration': {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+            # Repository files are keyed relative to the checkout so worktrees compare with each other.
+            'configuration': {str(path.relative_to(ROOT) if path.is_relative_to(ROOT) else path):
+                              hashlib.sha256(path.read_bytes()).hexdigest()
                               for path in configs if path.is_file()}}
 
 
