@@ -134,6 +134,15 @@ impl PreferenceStore {
     pub fn get(&self) -> &Preferences {
         &self.value
     }
+    pub fn clear_account(&mut self, id: &str) -> Result<(), String> {
+        if self.value.account.as_deref() == Some(id) {
+            let mut next = self.value.clone();
+            next.account = None;
+            crate::store::save(&self.database, "preferences", &next)?;
+            self.value = next;
+        }
+        Ok(())
+    }
     pub fn update(&mut self, input: PreferencesInput) -> Result<Preferences, String> {
         let mut next = self.value.clone();
         if let Some(mcp) = input.mcp {
