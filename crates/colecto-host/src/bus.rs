@@ -110,7 +110,10 @@ async fn publish(host: Host, bus: String, account: String, input: Input) {
             let subscribers = e.list(&account).into_iter().filter(|s| {
                 s.enabled
                     && s.manifest.capabilities.contains(&Capability::ExtensionsBus)
-                    && s.manifest.bus.as_ref().is_some_and(|b| b.subscribe.contains(&topic))
+                    && s.manifest
+                        .bus
+                        .as_ref()
+                        .is_some_and(|b| b.subscribe.contains(&topic))
             });
             let mut bundled = false;
             let mut targets = Vec::new();
