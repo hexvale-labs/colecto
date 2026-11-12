@@ -200,3 +200,16 @@ dropped. Lock therefore does not guarantee that no credential remains in memory 
 that wait ends.
 JMAP creation errors show fixed descriptions for recognized error types and a
 fixed generic description for unknown provider values.
+
+### Composer and automation review safety
+
+Send-approval notifications open the immutable request in Settings → Send approvals;
+only the review card showing recipients and body offers approval. Keyboard focus moves
+to the requested card. Rejection remains available from the notification.
+
+The composer reserves attachment count and bytes as soon as files are selected
+(at most 20 files and 25 MB). Send waits for all reads and shows a reading status.
+Read failures block sending until attachments are cleared and selected again.
+Reply and forward prefills, including headers and quote prefixes, are cut to 80,000
+UTF-8 bytes between Unicode code points, leaving 20,000 bytes of the 100,000-byte body
+limit for the owner's own text.

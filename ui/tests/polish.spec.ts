@@ -114,9 +114,19 @@ test('approval requests arrive as notifications with decisions, a close button a
   await expect(page.locator('.settings-overlay')).toBeVisible();
   expect(await page.locator('.settings-overlay').evaluate(el => Number(getComputedStyle(el).zIndex))).toBeGreaterThan(await page.locator('.extension-overlay').first().evaluate(el => Number(getComputedStyle(el).zIndex)));
   await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-  await request.getByRole('button', { name: 'Reject' }).click();
+  await expect(request.getByRole('button', { name: 'Approve and send' })).toHaveCount(0);
+  const snapshot = { id: 'r1', requester: 'key', account: 'demo', from: 'me@example.test', status: 'pending', expires_at: 2000000000, snapshot: { recipient: 'unexpected@example.test', subject: 'Quarterly numbers', body: 'Sensitive body' } };
+  await page.route('**/api/v1/send-requests', route => route.fulfill({ json: [snapshot] }));
+  await request.getByRole('button', { name: 'Review message' }).focus();
+  await page.keyboard.press('Enter');
+  const card = page.getByRole('article', { name: 'Delivery request: Quarterly numbers' });
+  await expect(card).toBeFocused();
+  await expect(card).toContainText('unexpected@example.test');
+  await expect(card).toContainText('Sensitive body');
+  expect(decided).toEqual([]);
+  await card.getByRole('button', { name: 'Reject' }).click();
   expect(decided).toEqual([expect.stringContaining('/send-requests/r1/reject')]);
-  await expect(toasts.getByRole('status', { name: 'Request rejected' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
