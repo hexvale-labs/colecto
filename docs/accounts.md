@@ -25,9 +25,9 @@ before `just run` (set secrets in your local environment, never in source contro
 | Variable | Meaning |
 | --- | --- |
 | `COLECTO_IMAP_HOST` | IMAP server hostname |
-| `COLECTO_IMAP_PORT` | Implicit TLS port, default `993` |
+| `COLECTO_IMAP_PORT` | Implicit TLS port, default `993` (STARTTLS needs Settings → Accounts) |
 | `COLECTO_SMTP_HOST` | SMTP server hostname |
-| `COLECTO_SMTP_PORT` | `587` (required STARTTLS, default) or `465` (implicit TLS) |
+| `COLECTO_SMTP_PORT` | `465` uses implicit TLS; any other port (default `587`) requires STARTTLS |
 | `COLECTO_MAIL_USERNAME` | Login for both servers |
 | `COLECTO_MAIL_PASSWORD` | Password or provider app password for both servers |
 | `COLECTO_MAIL_ADDRESS` | Sender email address |
@@ -62,6 +62,56 @@ performed. The editor preserves text on failure and disables sending again after
 success. Server/network operations run outside the async executor and serialize per
 account, with 30-second socket timeouts. Another account can continue independently.
 Credential changes and locking report busy while an account operation is active.
+
+## Connection security
+
+Every IMAP and SMTP connection is encrypted before the password is sent; there is no
+plaintext mode. Each server row in the account dialog has a **Security** choice:
+
+| Server | Setting | Behaviour |
+| --- | --- | --- |
+| IMAP | **TLS** (`imap_starttls: false`, default) | TLS from the first byte, usually port `993` |
+| IMAP | **STARTTLS** (`imap_starttls: true`) | Plain connection upgraded with `STARTTLS`, usually port `143` |
+| SMTP | **TLS** | Port `465` only: TLS from the first byte |
+| SMTP | **STARTTLS** | Any other port (default `587`): `STARTTLS` is required |
+
+SMTP security follows the port, so the choice and the port field change together.
+Picking IMAP STARTTLS moves port `993` to `143` (and back); a custom port is kept.
+If a server refuses or does not offer STARTTLS, the connection ends before any
+credential is sent, so a downgrade cannot expose the password.
+
+### Trusted certificate
+
+By default, certificates are checked against the system's certificate authorities.
+For a server with a self-signed certificate, open **Trusted certificate** in the account
+dialog and choose its PEM file (`tls_certificate`, one `BEGIN CERTIFICATE` block, at
+most 16 KB). Then, for both IMAP and SMTP of that account:
+
+- only that certificate is trusted, and the system authorities are not;
+- the host name entered for each server must still match the certificate;
+- certificate and host name checks are never switched off.
+
+The certificate is public, so it is stored with the account settings, not in the
+credential vault. **Use system certificates** removes it.
+
+### Proton Mail Bridge
+
+[Proton Mail Bridge](https://proton.me/mail/bridge) (paid Proton plans) serves IMAP and
+SMTP on this computer with its own self-signed certificate:
+
+1. In Bridge, open the account's mailbox configuration and note the IMAP and SMTP
+   ports, username and Bridge password. Keep both connections on STARTTLS.
+2. Export Bridge's TLS certificate (advanced settings, **Export TLS certificates**);
+   only `cert.pem` is needed.
+3. In Colecto, add an IMAP + SMTP account with server `127.0.0.1` for both, the Bridge
+   ports, **STARTTLS** for both, the Bridge username and password, and `cert.pem` as
+   the trusted certificate.
+
+Bridge must run on the same machine as the Colecto Host: the desktop app works, while a
+daemon in Docker needs Bridge in a reachable container or network. Bridge does not run
+on Android. Bridge's certificate is issued to the IP address `127.0.0.1`, so enter that
+rather than `localhost`. This was tested against a stand-in server on Linux, not a
+real Bridge; IP-address certificates on Windows and macOS are unverified.
 
 Transport libraries follow the [imap client documentation](https://docs.rs/imap/2.4.1/imap/)
 and [lettre SMTP documentation](https://docs.rs/lettre/0.11.23/lettre/transport/smtp/).

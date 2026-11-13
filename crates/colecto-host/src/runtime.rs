@@ -47,6 +47,8 @@ pub fn open_accounts(directory: &Path) -> Result<Accounts, Box<dyn std::error::E
             username: required("COLECTO_MAIL_USERNAME")?,
             password: required("COLECTO_MAIL_PASSWORD")?,
             address: required("COLECTO_MAIL_ADDRESS")?,
+            imap_starttls: false,
+            tls_certificate: String::new(),
         })?;
     }
     let namespace = format!("Colecto:{}", std::fs::canonicalize(directory)?.display());

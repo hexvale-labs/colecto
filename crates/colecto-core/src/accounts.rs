@@ -38,6 +38,8 @@ fn prepare_connection(
             username: settings.username.clone(),
             password: secret.into(),
             address: settings.address.clone(),
+            imap_starttls: settings.imap_starttls,
+            tls_certificate: settings.tls_certificate.clone(),
         }),
         Protocol::Jmap => Account::Jmap(JmapAccount {
             session_url: settings.session_url.clone(),
@@ -93,6 +95,8 @@ impl Accounts {
                         smtp_port: a.smtp_port,
                         username: a.username.clone(),
                         session_url: String::new(),
+                        imap_starttls: a.imap_starttls,
+                        tls_certificate: a.tls_certificate.clone(),
                     },
                     secret: a.password.clone(),
                 }),
@@ -108,6 +112,8 @@ impl Accounts {
                         smtp_port: 587,
                         username: a.username.clone(),
                         session_url: a.session_url.clone(),
+                        imap_starttls: false,
+                        tls_certificate: String::new(),
                     },
                     secret: a.token.clone(),
                 }),
@@ -238,6 +244,7 @@ impl Accounts {
             || settings.smtp_host.len() > 253
             || settings.username.len() > 320
             || settings.session_url.len() > 2048
+            || settings.tls_certificate.len() > crate::remote::MAX_CERTIFICATE_BYTES
             || secret.0.len() > 8192
         {
             return Err(invalid("Check account name, address and server settings"));

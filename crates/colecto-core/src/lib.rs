@@ -872,6 +872,8 @@ mod cache_tests {
             username: "me".into(),
             password: "secret".into(),
             address: "me@example.test".into(),
+            imap_starttls: false,
+            tls_certificate: String::new(),
         }
     }
     #[test]
