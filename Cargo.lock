@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-colecto"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "colecto-extension-api",
  "colecto-extension-sys",
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "colecto-app"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum",
  "colecto-host",
@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "colecto-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "colecto-extension"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "colecto-extension-api",
  "colecto-extension-sys",
@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "colecto-extension-api"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -916,11 +916,11 @@ dependencies = [
 
 [[package]]
 name = "colecto-extension-sys"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "colecto-host"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum",
  "colecto-core",
@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "colecto-package"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "colecto-extension-api",
  "flate2",
@@ -5483,7 +5483,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-colecto-native"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "tauri",
  "tauri-plugin",
