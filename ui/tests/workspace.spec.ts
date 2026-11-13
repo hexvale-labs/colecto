@@ -423,3 +423,15 @@ test('appearance applies and restores typography preferences', async ({ page }) 
   await page.reload();
   await expect.poll(scale).toBe(String(18 / 14));
 });
+
+// Regression: closing the runner moves history back, which cancelled a reload started at once.
+test('the command runner reloads the app', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
+  await page.evaluate(() => { (window as unknown as { beforeReload: boolean }).beforeReload = true; });
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox', { name: 'Search commands' }).fill('reload');
+  await Promise.all([page.waitForEvent('load'), page.keyboard.press('Enter')]);
+  expect(await page.evaluate(() => (window as unknown as { beforeReload?: boolean }).beforeReload)).toBeUndefined();
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
+});
