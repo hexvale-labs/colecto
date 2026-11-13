@@ -39,6 +39,8 @@ use spacing rather than additional rules.
 - **Top bar**: brand on the left, the command palette trigger (`Ctrl K`) centred, and
   Settings on the right. These are host controls and do not move. Compose joins them
   only when the Mail pane is hidden.
+  The palette's "Reload the app" stays available while the app is busy, because a reload
+  is the way out when it is stuck; it asks first when there are unsaved changes.
 - **Workspace**: a tree. Splits divide space into rows or columns; every leaf is a
   group of tabbed panes with a 34 px tab strip. The default is Mail above the account
   switcher in a left column, with the Reader beside them.
@@ -77,7 +79,12 @@ Connection pages.
 Settings controls follow the value's shape: a switch for on/off, a segmented control
 for two to four choices, a list for more, and a slider (`.slider`, accent-filled up to
 the thumb) for a bounded number, with the current value beside its label and the ends
-underneath. Settings save as they change; there is no Save button. An extension's own
+underneath. Touch and pen input on a slider goes through `use:touchSlider`
+(`ui/src/lib/slider.ts`), not the engine: the Android app's WebView never moved a styled
+range under a finger. A drag follows the finger, a tap jumps on release, and
+`touch-action: pan-y` leaves vertical swipes to scrolling without changing the value. On
+coarse pointers the thumb grows to 22 px and the hit area to 40 px. Mouse input stays
+native. Settings save as they change; there is no Save button. An extension's own
 settings page (`ExtensionSettings.svelte`) renders its manifest's `[[settings]]` with
 these same controls.
 
