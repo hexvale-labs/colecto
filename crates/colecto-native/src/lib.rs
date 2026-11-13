@@ -33,7 +33,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             #[cfg(target_os = "android")]
             _api.register_android_plugin("app.colecto.mobile", "NativePlugin")?;
             #[cfg(target_os = "ios")]
-            ios::register(_api)?;
+            ios::register(&_api)?;
             Ok(())
         })
         .build()
