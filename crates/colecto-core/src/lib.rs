@@ -384,6 +384,34 @@ impl MailStore {
         self.messages.clear();
         self.reader_cache.clear();
     }
+    /// Show the sample Inbox again after a lock hid it. The demo account has no credentials,
+    /// so unlocking has nothing to reconnect; without this its mail stayed empty until restart.
+    pub(crate) fn restore_demo(&mut self) {
+        if self.account.is_some() {
+            return;
+        }
+        self.messages = self
+            .demo_mail
+            .iter()
+            .filter(|message| {
+                self.demo_folders
+                    .get(&message.id)
+                    .map_or("inbox", String::as_str)
+                    == "inbox"
+            })
+            .cloned()
+            .collect();
+        if let Ok(mut snapshot) = self.snapshot.write() {
+            snapshot.insert(
+                "inbox".into(),
+                MailSnapshot {
+                    folder: "inbox".into(),
+                    messages: self.messages.clone(),
+                    fetched_at: None,
+                },
+            );
+        }
+    }
     pub fn snapshot_handle(&self) -> SnapshotHandle {
         self.snapshot.clone()
     }

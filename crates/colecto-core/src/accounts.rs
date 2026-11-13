@@ -488,6 +488,8 @@ impl Accounts {
                     {
                         connect(store, &record.settings, &secret.0)?;
                     }
+                } else {
+                    store.restore_demo();
                 }
                 Ok(())
             });
