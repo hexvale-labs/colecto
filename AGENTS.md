@@ -82,13 +82,21 @@ taking performance measurements.
 
 ## Shipping
 
-When a task is done and its checks pass, commit, push and merge it yourself: branch
-off `main` if needed, open a pull request, and merge it once the required checks pass.
+Work goes into `develop`; `main` only moves when a release ships (see "Branches" in
+[docs/development.md](docs/development.md)). When a task is done and its checks pass,
+commit, push and merge it yourself: branch off `develop`, open a pull request against
+`develop` (`gh pr create --base develop`), and merge it once the required checks pass.
 Wait for a human only when something truly needs one: failing checks you cannot fix,
 merge conflicts with unclear intent, missing access, or destructive history changes.
 
-Never tag or publish a release yourself. Instead, remind the maintainer that a release
-might be worth cutting (see "Releases" in [docs/development.md](docs/development.md)),
-in plain words and twice: once when you open the pull request, before waiting on CI,
-and again in your final message after the merge. CI takes a while, so the first
-reminder may be the one they see.
+Ship a release only when the maintainer asks for one in the current session, for
+example "ship a new release". Then follow "Shipping a release" in
+[docs/development.md](docs/development.md): read what changed since the last tag,
+write the release notes, choose a minor or patch version yourself, bump it, merge
+`develop` into `main`, and push the tag. Never pick a major version unless the
+maintainer asks for one. Never tag or publish at any other time.
+
+When you merge a change that users would notice, remind the maintainer that a release
+might be worth shipping. Say it in plain words, twice: once when you open the pull
+request, before waiting on CI, and again in your final message after the merge. CI
+takes a while, so the first reminder may be the one they see.
