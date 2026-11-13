@@ -18,6 +18,8 @@
     replyAll: '<path d="m7 17-5-5 5-5"/><path d="m12 17-5-5 5-5"/><path d="M22 18v-2a4 4 0 0 0-4-4H7"/>',
     forward: '<path d="m15 17 5-5-5-5"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/>',
     close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    sidebar: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>',
+    next: '<path d="m9 18 6-6-6-6"/>',
     chevron: '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>',
     back: '<path d="m15 18-6-6 6-6"/>',
     'arrow-right': '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',

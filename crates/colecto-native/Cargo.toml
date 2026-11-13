@@ -1,0 +1,21 @@
+[package]
+name = "tauri-plugin-colecto-native"
+description = "Native touches for the Colecto mobile app: system back gestures and press feedback"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+# Tauri finds a plugin's Android and iOS projects through this `links` key.
+links = "tauri-plugin-colecto-native"
+
+# The workspace forbids unsafe code; Tauri's iOS binding macro declares a Swift function, so
+# this crate denies it instead and allows it on that one binding.
+[lints.rust]
+unsafe_code = "deny"
+
+[dependencies]
+tauri.workspace = true
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

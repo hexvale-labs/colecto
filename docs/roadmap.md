@@ -53,6 +53,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Item | Status |
 | --- | --- |
 | Linux, Windows, browser; Docker image `ghcr.io/hexvale-labs/colectod`; AUR packages | Done |
+| Mobile feel: system back and predictive back, press sounds and haptics, compact/medium/expanded layouts, phone Settings | Done; real-device validation pending |
 | Android: UnifiedPush from a self-hosted daemon (Web Push, no foreground service) | Next |
 | Android: optional foreground service for local accounts without a daemon | Next |
 | Signed macOS and iOS builds | Later (needs an Apple developer account) |

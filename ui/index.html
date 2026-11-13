@@ -12,7 +12,7 @@
       /* Startup splash: painted before any script runs, removed by main.ts. Matches --ground. */
       html, body { margin: 0; height: 100%; background: oklch(0.112 0.002 165); }
       #startup { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; background: oklch(0.112 0.002 165); }
-      #startup img { width: 176px; height: auto; animation: startup-in 320ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+      #startup img { width: 128px; height: auto; animation: startup-in 320ms cubic-bezier(0.23, 1, 0.32, 1) both; }
       #startup span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
       @keyframes startup-in { from { opacity: 0; transform: scale(0.96); } }
       @media (prefers-reduced-motion: reduce) { #startup img { animation: none; } }

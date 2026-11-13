@@ -40,6 +40,7 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
         tauri::async_runtime::block_on(tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)))?;
     let authority = listener.local_addr()?.to_string();
     tauri::Builder::default()
+        .plugin(tauri_plugin_colecto_native::init())
         .setup(move |app| {
             colecto_host::logging::init_with_files(app.path().app_log_dir().ok().as_deref());
             let directory = match std::env::var_os("COLECTO_DATA_DIR") {

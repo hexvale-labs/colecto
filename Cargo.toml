@@ -44,6 +44,7 @@ colecto-extension-api = { path = "crates/colecto-extension-api" }
 colecto-extension-sys = { path = "crates/colecto-extension-sys" }
 colecto-package = { path = "crates/colecto-package" }
 colecto-host = { path = "crates/colecto-host" }
+tauri-plugin-colecto-native = { path = "crates/colecto-native" }
 
 imap = "2.4.1"
 native-tls = "0.2"

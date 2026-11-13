@@ -144,7 +144,7 @@
   .label-row { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line-soft); }
   .label-row:last-child { border-bottom: 0; }
   .label-open { display: grid; flex: 1; min-width: 0; padding: 10px 8px; margin-left: -8px; border-radius: 8px; text-align: left; transition: background-color 120ms ease; }
-  .label-open:hover:not(:disabled) { background: var(--raise); }
+  @media (hover: hover) and (pointer: fine) { .label-open:hover:not(:disabled) { background: var(--raise); } }
   .label-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: calc(14px * var(--text-scale)); font-weight: 560; }
   .label-open small { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
   @media (prefers-reduced-motion: reduce) { .ai-options, .label-list { transition: none; } }

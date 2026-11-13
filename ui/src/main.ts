@@ -1,5 +1,11 @@
 import { installLayers } from './lib/layers';
+import { installBack } from './lib/back';
+import { installPressFeedback, platform } from './lib/native';
 installLayers();
+installBack();
+installPressFeedback();
+// Motion follows the platform's conventions (see lib/back.ts); styles can too.
+document.documentElement.dataset.platform = platform;
 import { mount } from 'svelte';
 import App from './App.svelte';
 import '@fontsource-variable/mona-sans/wdth.css';
