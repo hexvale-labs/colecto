@@ -57,6 +57,7 @@
   .ai-tool { width: auto !important; padding: 0 11px !important; }
   .ai-menu { left: auto; right: 0; min-width: 160px; transform-origin: top right; }
   .ai-menu button { display: flex; align-items: center; width: 100%; padding: 7px 10px; border-radius: 8px; font-size: calc(13.5px * var(--text-scale)); text-align: left; transition: background-color 90ms ease, transform 120ms var(--ease-out); }
-  .ai-menu button:hover, .ai-menu button:focus-visible { background: var(--raise); outline: none; }
+  .ai-menu button:focus-visible { background: var(--raise); outline: none; }
+  @media (hover: hover) and (pointer: fine) { .ai-menu button:hover { background: var(--raise); } }
   .ai-menu button:active { transform: scale(0.985); }
 </style>

@@ -124,6 +124,8 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  // On a phone Settings opens on its list of sections.
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Accounts', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Accounts & security' })).toBeVisible();
   await page.getByLabel('Master password', { exact: true }).fill('correct horse battery staple');
   await page.getByLabel('Confirm master password').fill('correct horse battery staple');
@@ -139,7 +141,10 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
   await page.getByLabel('Password', { exact: true }).fill('provider-secret');
   await page.getByRole('button', { name: 'Save account', exact: true }).click();
   await expect(page.getByText('Work saved. Colecto checks the connection in the background.')).toBeVisible();
+  // Back goes from the page to the list, then closes Settings.
+  await page.getByRole('button', { name: 'Back to Settings' }).click();
   await page.getByRole('button', { name: 'Close settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).not.toBeVisible();
   await chooseAccount(page, 'Work');
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await expect(page.getByText('No drafts yet')).toBeVisible();
@@ -159,6 +164,7 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await expect(page.getByRole('button', { name: /Work only/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Accounts', exact: true }).click();
   await page.getByRole('button', { name: 'Lock credentials', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Credential protection' }).getByText('Credentials locked', { exact: true })).toBeVisible();
   await page.getByLabel('Master password', { exact: true }).fill('incorrect password');

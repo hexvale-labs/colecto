@@ -31,7 +31,7 @@
   h3 { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); font-weight: 600; }
   .ai-summary-actions { display: flex; gap: 2px; margin-right: -6px; }
   .ai-summary-button { height: 26px; padding: 0 8px; border-radius: 6px; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); font-weight: 560; transition: background-color 120ms ease, color 120ms ease, transform 120ms var(--ease-out); }
-  .ai-summary-button:hover:not(:disabled) { background: var(--control); color: var(--ink); }
+  @media (hover: hover) and (pointer: fine) { .ai-summary-button:hover:not(:disabled) { background: var(--control); color: var(--ink); } }
   .ai-summary-button:active:not(:disabled) { transform: scale(0.97); }
   .ai-summary-button:disabled { color: var(--ink-3); }
   .ai-summary-text { color: var(--ink-2); font-size: calc(14px * var(--text-scale)); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; transition: opacity 160ms ease; }

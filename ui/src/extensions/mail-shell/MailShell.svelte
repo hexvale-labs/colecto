@@ -9,7 +9,8 @@
   import mark from '../../assets/logo-square.svg';
   import wordmark from '../../assets/wordmark.svg';
   import { setAccessToken } from '../../lib/api';
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
+  import { claimBack, goBack } from '../../lib/back';
   import ExtensionPanel from '../../ExtensionPanel.svelte';
   import DockArea, { type PaneInfo } from '../../DockArea.svelte';
   import { activate as showPane, defaultLayout, dock, dockEdge, groupOf, parseLayout, reconcile, setVisible, type Edge, type Layout } from '../../lib/layout';
@@ -49,6 +50,16 @@
   let extensionPages = $derived(extensionStates.filter(e => e.enabled && e.manifest.settings?.length));
   let currentExtension = $derived(extensionPages.find(e => `extension:${e.manifest.id}` === settingsPage));
   let settingsPage = $state<SettingsPage>('accounts');
+  // On a phone Settings is a list of sections that opens one page at a time; wider, the list is
+  // a sidebar that collapses to icons (remembered on this device only).
+  let phone = $state(false);
+  let settingsPageShown = $state(false);
+  const NAV_KEY = 'colecto.settingsNavCollapsed';
+  let navCollapsed = $state(false);
+  function toggleNav() {
+    navCollapsed = !navCollapsed;
+    try { localStorage.setItem(NAV_KEY, navCollapsed ? '1' : '0'); } catch { /* Kept for this session. */ }
+  }
   let settingsDirty = $state(false);
   let reviewRequest = $state<string | null>(null);
   let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'top', updates: true });
@@ -121,11 +132,16 @@
     catch { serverError = 'Enter an HTTPS server address, or HTTP for a local server. Do not include credentials or an access token.'; }
   }
   const discardSettings = () => !settingsDirty || window.confirm('Discard unsaved settings changes?');
-  function settingsTab(next: SettingsPage) { if (next === settingsPage || !discardSettings()) return; settingsDirty = false; settingsPage = next; if (next === 'extensions') onsettings(); }
-  function openSettings(page: SettingsPage = 'accounts') {
+  function settingsTab(next: SettingsPage) {
+    if (next === settingsPage) { settingsPageShown = true; return; }
+    if (!discardSettings()) return;
+    settingsDirty = false; settingsPage = next; settingsPageShown = true; if (next === 'extensions') onsettings();
+  }
+  /** Open Settings, at `page` when given; without one a phone shows the list of sections. */
+  function openSettings(page?: SettingsPage) {
     if (busy || !initialized) return;
-    if (settingsOpen) { settingsTab(page); return; }
-    settingsOpen = true; settingsDirty = false; settingsPage = page;
+    if (settingsOpen) { if (page) settingsTab(page); return; }
+    settingsOpen = true; settingsDirty = false; settingsPage = page ?? 'accounts'; settingsPageShown = !!page;
     if (page === 'extensions') onsettings();
     void refreshAccounts().catch(e => accountError = (e as Error).message);
   }
@@ -137,6 +153,27 @@
     return true;
   }
   function closeSettings() { if (leaveSettings()) void tick().then(() => document.querySelector<HTMLElement>('.topbar [aria-label="Settings"]')?.focus()); }
+  // Back (the system button or gesture, the browser, the in-app arrows) closes the newest of:
+  // Settings, a Settings page on a phone, and on narrow windows whatever replaced the list.
+  $effect(() => {
+    if (!settingsOpen) return;
+    return claimBack({ close: closeSettings, isOpen: () => settingsOpen, surface: () => document.querySelector<HTMLElement>('.settings-window'), push: untrack(() => phone) });
+  });
+  $effect(() => {
+    if (!settingsOpen || !phone || !settingsPageShown) return;
+    return claimBack({ close: () => settingsPageShown = false, isOpen: () => settingsOpen && phone && settingsPageShown, surface: () => document.querySelector<HTMLElement>('.settings-main'), under: () => document.querySelector<HTMLElement>('.settings-nav'), push: true });
+  });
+  $effect(() => {
+    if (!compact || !layoutReady || focus === 'mailbox') return;
+    const pane = focus;
+    return claimBack({
+      close: () => { if (view) back(); else activate('mailbox'); },
+      isOpen: () => compact && focus === pane,
+      surface: () => document.getElementById(`pane-${pane}`),
+      under: () => document.getElementById('pane-mailbox'),
+      push: true,
+    });
+  });
   function focusCard(node: HTMLElement) { node.focus(); }
   /** Open any page by its shared destination name: the command runner and MCP both come through here. */
   function go(target: Destination) {
@@ -463,8 +500,12 @@
   const hour = new Date().getHours();
   const greeting = hour < 5 ? 'Up late?' : hour < 12 ? 'Good morning.' : hour < 18 ? 'Good afternoon.' : 'Good evening.';
   onMount(() => {
-    const narrow = window.matchMedia('(max-width: 800px)');
-    const sync = () => compact = narrow.matches; sync(); narrow.addEventListener('change', sync);
+    // Android window size classes: compact (< 600 dp) and medium (< 840 dp) show one pane at a time.
+    const narrow = window.matchMedia('(max-width: 839.98px)');
+    const small = window.matchMedia('(max-width: 599.98px)');
+    const sync = () => { compact = narrow.matches; phone = small.matches; }; sync();
+    narrow.addEventListener('change', sync); small.addEventListener('change', sync);
+    try { const saved = localStorage.getItem(NAV_KEY); navCollapsed = saved ? saved === '1' : narrow.matches; } catch { navCollapsed = narrow.matches; }
     const preferences = hostService.preferences().catch(() => null);
     void preferences.then(saved => {
       savedLayout = parseLayout(saved?.workspace); layoutReady = true;
@@ -492,7 +533,7 @@
       else accountId = accounts.find(a => isOn(a.id))?.id ?? accountId;
       connected = accounts.find(a => a.id === accountId)?.connected ?? false;
     }).catch(e => accountError = (e as Error).message).finally(() => { initialized = true; void loadList(); listen(); });
-    return () => { narrow.removeEventListener('change', sync); stopEvents(); clearTimeout(searchTimer); };
+    return () => { narrow.removeEventListener('change', sync); small.removeEventListener('change', sync); stopEvents(); clearTimeout(searchTimer); };
   });
 </script>
 
@@ -528,7 +569,7 @@
       {:else if pane === 'accounts'}<div class="account-pane">{@render accountSwitcher('above')}</div>
       {:else}
         {@const id = pane.slice(4)}
-        {#if panelRuns[id] || groupOf(layout, pane)?.active === pane}{#key `${accountId}:${id}:${panelRuns[id] ?? 0}`}<ExtensionPanel {id} account={accountId} onback={() => activate('mailbox')} />{/key}{/if}
+        {#if panelRuns[id] || groupOf(layout, pane)?.active === pane}{#key `${accountId}:${id}:${panelRuns[id] ?? 0}`}<ExtensionPanel {id} account={accountId} onback={() => goBack() || activate('mailbox')} />{/key}{/if}
       {/if}
     {/snippet}
   </DockArea>{/if}
@@ -540,12 +581,16 @@
   <!-- Pressing the dimmed backdrop closes Settings, like Escape; the card itself is the dialog. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="settings-overlay" onpointerdown={(event) => { if (event.target === event.currentTarget) closeSettings(); }}>
-    <div class="settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" use:focusCard>
-      <nav class="settings-nav" aria-label="Settings sections">
-        <h1 id="settings-title">Settings</h1>
+    <div class="settings-window" class:collapsed={navCollapsed && !phone} data-view={phone ? settingsPageShown ? 'page' : 'list' : undefined} role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" use:focusCard>
+      <nav class="settings-nav" aria-label="Settings sections" inert={phone && settingsPageShown}>
+        <header class="settings-nav-head">
+          {#if phone}<button class="icon-button" aria-label="Close settings" disabled={busy} onclick={() => goBack() || closeSettings()}><Icon name="back" size={20} /></button>{/if}
+          <h1 id="settings-title">Settings</h1>
+          {#if !phone}<button class="icon-button nav-toggle" aria-label={navCollapsed ? 'Expand the section list' : 'Collapse the section list'} aria-expanded={!navCollapsed} title={navCollapsed ? 'Expand' : 'Collapse'} onclick={toggleNav}><Icon name="sidebar" size={17} /></button>{/if}
+        </header>
         <div class="nav-group" role="group" aria-labelledby="settings-built-in">
           <span class="nav-group-label" id="settings-built-in">Built-in</span>
-          {#each settingsPages as page (page.id)}<button class="nav-item" class:active={settingsPage === page.id} aria-current={settingsPage === page.id ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(page.id)}><Icon name={page.icon} /><span class="nav-label">{page.name}</span></button>{/each}
+          {#each settingsPages as page (page.id)}<button class="nav-item" class:active={settingsPage === page.id} aria-current={settingsPage === page.id ? 'page' : undefined} title={navCollapsed && !phone ? page.name : undefined} disabled={busy} onclick={() => settingsTab(page.id)}><Icon name={page.icon} /><span class="nav-label">{page.name}</span><Icon name="next" /></button>{/each}
           {#each extensionPages.filter(e => e.bundled) as extension (extension.manifest.id)}{@render extensionNav(extension)}{/each}
         </div>
         {#if extensionPages.some(e => !e.bundled)}
@@ -555,8 +600,12 @@
           </div>
         {/if}
       </nav>
-      <div class="settings-main">
-        <header class="settings-head"><p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name ?? currentExtension?.manifest.name ?? 'Extension'}</strong></p><button class="icon-button" aria-label="Close settings" title="Close  Esc" disabled={busy} onclick={closeSettings}><Icon name="close" size={16} /></button></header>
+      <div class="settings-main" inert={phone && !settingsPageShown}>
+        <header class="settings-head">
+          {#if phone}<button class="icon-button" aria-label="Back to Settings" disabled={busy} onclick={() => goBack() || (settingsPageShown = false)}><Icon name="back" size={20} /></button>{/if}
+          <p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name ?? currentExtension?.manifest.name ?? 'Extension'}</strong></p>
+          {#if !phone}<button class="icon-button" aria-label="Close settings" title="Close  Esc" disabled={busy} onclick={closeSettings}><Icon name="close" size={16} /></button>{/if}
+        </header>
         <div class="settings-page">
           {#if settingsPage.startsWith('extension:')}{#if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
           {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} enabled={isOn} ontoggle={toggleAccount} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
@@ -580,7 +629,7 @@
 {#snippet aiSummary(slot: import('../../lib/reader-slots').ReaderSlot)}<aiExtension.summary reader={slot} account={accountId} />{/snippet}
 {#snippet extensionNav(extension: import('../../lib/api').ExtensionState)}
   {@const id = `extension:${extension.manifest.id}` as const}
-  <button class="nav-item" class:active={settingsPage === id} aria-current={settingsPage === id ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(id)}><span class="nav-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1).toUpperCase()}</span><span class="nav-label">{extension.manifest.name}</span></button>
+  <button class="nav-item" class:active={settingsPage === id} aria-current={settingsPage === id ? 'page' : undefined} title={navCollapsed && !phone ? extension.manifest.name : undefined} disabled={busy} onclick={() => settingsTab(id)}><span class="nav-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1).toUpperCase()}</span><span class="nav-label">{extension.manifest.name}</span><Icon name="next" /></button>
 {/snippet}
 {#snippet folderNav()}
 <nav class="folder-nav" aria-label="Mail folders">
@@ -635,8 +684,8 @@
     {#if compact}{@render messageTabs()}{/if}
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
-        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} {remoteImages} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} actions={aiOn ? aiActions : undefined} aboveBody={aiOn ? aiSummary : undefined} />
-        {:else if view?.kind === 'draft' && Composer}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
+        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} {remoteImages} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={() => goBack() || back()} actions={aiOn ? aiActions : undefined} aboveBody={aiOn ? aiSummary : undefined} />
+        {:else if view?.kind === 'draft' && Composer}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={() => goBack() || back()} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
         {:else}
           <section class="welcome">
             <img src={mark} alt="" width="48" height="48" />

@@ -1,0 +1,7 @@
+{
+  "identifier": "native-feedback",
+  "description": "The app's own page (the in-process service on loopback) may ask for press feedback. Nothing else is exposed to it.",
+  "windows": ["main"],
+  "remote": { "urls": ["http://127.0.0.1:*"] },
+  "permissions": ["colecto-native:default"]
+}

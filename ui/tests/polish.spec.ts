@@ -65,6 +65,8 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
       await settings.getByRole('button', { name: section, exact: true }).click();
       await expect(settings.getByRole('heading', { level: 2 }).first()).toBeVisible();
       await scrollAll(); await expectNoOverscroll(page, `settings: ${section}`);
+      // A phone shows one Settings page at a time over the list of sections.
+      if (viewport.width < 600) await settings.getByRole('button', { name: 'Back to Settings' }).click();
     }
   });
 }

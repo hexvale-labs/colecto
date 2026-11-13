@@ -4,6 +4,7 @@
 <script lang="ts" generics="T extends string">
   import { tick, type Snippet } from 'svelte';
   import Icon from './Icon.svelte';
+  import { claimBack } from './lib/back';
   let { label, value, options, onchange, disabled = false, placement = 'below', trigger, onopen }: {
     label: string; value: T; options: Option<T>[]; onchange: (value: T) => void;
     onopen?: () => void; disabled?: boolean; placement?: 'below' | 'above'; trigger?: Snippet<[Option<T> | undefined]>;
@@ -37,6 +38,8 @@
     if (found !== undefined) { active = found; document.getElementById(`${id}-${active}`)?.scrollIntoView({ block: 'nearest' }); }
   }
   function hide(refocus = true) { open = false; if (refocus) button.focus(); }
+  // Back closes an open list, like Escape.
+  $effect(() => { if (open) return claimBack({ close: () => hide(false), isOpen: () => open }); });
   function choose(index: number) { const option = options[index]; hide(); if (option && option.value !== value) onchange(option.value); }
   function keydown(event: KeyboardEvent) {
     const last = options.length - 1;

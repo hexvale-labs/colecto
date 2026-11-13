@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Opts the app in to predictive back, so Android streams back gestures to the callback
+         in NativePlugin as they happen. Merged into the app's <application>. -->
+    <application android:enableOnBackInvokedCallback="true" />
+</manifest>

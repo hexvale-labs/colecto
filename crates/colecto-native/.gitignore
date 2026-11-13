@@ -1,0 +1,5 @@
+# Copied in by the build from the Tauri crate.
+/.tauri
+/android/.tauri
+/android/build
+/ios/.build

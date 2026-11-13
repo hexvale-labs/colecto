@@ -363,6 +363,7 @@ test('account dialog and long identities remain usable at 360px', async ({ page 
   await page.route('**/api/v1/security', route => route.fulfill({ json: { protected: false, locked: false, cleanup_pending: false } }));
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Accounts', exact: true }).click();
   const edit = page.getByRole('button', { name: 'Edit Aleksandra Wiśniewska-Kowalczyk', exact: true });
   await edit.click();
   await expect(page.locator('dialog.account-dialog')).toBeVisible();

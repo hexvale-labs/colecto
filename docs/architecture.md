@@ -88,6 +88,16 @@ mobile apps; the browser reaches the same Rust service over HTTP. Linux, Windows
 Android and the browser are supported. macOS and iOS builds are produced but unsigned
 and untested (see [installing](install.md#experimental-apple-builds)).
 
+On Android and iOS the app also loads `tauri-plugin-colecto-native`
+(`crates/colecto-native/`), which carries its own Kotlin and Swift because CI generates
+the mobile projects fresh on every build. It claims the Android back gesture while the
+page has history to go back through and streams predictive-back progress to it as
+`colecto:back` window events, and its one command, `press`, plays the system click
+sound and haptics. The capability `native-feedback`
+(`crates/colecto-app/capabilities/native.json`) grants only that command, and only to
+the app's own loopback page (`http://127.0.0.1:*`); nothing else on that page can reach
+Tauri. On desktop the plugin does nothing.
+
 On Linux the app sets its GTK program name to `Colecto` so the Wayland `app_id`
 matches the `Colecto.desktop` entry every package installs; compositors use that
 match to find the window icon.

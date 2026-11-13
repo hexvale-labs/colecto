@@ -85,11 +85,13 @@
   .tones label { flex: 1 1 auto; justify-content: center; padding: 0 8px; }
   /* Hover waits a moment so passing over the pill stays quiet; keyboard focus shows it at once. */
   .tip { position: absolute; bottom: calc(100% + 8px); left: 50%; z-index: 1; width: max-content; max-width: 280px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--float); color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); line-height: 1.4; white-space: normal; text-align: center; pointer-events: none; visibility: hidden; opacity: 0; transform: translate(-50%, 2px); transition: opacity 120ms ease, transform 120ms var(--ease-out), visibility 0s 120ms; }
-  .tones label:hover .tip { visibility: visible; opacity: 1; transform: translate(-50%, 0); transition-delay: 350ms; }
+  @media (hover: hover) and (pointer: fine) { .tones label:hover .tip { visibility: visible; opacity: 1; transform: translate(-50%, 0); transition-delay: 350ms; } }
   .tones label:has(input:focus-visible) .tip { visibility: visible; opacity: 1; transform: translate(-50%, 0); transition-delay: 0ms; }
   .tones label:first-child .tip { left: 0; transform: translate(0, 2px); }
-  .tones label:first-child:hover .tip, .tones label:first-child:has(input:focus-visible) .tip { transform: none; }
+  .tones label:first-child:has(input:focus-visible) .tip { transform: none; }
+  @media (hover: hover) and (pointer: fine) { .tones label:first-child:hover .tip { transform: none; } }
   .tones label:last-child .tip { left: auto; right: 0; transform: translate(0, 2px); }
-  .tones label:last-child:hover .tip, .tones label:last-child:has(input:focus-visible) .tip { transform: none; }
+  .tones label:last-child:has(input:focus-visible) .tip { transform: none; }
+  @media (hover: hover) and (pointer: fine) { .tones label:last-child:hover .tip { transform: none; } }
   @media (prefers-reduced-motion: reduce) { .tip { transition: none; } }
 </style>

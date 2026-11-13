@@ -84,9 +84,62 @@ these same controls.
 Settings open as a card over the workspace, which stays mounted (and inert) behind a
 dimmed backdrop, so an open message or draft is still there when Settings close. The
 card has a section list, a breadcrumb and a close button; Escape or a click on the
-backdrop closes it. On phones the card fills the screen (under 800 px wide, and on short
-touch screens such as a phone on its side). Under 800 px the app shows one
-pane at a time, and folders become a bottom tab bar.
+backdrop closes it. The section list is a sidebar that collapses to an icon rail (its
+button sits beside the title); the choice is remembered per device in `localStorage`
+(`colecto.settingsNavCollapsed`), and starts collapsed below 840 px. Below 840 px, and
+on short touch screens such as a phone on its side, the card fills the screen. On a
+compact window (below 600 px) Settings opens on the list of sections, full width like a
+phone's settings app, and each section opens over it with a back arrow; the page's own
+heading names it.
+
+## Adaptive layout
+
+The shell follows Android's window size classes, by window width rather than device:
+
+| Class | Width | Layout |
+| --- | --- | --- |
+| Compact | below 600 px | One pane at a time; folders in a bottom navigation bar; Settings as list, then page |
+| Medium | 600 to 839 px | One pane at a time; folders in an 80 px navigation rail on the leading edge |
+| Expanded | 840 px and up | The dockable workspace described above |
+
+The bar and the rail mark the current folder with Material's pill indicator, which widens
+in from the middle. Window classes change while the app runs (rotation, split screen,
+folding, resizing a ChromeOS window), and the layout follows. Only the shell reads them,
+through media queries and `matchMedia` in `MailShell.svelte`.
+
+## Back and gestures
+
+`ui/src/lib/back.ts` keeps one back stack. Each thing you can go back from claims an
+entry while it is open, and each entry is a browser history entry (`history.state`
+`{ colectoBack: n }`), so the system back button, the browser's back, a mouse back button
+and the in-app back arrows all close the newest thing first:
+
+| Claims back | While |
+| --- | --- |
+| Every modal `<dialog>` | Open (`showModal` is wrapped once; back sends it `cancel`, like Escape) |
+| An open listbox (`Select.svelte`) | Open |
+| Settings | Open |
+| A Settings page | Open over the section list (compact) |
+| The reader, composer or a panel | Shown instead of the mail list (compact and medium) |
+
+The owner can still refuse (unsaved changes): the entry then claims its place again. With
+nothing claimed, back leaves the app (Android) or the page (browser). A reload starts a
+fresh stack. In-app back arrows call `goBack()`, so they animate exactly like the system
+back.
+
+On Android the native plugin turns the predictive back gesture into `colecto:back` events
+(`start`, `progress`, `cancel`); the screen on top shrinks toward 90 %, drifts away from the
+edge, rounds its corners and shows what it will reveal, then leaves on commit. Android's
+own back-to-home preview does not play yet: Tauri always registers its own back callback
+(tauri-apps/tauri#16430 would make that optional). iOS has no back button, so a swipe from
+the left 24 px follows the finger and goes back past 35 % of the width or on a fast flick.
+
+## Press feedback
+
+In the Android app every tap on a control (button, link, tab, option, switch) plays the
+system click and toggles add a light tick, through the plugin's `press` command; Android
+plays them only when the owner has touch sounds and touch feedback on. iOS controls do not
+click, so iOS gets only the tick on toggles. Browsers and desktop get neither.
 
 Reordering groups that share a row or column keeps every group's size; only a drop that
 creates a new split divides space in half.
@@ -162,7 +215,13 @@ scales from 0.97 in 220 ms. Notifications enter from the edge they are docked to
 leave the same way, fading in place while the rest of the stack slides (FLIP) into the
 space. Their transitions move only `translate`, `scale` and `opacity`: Svelte holds a
 leaving toast in place with a `transform`, and an exit that animated `transform` would
-throw it to the wrong spot for its last frames. The command palette opens
+throw it to the wrong spot for its last frames. On compact and medium windows a screen that replaces the mail list (a message, the
+composer, a panel, a Settings page) slides in over it: on iOS fully from the right in
+300 ms with the drawer curve (`cubic-bezier(0.32, 0.72, 0, 1)`), elsewhere as Material's
+shared-axis step (96 px or 30 % of the width, with a fade) in 240 ms. Going back plays it
+in reverse in about 200 ms, with the covered screen shown underneath. Gestures drive the
+same surfaces (see "Back and gestures"). Collapsing the Settings section list animates
+its column in 240 ms. The command palette opens
 instantly, because it is used hundreds of times a day. Docking previews slide
 between zones in 160 ms; resizing and tab switches do not animate. The palette closes
 on Escape or a click outside it. HTML mail appears
@@ -173,7 +232,11 @@ not animate. `prefers-reduced-motion` removes every transition.
 ## Feels native
 
 Colecto is an app window, not a page. The document never scrolls; every scroll area ends
-at its content (a browser test checks each pane and Settings section). Interface text is
+at its content (a browser test checks each pane and Settings section). Hover styles apply
+only with `(hover: hover) and (pointer: fine)`, so a tap never leaves a highlight behind;
+presses use `:active`. Keyboard hints (`Ctrl K`, `Esc`, the palette's key legend, the
+welcome tip) are hidden where no fine pointer exists (`not all and (any-pointer: fine)`).
+Inputs stay at least 16 px on compact and medium windows so iOS does not zoom into them. Interface text is
 not selectable: only message text, inputs, identifiers in `code`, errors and anything
 marked `.selectable` are. Images, icons and links cannot be dragged around the window.
 Copy buttons sit in the reader toolbar and the composer footer.
@@ -219,7 +282,8 @@ Desktop message tabs share the dock header with the Reader tab; its drag handle,
 arrange menu and pane semantics remain available. Compact mode keeps message tabs
 inside the reader because it has no dock header. Tab strips scroll horizontally.
 
-The static `index.html` startup splash (the full logo on `--ground`; the wordmark is
+The static `index.html` startup splash (the full logo, 128 px wide and centred, on
+`--ground`; `logo-full.svg`'s view box is trimmed to the artwork so it centres; the wordmark is
 vector, so it needs no web font) paints before mounting, with a two-frame
 paint checkpoint. It stays for at least 800 ms after that checkpoint and until a
 usable app surface exists, then fades over 200 ms with ease-out without moving the
@@ -237,7 +301,9 @@ common families `probeSystemFonts()` in `lib/typography.ts` finds by measuring t
 where the Local Font Access API exists, **List all installed fonts** asks for the full list.
 
 Text size is four steps (13, 14, 16 and 18 px; 14 is the design size), shown as "Aa"
-samples. Every `font-size` in the stylesheets is written as
+samples. On a touch screen (`pointer: coarse`) every step reads larger by 18/14, so the
+default there is the desktop's largest size and the steps above it go further; the saved
+preference is the same on every device. Every `font-size` in the stylesheets is written as
 `calc(<px> * var(--text-scale))`, and the setting sets `--text-scale`. Write new font
 sizes the same way. Spacing and pane geometry stay in px on purpose, so docking and
 layout maths do not change with text size.
