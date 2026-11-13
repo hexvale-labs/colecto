@@ -372,6 +372,24 @@ test('account dialog and long identities remain usable at 360px', async ({ page 
   await page.getByRole('button', { name: 'Add account', exact: true }).click();
   await page.getByLabel('Email address', { exact: true }).fill('jo@example.test');
   await expect(page.getByLabel('Username', { exact: true })).toHaveValue('jo@example.test');
+  // Proton Mail Bridge style: STARTTLS on custom ports with a pinned certificate.
+  const incoming = page.getByRole('group', { name: 'Security for incoming mail' });
+  const outgoing = page.getByRole('group', { name: 'Security for outgoing mail' });
+  await incoming.getByRole('radio', { name: 'STARTTLS', exact: true }).focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByLabel('Port').first()).toHaveValue('143');
+  await page.getByLabel('Port').nth(1).fill('1025');
+  await expect(outgoing.getByRole('radio', { name: 'STARTTLS', exact: true })).toBeChecked();
+  await outgoing.getByRole('radio', { name: 'TLS', exact: true }).focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByLabel('Port').nth(1)).toHaveValue('465');
+  await page.getByText('Trusted certificate', { exact: true }).click();
+  await page.locator('dialog.account-dialog input[type=file]').setInputFiles({ name: 'cert.pem', mimeType: 'application/x-pem-file', buffer: Buffer.from('-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n') });
+  await expect(page.getByText('Custom certificate in use')).toBeVisible();
+  expect(await page.locator('dialog.account-dialog').evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Use system certificates', exact: true }).click();
+  await page.locator('dialog.account-dialog input[type=file]').setInputFiles({ name: 'key.pem', mimeType: 'application/x-pem-file', buffer: Buffer.from('-----BEGIN PRIVATE KEY-----\n') });
+  await expect(page.getByText(/exactly one certificate/)).toBeVisible();
   await page.getByRole('radio', { name: 'JMAP', exact: true }).focus();
   await page.keyboard.press('Space');
   await expect(page.getByLabel('Incoming (IMAP) server')).not.toBeVisible();

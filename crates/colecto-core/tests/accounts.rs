@@ -310,6 +310,8 @@ fn locked_vault_suppresses_legacy_environment_account() {
             username: "env".into(),
             password: "must-not-bypass-lock".into(),
             address: "env@example.test".into(),
+            imap_starttls: false,
+            tls_certificate: String::new(),
         })
         .unwrap();
     let accounts = Accounts::open(legacy, backend).unwrap();

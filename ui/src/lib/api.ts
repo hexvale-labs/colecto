@@ -9,7 +9,7 @@ export interface DraftInput extends Omit<Draft, 'id'> { id?: string; attachments
 export interface AttachmentInfo { index: number; name: string; content_type: string; size: number }
 export interface MessageContent { text: string; html: string | null; attachments: AttachmentInfo[]; message_id: string; references: string; reply_to: string; to: string; cc: string }
 export interface MailItem { id: string; name: string; subject: string; preview: string; date: string }
-export interface AccountSettings { name: string; address: string; protocol: 'imap' | 'jmap'; imap_host: string; imap_port: number; smtp_host: string; smtp_port: number; username: string; session_url: string }
+export interface AccountSettings { name: string; address: string; protocol: 'imap' | 'jmap'; imap_host: string; imap_port: number; smtp_host: string; smtp_port: number; username: string; session_url: string; imap_starttls?: boolean; tls_certificate?: string }
 export interface AccountInfo { id: string; settings: AccountSettings | null; connected: boolean; configured: boolean }
 /** `version` is the Colecto that wrote the unit; `update_to` is set when this app can rewrite it. */
 export interface BackgroundService { installed: boolean; version?: string | null; update_to?: string | null; enabled: boolean; active: boolean; supported: boolean; reason?: string | null; socket?: string | null; token_file?: string | null }

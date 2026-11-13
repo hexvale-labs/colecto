@@ -13,6 +13,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | --- | --- |
 | Reply, reply all, forward; sandboxed HTML reading; attachments both ways | Done |
 | IMAP IDLE and JMAP push, with polling fallback | Done |
+| IMAP STARTTLS, any SMTP port, a pinned certificate per account (Proton Mail Bridge) | Done; untested against a real Bridge |
 | Discover every server folder with its role and counts (`GET /folders`) | Done |
 | Read/unread and star flags; move, archive and delete | In progress |
 | Browse any folder in the UI, with paging through full history | Next |
@@ -35,7 +36,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Onboarding for the first account; demo account off by default | Next |
 | Font choice and text size, account rows and add/edit account dialog, account removal | Done |
 | Loading screen and selection polish | Done |
-| Custom ports in every server field | Next |
+| Custom ports in every server field | Done |
 | Install the daemon and notifier as Linux systemd user services from Connection | Done; real systemd validation pending |
 | Show service unit versions and update outdated units from Connection | Done; real systemd validation pending |
 | Install the daemon as a Windows logon task | Next |
