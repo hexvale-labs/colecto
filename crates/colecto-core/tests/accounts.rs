@@ -114,6 +114,17 @@ fn password_vault_locks_restarts_and_rejects_wrong_password() {
     assert!(accounts.security().locked);
     accounts.unlock("a strong master password").unwrap();
     assert!(accounts.store(&a.id).unwrap().lock().unwrap().connected());
+    // The sample Inbox comes back with the unlock, not only after a restart.
+    assert!(
+        !accounts
+            .cached("demo", "inbox")
+            .unwrap()
+            .messages
+            .is_empty()
+    );
+    let demo = accounts.store("demo").unwrap();
+    assert!(!demo.lock().unwrap().query("inbox", "").unwrap().is_empty());
+    drop(demo);
     drop(accounts);
     let mut accounts = Accounts::open(MailStore::open(dir.path()).unwrap(), secrets).unwrap();
     assert!(accounts.security().locked);

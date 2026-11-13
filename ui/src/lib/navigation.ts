@@ -4,11 +4,13 @@ import type { IconName } from '../Icon.svelte';
 
 export const settingsPages = [
   { id: 'accounts', name: 'Accounts', icon: 'account' },
+  { id: 'mail', name: 'Mail', icon: 'inbox' },
   { id: 'appearance', name: 'Appearance', icon: 'palette' },
   { id: 'notifications', name: 'Notifications', icon: 'bell' },
   { id: 'privacy', name: 'Privacy', icon: 'image' },
   { id: 'servers', name: 'Connection', icon: 'server' },
   { id: 'extensions', name: 'Extensions', icon: 'extension' },
+  { id: 'ai', name: 'AI', icon: 'cpu' },
   { id: 'api-keys', name: 'API keys', icon: 'key' },
   { id: 'send-approvals', name: 'Send approvals', icon: 'shield' },
 ] as const satisfies readonly { id: string; name: string; icon: IconName }[];

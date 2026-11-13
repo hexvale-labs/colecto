@@ -1,8 +1,10 @@
 //! Platform-independent email business logic and core services.
 mod accounts;
 mod cache;
+mod content;
 mod database;
 pub use cache::{MailCacheStore, MailSnapshot, SnapshotHandle};
+pub use content::{MAX_CONTENT_BYTES, MAX_CONTENT_MESSAGES};
 pub use database::Database;
 mod credentials;
 pub use accounts::Accounts;
@@ -27,6 +29,8 @@ use std::{
 pub const MAX_BODY_BYTES: usize = 100_000;
 /// Maximum messages returned by a provider folder query.
 pub const MAX_LIST_MESSAGES: usize = 100;
+/// Prefetch skips messages larger than this, so background downloads stay modest.
+pub const MAX_PREFETCH_BYTES: usize = 10_000_000;
 
 #[derive(Debug)]
 pub enum Error {
@@ -63,6 +67,131 @@ enum Account {
     Jmap(JmapAccount),
 }
 
+/// A folder listing fetched without the store lock, applied later by `MailStore::finish_query`.
+pub struct Listing {
+    messages: Vec<Message>,
+    /// The IMAP mailbox identity (an `imap-{validity}-` style prefix); JMAP has none.
+    identity: Option<String>,
+    /// Complete messages that came down while listing, for the content cache.
+    raws: Vec<(String, Vec<u8>)>,
+}
+
+/// A detached handle for reading message content without holding the store's lock.
+/// Content comes from the local cache when present and from the provider otherwise.
+#[derive(Clone)]
+pub struct MailReader {
+    account: Account,
+    key: String,
+    content: content::ContentCache,
+}
+impl MailReader {
+    /// Identifies the provider connection this reader belongs to.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+    pub fn is_cached(&self, id: &str) -> bool {
+        self.content
+            .get(&self.key, id)
+            .is_ok_and(|raw| raw.is_some())
+    }
+    fn raw(&self, id: &str) -> Result<Vec<u8>, Error> {
+        match self.content.get(&self.key, id) {
+            Ok(Some(raw)) => return Ok(raw),
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "Message cache unavailable"),
+        }
+        let raw = match &self.account {
+            Account::Imap(account) => account.fetch_raw(id),
+            Account::Jmap(account) => account.fetch_raw(id),
+        }?;
+        if let Err(error) = self.content.put(&self.key, id, &raw) {
+            tracing::debug!(%error, "Message not cached");
+        }
+        Ok(raw)
+    }
+    /// HTML, attachments and reply headers for one message.
+    pub fn content(&self, id: &str) -> Result<MessageContent, Error> {
+        mime::content(&self.raw(id)?)
+    }
+    pub fn attachment(&self, id: &str, index: usize) -> Result<(AttachmentInfo, Vec<u8>), Error> {
+        let file = mime::attachment(&self.raw(id)?, index)?;
+        Ok((
+            AttachmentInfo {
+                index,
+                name: file.name,
+                content_type: file.content_type,
+                size: file.data.len(),
+            },
+            file.data,
+        ))
+    }
+    /// Download the messages from `ids` that are not cached yet, in order, over one provider
+    /// session, and report `(done, total)` as they arrive. Returns how many were cached.
+    pub fn prefetch(
+        &self,
+        ids: &[String],
+        progress: &mut dyn FnMut(usize, usize),
+    ) -> Result<usize, Error> {
+        let missing = self.content.missing(&self.key, ids)?;
+        let total = missing.len();
+        if total == 0 {
+            return Ok(0);
+        }
+        progress(0, total);
+        let mut done = 0;
+        let mut found = |id: String, raw: Vec<u8>| {
+            if self.content.put(&self.key, &id, &raw).is_ok() {
+                done += 1;
+                progress(done, total);
+            }
+        };
+        match &self.account {
+            Account::Imap(account) => account.fetch_many(&missing, MAX_PREFETCH_BYTES, &mut found),
+            Account::Jmap(account) => account.fetch_many(&missing, MAX_PREFETCH_BYTES, &mut found),
+        }?;
+        Ok(done)
+    }
+}
+
+/// A provider query prepared under the store lock and run without it.
+pub struct QueryJob {
+    reader: MailReader,
+    folder: String,
+    search: String,
+    known: std::collections::HashMap<String, Message>,
+}
+impl QueryJob {
+    pub fn folder(&self) -> &str {
+        &self.folder
+    }
+    pub fn search(&self) -> &str {
+        &self.search
+    }
+    /// Talk to the provider. `progress` reports `(done, total)` messages downloaded where
+    /// the protocol allows counting (IMAP); unchanged messages are not downloaded again.
+    pub fn run(&self, progress: &mut dyn FnMut(usize, usize)) -> Result<Listing, Error> {
+        let listing = match &self.reader.account {
+            Account::Imap(account) => {
+                account.list(&self.folder, &self.search, &self.known, progress)?
+            }
+            Account::Jmap(account) => Listing {
+                messages: account.query(&self.folder, &self.search)?,
+                identity: None,
+                raws: Vec::new(),
+            },
+        };
+        // Listing already downloaded these in full; keep them so opening one is instant.
+        if let Err(error) = self
+            .reader
+            .content
+            .put_many(&self.reader.key, &listing.raws)
+        {
+            tracing::debug!(%error, "Listed messages not cached");
+        }
+        Ok(listing)
+    }
+}
+
 struct PreparedConnection {
     snapshots: std::collections::BTreeMap<String, MailSnapshot>,
     account: Account,
@@ -84,6 +213,7 @@ pub struct MailStore {
     demo_mail: Vec<Message>,
     _lock: File,
     cache: MailCacheStore,
+    content: content::ContentCache,
     snapshot: SnapshotHandle,
     account: Option<Account>,
     account_key: Option<String>,
@@ -138,6 +268,7 @@ impl MailStore {
         let cache = MailCacheStore::with_database(database.clone(), account)?;
         let store = Self {
             cache,
+            content: content::ContentCache::new(database.clone(), account),
             snapshot: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::BTreeMap::from([(
                     "inbox".into(),
@@ -202,6 +333,9 @@ impl MailStore {
             }
         }
         .map_err(storage)?;
+        if let Err(error) = self.content.keep_provider(&key) {
+            tracing::warn!(%error, "Could not clear another provider's cached messages");
+        }
         let snapshots = self.cache.snapshots(&key)?;
         let messages = snapshots
             .get("inbox")
@@ -249,6 +383,34 @@ impl MailStore {
         self.account_key = None;
         self.messages.clear();
         self.reader_cache.clear();
+    }
+    /// Show the sample Inbox again after a lock hid it. The demo account has no credentials,
+    /// so unlocking has nothing to reconnect; without this its mail stayed empty until restart.
+    pub(crate) fn restore_demo(&mut self) {
+        if self.account.is_some() {
+            return;
+        }
+        self.messages = self
+            .demo_mail
+            .iter()
+            .filter(|message| {
+                self.demo_folders
+                    .get(&message.id)
+                    .map_or("inbox", String::as_str)
+                    == "inbox"
+            })
+            .cloned()
+            .collect();
+        if let Ok(mut snapshot) = self.snapshot.write() {
+            snapshot.insert(
+                "inbox".into(),
+                MailSnapshot {
+                    folder: "inbox".into(),
+                    messages: self.messages.clone(),
+                    fetched_at: None,
+                },
+            );
+        }
     }
     pub fn snapshot_handle(&self) -> SnapshotHandle {
         self.snapshot.clone()
@@ -398,6 +560,13 @@ impl MailStore {
         }
 
         change(&mut self.reader_cache, "");
+        // Moved IMAP mail gets a new id, and deleted mail should not linger on disk.
+        if (destination.is_some() || delete)
+            && let Some(key) = &self.account_key
+            && let Err(error) = self.content.remove(key, ids)
+        {
+            tracing::warn!(%error, "Could not remove cached messages");
+        }
         let mut snapshots = self.snapshot.write().map_err(storage)?;
         for (folder, snapshot) in snapshots.iter_mut() {
             change(&mut snapshot.messages, folder);
@@ -478,6 +647,7 @@ impl MailStore {
         if let Some(provider) = &self.account_key
             && self.cache.observe_identity(provider, folder, identity)?
         {
+            self.content.keep_identity(provider, folder, identity)?;
             self.reader_cache.retain(|message| {
                 !imap_folder_id(&message.id, folder) || message.id.starts_with(identity)
             });
@@ -490,18 +660,11 @@ impl MailStore {
         Ok(())
     }
     pub fn query(&mut self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
-        validate_query(folder, search)?;
-        let search = search.trim();
-        let messages = match &self.account {
-            Some(Account::Imap(account)) => {
-                let (messages, identity) = account.query_with_identity(folder, search)?;
-                self.observe_mailbox_identity(folder, &identity)?;
-                messages
-            }
-            Some(Account::Jmap(account)) => account.query(folder, search)?,
-            None if folder == "sent" => Vec::new(),
-            None => {
-                let query = search.to_lowercase();
+        let Some(job) = self.begin_query(folder, search)? else {
+            let query = search.trim().to_lowercase();
+            let messages = if folder == "sent" {
+                Vec::new()
+            } else {
                 self.messages
                     .iter()
                     .filter(|m| {
@@ -511,8 +674,66 @@ impl MailStore {
                     })
                     .cloned()
                     .collect()
-            }
+            };
+            return self.apply_listing(folder, search.trim(), messages);
         };
+        let listing = job.run(&mut |_, _| {})?;
+        self.finish_query(job, listing)
+    }
+    /// A detached content reader, or `None` for the demo account.
+    pub fn reader(&self) -> Option<MailReader> {
+        Some(MailReader {
+            account: self.account.clone()?,
+            key: self.account_key.clone()?,
+            content: self.content.clone(),
+        })
+    }
+    /// Prepare a provider query to run without this store's lock; `None` for the demo
+    /// account, which `query` answers directly.
+    pub fn begin_query(&self, folder: &str, search: &str) -> Result<Option<QueryJob>, Error> {
+        validate_query(folder, search)?;
+        let Some(reader) = self.reader() else {
+            return Ok(None);
+        };
+        // IMAP UIDs never change content, so known messages are listed without downloading.
+        let mut known = std::collections::HashMap::new();
+        if matches!(reader.account, Account::Imap(_)) {
+            let snapshots = self.snapshot.read().map_err(storage)?;
+            for message in snapshots
+                .get(folder)
+                .into_iter()
+                .flat_map(|snapshot| &snapshot.messages)
+                .chain(&self.reader_cache)
+                .chain(&self.messages)
+            {
+                known.insert(message.id.clone(), message.clone());
+            }
+        }
+        Ok(Some(QueryJob {
+            reader,
+            folder: folder.into(),
+            search: search.trim().into(),
+            known,
+        }))
+    }
+    /// Apply a listing from `QueryJob::run`, unless the account changed meanwhile.
+    pub fn finish_query(&mut self, job: QueryJob, listing: Listing) -> Result<Vec<Message>, Error> {
+        if self.account_key.as_deref() != Some(job.reader.key.as_str()) {
+            return Err(Error::Invalid(
+                "The account changed while mail was loading. Refresh again.".into(),
+            ));
+        }
+        if let Some(identity) = &listing.identity {
+            self.observe_mailbox_identity(&job.folder, identity)?;
+        }
+        self.apply_listing(&job.folder, &job.search, listing.messages)
+    }
+    fn apply_listing(
+        &mut self,
+        folder: &str,
+        search: &str,
+        messages: Vec<Message>,
+    ) -> Result<Vec<Message>, Error> {
         if folder == "inbox" && search.is_empty() {
             self.cache_inbox(&messages)?;
         }
@@ -569,34 +790,24 @@ impl MailStore {
         result
     }
     fn raw(&self, id: &str) -> Result<Vec<u8>, Error> {
-        match &self.account {
-            Some(Account::Imap(account)) => account.fetch_raw(id),
-            Some(Account::Jmap(account)) => account.fetch_raw(id),
-            None => Err(Error::Missing),
-        }
+        self.reader().ok_or(Error::Missing)?.raw(id)
     }
-    /// Provider-fetched HTML, attachments, and reply headers for one message.
+    /// HTML, attachments, and reply headers for one message, from the content cache or
+    /// the provider. Prefer `reader()` to avoid holding the store lock during network work.
     pub fn content(&self, id: &str) -> Result<MessageContent, Error> {
-        if self.account.is_none() {
-            let message = self.message(id).ok_or(Error::Missing)?;
-            return Ok(MessageContent {
-                text: message.body.clone(),
-                ..MessageContent::default()
-            });
+        match self.reader() {
+            Some(reader) => reader.content(id),
+            None => {
+                let message = self.message(id).ok_or(Error::Missing)?;
+                Ok(MessageContent {
+                    text: message.body.clone(),
+                    ..MessageContent::default()
+                })
+            }
         }
-        mime::content(&self.raw(id)?)
     }
     pub fn attachment(&self, id: &str, index: usize) -> Result<(AttachmentInfo, Vec<u8>), Error> {
-        let file = mime::attachment(&self.raw(id)?, index)?;
-        Ok((
-            AttachmentInfo {
-                index,
-                name: file.name,
-                content_type: file.content_type,
-                size: file.data.len(),
-            },
-            file.data,
-        ))
+        self.reader().ok_or(Error::Missing)?.attachment(id, index)
     }
     pub fn messages(&self) -> &[Message] {
         &self.messages
@@ -933,6 +1144,55 @@ mod cache_tests {
                 .unwrap()
                 .contains_key("inbox")
         );
+    }
+    #[test]
+    fn cached_content_opens_without_the_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut provider = account();
+        // Nothing listens here, so any network attempt fails.
+        provider.imap_host = "127.0.0.1".into();
+        provider.imap_port = 1;
+        let mut store = MailStore::open(dir.path()).unwrap();
+        store.connect_account(provider).unwrap();
+        assert!(store.content("imap-7-42").is_err());
+        let raw =
+            b"From: a@example.test\r\nSubject: Hi\r\nContent-Type: text/html\r\n\r\n<p>Hello</p>";
+        let reader = store.reader().unwrap();
+        reader.content.put(reader.key(), "imap-7-42", raw).unwrap();
+        assert!(reader.is_cached("imap-7-42"));
+        assert_eq!(
+            store.content("imap-7-42").unwrap().html.as_deref(),
+            Some("<p>Hello</p>")
+        );
+        assert_eq!(
+            reader
+                .prefetch(&["imap-7-42".into()], &mut |_, _| {})
+                .unwrap(),
+            0
+        );
+        // A disconnected (or locked) account reads nothing from the cache.
+        store.disconnect();
+        assert!(store.content("imap-7-42").is_err());
+    }
+    #[test]
+    fn listing_from_a_previous_provider_is_never_applied() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = MailStore::open(dir.path()).unwrap();
+        store.connect_account(account()).unwrap();
+        let job = store.begin_query("inbox", "").unwrap().unwrap();
+        let mut another = account();
+        another.username = "another".into();
+        store.connect_account(another).unwrap();
+        let listing = Listing {
+            messages: sample_messages(),
+            identity: None,
+            raws: Vec::new(),
+        };
+        assert!(matches!(
+            store.finish_query(job, listing),
+            Err(Error::Invalid(_))
+        ));
+        assert!(store.messages().is_empty());
     }
     #[test]
     fn failed_draft_transaction_preserves_memory_and_canonical_state() {

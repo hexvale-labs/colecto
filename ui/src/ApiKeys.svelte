@@ -53,13 +53,14 @@
   <p>Give automation access to selected accounts and operations. Keys cannot manage settings, and <code>messages.send</code> only asks you for approval; it never sends directly.</p></header>
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   <p role="status">{status}</p>
-  <div class="settings-card setting-row">
-    <div><h3>MCP server</h3><p>Lets MCP clients use a key below at <code>{window.location.origin}/api/v1/mcp</code>. Off until you turn it on; keys keep working over HTTP either way.</p></div>
+  <div class="settings-group setting setting-row">
+    <div class="setting-text"><h3>MCP server</h3><p>Lets MCP clients use a key below at <code>{window.location.origin}/api/v1/mcp</code>. Off until you turn it on; keys keep working over HTTP either way.</p></div>
     <label class="switch"><input type="checkbox" checked={!!mcp} disabled={busy || mcp === null} onchange={(event) => void toggleMcp(event.currentTarget.checked)} /><span class="sr-only">MCP server</span></label>
   </div>
   {#if secret}<section class="secret" aria-label="New API key"><h3>Copy your key now</h3><p>This secret is shown only here, until you leave or dismiss it.</p><textarea aria-label="API key secret" readonly value={secret} spellcheck="false"></textarea><div><button class="secondary" onclick={copy}>Copy key</button><button class="text-button" onclick={() => secret = ''}>Dismiss secret</button></div></section>{/if}
-  <form class="settings-card" onsubmit={create}>
-    <h3>New key</h3>
+  <form class="settings-group" onsubmit={create}>
+    <h3 class="group-label">New key</h3>
+    <p>Choose what the key may reach. You see its secret once, right after it is made.</p>
     <label class="field">Key name<input bind:value={name} maxlength="80" required placeholder="Desktop assistant" autocomplete="off" /></label>
     <fieldset class="check-group" disabled={busy}><legend>Accounts</legend>
       <div class="chips">{#each accounts as account (account.id)}<label class="chip toggle"><input type="checkbox" bind:group={selectedAccounts} value={account.id} /><Icon name="check" size={12} />{account.settings?.name || account.settings?.address || 'Demo account'}</label>{/each}</div>
@@ -76,31 +77,32 @@
     </fieldset>
     <button class="primary" disabled={busy || !name.trim() || !selectedAccounts.length || !capabilities.length}>{busy ? 'Saving…' : 'Generate API key'}</button>
   </form>
-  <h3 class="list-title">Issued keys</h3>
+  <div class="settings-group">
+  <h3 class="group-label">Issued keys</h3>
   {#if !keys.length}<p class="empty-note">No API keys yet. Your mail is keeping to itself.</p>{/if}
-  {#each keys as key (key.id)}<article class="settings-card issued-key"><h4>{key.name}</h4><p>{key.accounts.map(id => accounts.find(a => a.id === id)?.settings?.name || accounts.find(a => a.id === id)?.settings?.address || id).join(', ')}</p><p class="caps">{#each key.capabilities as capability}<code title={capabilityLabel(capability)}>{capability}</code>{/each}</p><p class="meta">Created {date(key.created_at)} · Last used {date(key.last_used_at)}<br />Expires {key.expires_at ? date(key.expires_at) : 'Never'}</p>{#if key.revoked_at}<p>Revoked {date(key.revoked_at)}</p>{:else}<button class="secondary" disabled={busy} onclick={() => revoke(key.id)} aria-label={`Revoke ${key.name}`}>Revoke key</button>{/if}</article>{/each}
+  {#if keys.length}<div class="settings-list">
+  {#each keys as key (key.id)}<article class="issued-key"><h4>{key.name}</h4><p>{key.accounts.map(id => accounts.find(a => a.id === id)?.settings?.name || accounts.find(a => a.id === id)?.settings?.address || id).join(', ')}</p><p class="caps">{#each key.capabilities as capability}<code title={capabilityLabel(capability)}>{capability}</code>{/each}</p><p class="meta">Created {date(key.created_at)} · Last used {date(key.last_used_at)}<br />Expires {key.expires_at ? date(key.expires_at) : 'Never'}</p>{#if key.revoked_at}<p>Revoked {date(key.revoked_at)}</p>{:else}<button class="secondary" disabled={busy} onclick={() => revoke(key.id)} aria-label={`Revoke ${key.name}`}>Revoke key</button>{/if}</article>{/each}
+  </div>{/if}
+  </div>
 </section>
 
 <style>
-  .check-group { margin-top: 18px; }
-  /* Legends float in settings cards (style.css); start the controls below them. */
-  .check-group > :is(.chips, .quick, .segmented, .hint) { clear: both; }
+  .check-group legend + * { margin-top: 0; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip.toggle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .quick { display: flex; gap: 14px; margin: -2px 0 8px; }
   .quick .text-button { min-height: 24px; font-size: calc(12.5px * var(--text-scale)); }
   .quick .muted { color: var(--ink-3); }
   .hint { margin-top: 8px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
-  .check-group legend { width: 100%; margin-bottom: 6px; padding: 0; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); font-weight: 560; }
-  .settings-card > .primary { margin-top: 20px; }
-  .list-title { margin: 28px 0 10px; font-size: calc(15px * var(--text-scale)); }
-  .issued-key { display: grid; gap: 6px; margin-bottom: 10px; overflow-wrap: anywhere; }
+  .check-group legend { width: 100%; margin-bottom: 8px; padding: 0; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); font-weight: 540; }
+  .settings-group > .primary { justify-self: start; }
+  .issued-key { display: grid; gap: 6px; overflow-wrap: anywhere; }
   .issued-key p { color: var(--ink-2); font-size: calc(13px * var(--text-scale)); }
   .issued-key .meta { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
   .issued-key .secondary { justify-self: start; margin-top: 6px; }
   .caps { display: flex; flex-wrap: wrap; gap: 6px; }
   .caps code { padding: 2px 7px; border-radius: 6px; background: var(--sunk); }
-  h4 { margin: 0; font-size: calc(14px * var(--text-scale)); }
+  h4 { margin: 0; font-size: calc(14px * var(--text-scale)); font-weight: 540; }
   .secret { display: grid; gap: 10px; margin: 16px 0; padding: 18px; border-radius: 12px; background: var(--select); }
   .secret h3 { margin: 0; color: var(--mint-hi); }
   .secret p { color: var(--ink-2); }

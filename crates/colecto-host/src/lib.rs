@@ -1,11 +1,14 @@
 //! Trusted HTTP adapter for bundled UI and isolated Wasm extensions.
+mod ai;
 pub mod api_keys;
 pub mod approvals;
 mod bus;
 pub mod mcp;
 pub mod preferences;
+mod releases;
 pub mod services;
 mod store;
+mod sync;
 use api_keys::{ApiKeys, Principal};
 mod extensions;
 pub mod logging;
@@ -61,7 +64,7 @@ impl From<PathBuf> for Assets {
     }
 }
 
-/// Named server-sent events for connected clients: `mail`, `approval` and `navigate`.
+/// Named server-sent events for connected clients: `mail`, `approval`, `navigate` and `sync`.
 /// An empty payload closes every stream.
 pub(crate) type Events = tokio::sync::broadcast::Sender<(&'static str, String)>;
 
@@ -78,6 +81,8 @@ struct Host {
     authority: String,
     origin: String,
     execution: Arc<tokio::sync::Semaphore>,
+    ai: Arc<ai::Ai>,
+    sync: Arc<sync::SyncState>,
 }
 
 struct Failure(StatusCode, String);
@@ -220,6 +225,7 @@ fn build_app(host: Host, assets: Assets) -> Router {
         .route("/messages/refresh", axum::routing::post(messages))
         .route("/messages/{id}", get(message).post(organize_messages))
         .route("/messages/{id}/content", get(message_content))
+        .route("/sync", get(sync_status))
         .route(
             "/messages/{id}/attachments/{index}",
             get(message_attachment),
@@ -227,6 +233,18 @@ fn build_app(host: Host, assets: Assets) -> Router {
         .route("/drafts", get(drafts).post(save_draft))
         .route("/drafts/{id}", get(draft))
         .route("/version", get(version))
+        .route("/releases/latest", get(latest_release))
+        .route("/ai/settings", get(ai::get_settings).post(ai::put_settings))
+        .route("/ai/keys", axum::routing::post(ai::put_key))
+        .route("/ai/test", axum::routing::post(ai::test_connection))
+        .route("/ai/labels/preview", axum::routing::post(ai::preview))
+        .route(
+            "/ai/summaries/{id}",
+            get(ai::get_summary)
+                .post(ai::create_summary)
+                .delete(ai::delete_summary),
+        )
+        .route("/ai/reply", axum::routing::post(ai::draft_reply))
         .fallback(|| async { Failure(StatusCode::NOT_FOUND, "API route not found".into()) });
     let router = Router::new().nest("/api/v1", api);
     let router = match assets {
@@ -259,6 +277,19 @@ async fn version() -> Json<serde_json::Value> {
         "commit": commit(),
         "api": "v1",
     }))
+}
+
+/// Owner only: a newer stable release, or `null`. The UI calls it once per start, and only
+/// when the owner keeps update notifications on, so turning them off means no request.
+async fn latest_release(headers: HeaderMap) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    let latest = tokio::task::spawn_blocking(|| releases::latest(VERSION))
+        .await
+        .map_err(|_| forbidden())?
+        .map_err(|error| Failure(StatusCode::BAD_GATEWAY, error))?;
+    Ok(Json(
+        serde_json::json!({ "current": VERSION, "latest": latest }),
+    ))
 }
 
 async fn boundary(State(host): State<Host>, request: Request, next: Next) -> Response {
@@ -695,6 +726,47 @@ async fn with_store<T: Send + 'static>(
         )
     })?
 }
+/// Read message content without holding the store lock: only taking the detached reader
+/// locks it, so a refresh in progress never delays opening a message. The demo account
+/// has no reader and answers from the store directly.
+async fn with_reader<T: Send + 'static>(
+    host: Host,
+    account: String,
+    demo: impl FnOnce(&mut MailStore) -> Result<T, Error> + Send + 'static,
+    action: impl FnOnce(&colecto_core::MailReader) -> Result<T, Error> + Send + 'static,
+) -> Result<T, Failure> {
+    tokio::task::spawn_blocking(move || {
+        let handle = host
+            .accounts
+            .lock()
+            .map_err(|_| forbidden())?
+            .store(&account)
+            .map_err(|_| forbidden())?;
+        let unavailable = || {
+            Failure(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Mail store unavailable".into(),
+            )
+        };
+        let reader = handle.lock().map_err(|_| unavailable())?.reader();
+        match reader {
+            Some(reader) => action(&reader).map_err(Failure::from),
+            None => demo(&mut *handle.lock().map_err(|_| unavailable())?).map_err(Failure::from),
+        }
+    })
+    .await
+    .map_err(|_| {
+        Failure(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Mail service unavailable".into(),
+        )
+    })?
+}
+#[derive(serde::Deserialize, Default)]
+struct ContentQuery {
+    #[serde(default)]
+    cached: bool,
+}
 #[derive(serde::Deserialize, Default)]
 struct MessageQuery {
     #[serde(default = "inbox_folder")]
@@ -775,11 +847,17 @@ async fn update_label(
 ) -> Result<Json<std::collections::BTreeMap<String, Vec<String>>>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesLabel)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
-    with_store(host, account, move |s| {
+    let ai = host.ai.clone();
+    let unlabeled = input.message_id.clone().filter(|_| input.remove);
+    let labels = with_store(host, account.clone(), move |s| {
         s.update_label(&input.name, input.message_id.as_deref(), input.remove)
     })
-    .await
-    .map(Json)
+    .await?;
+    // Auto-labelling never touches a message the owner has unlabelled by hand.
+    if let Some(message) = unlabeled {
+        ai.owner_unlabeled(&account, &message);
+    }
+    Ok(Json(labels))
 }
 fn redact_list_bodies(
     host: &Host,
@@ -830,12 +908,41 @@ async fn messages(
     Query(query): Query<MessageQuery>,
 ) -> Result<Json<Vec<Message>>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
-    let mut messages = with_store(host.clone(), account.clone(), move |s| {
-        s.query(&query.folder, &query.q)
+    host.accounts
+        .lock()
+        .map_err(|_| forbidden())?
+        .store(&account)
+        .map_err(|_| forbidden())?;
+    let (worker, id) = (host.clone(), account.clone());
+    let mut messages = tokio::task::spawn_blocking(move || {
+        let messages = sync::refresh(&worker, &id, &query.folder, &query.q, sync::Origin::Owner)?
+            .unwrap_or_default();
+        if query.folder == "inbox" && query.q.trim().is_empty() {
+            sync::start_prefetch(&worker, &id);
+        }
+        Ok::<_, Error>(messages)
     })
-    .await?;
+    .await
+    .map_err(|_| {
+        Failure(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Mail service unavailable".into(),
+        )
+    })??;
     redact_list_bodies(&host, &principal, &account, &mut messages)?;
     Ok(Json(messages))
+}
+/// Sync mode and progress for every account, also streamed as `sync` events.
+async fn sync_status(
+    State(host): State<Host>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<sync::AccountSync>>, Failure> {
+    host_grant(&headers)?;
+    Ok(Json(
+        tokio::task::spawn_blocking(move || sync::statuses(&host))
+            .await
+            .unwrap_or_default(),
+    ))
 }
 async fn message(
     State(host): State<Host>,
@@ -864,11 +971,24 @@ async fn message_content(
     axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(query): Query<ContentQuery>,
 ) -> Result<Json<MessageContent>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesRead)?;
-    with_store(host, account, move |s| s.content(&id))
-        .await
-        .map(Json)
+    let demo = id.clone();
+    with_reader(
+        host,
+        account,
+        move |store| store.content(&demo),
+        move |reader| {
+            // Clients warm their own caches with `cached=true`; that never reaches the provider.
+            if query.cached && !reader.is_cached(&id) {
+                return Err(Error::Missing);
+            }
+            reader.content(&id)
+        },
+    )
+    .await
+    .map(Json)
 }
 async fn message_attachment(
     State(host): State<Host>,
@@ -877,7 +997,14 @@ async fn message_attachment(
     Path((id, index)): Path<(String, usize)>,
 ) -> Result<Response, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesRead)?;
-    let (info, data) = with_store(host, account, move |s| s.attachment(&id, index)).await?;
+    let demo = id.clone();
+    let (info, data) = with_reader(
+        host,
+        account,
+        move |store| store.attachment(&demo, index),
+        move |reader| reader.attachment(&id, index),
+    )
+    .await?;
     let name: String = info
         .name
         .bytes()
@@ -1049,6 +1176,7 @@ async fn remove_account(
     host_grant(&headers)?;
     tokio::task::spawn_blocking(move || {
         host.accounts.lock().map_err(|_| forbidden())?.remove(&id)?;
+        host.ai.remove_account(&id);
         host.preferences
             .lock()
             .map_err(|_| forbidden())?
@@ -1460,6 +1588,7 @@ mod extension_service_tests {
             events: tokio::sync::broadcast::channel(1).0,
             bus_replies: Default::default(),
             keys: Arc::new(Mutex::new(ApiKeys::open(database.clone()).unwrap())),
+            ai: Arc::new(ai::Ai::open(database.clone()).unwrap()),
             preferences: Arc::new(Mutex::new(
                 preferences::PreferenceStore::open(database.clone()).unwrap(),
             )),
@@ -1472,6 +1601,7 @@ mod extension_service_tests {
             authority: "127.0.0.1:4173".into(),
             origin: "http://127.0.0.1:4173".into(),
             execution: Arc::new(tokio::sync::Semaphore::new(2)),
+            sync: Arc::default(),
         };
         let epoch = host
             .extensions

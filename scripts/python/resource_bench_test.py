@@ -67,6 +67,7 @@ class ResourceBenchTests(unittest.TestCase):
         self.assertNotIn('COLECTO_JMAP_TOKEN', env)
         self.assertEqual(env['COLECTO_DATA_DIR'], '/tmp/new')
         self.assertEqual(env['COLECTO_PORT'], '1234')
+        self.assertEqual(env['COLECTO_UPDATE_CHECK'], 'off')
 
     def test_stop_process_terminates_its_isolated_process_group(self):
         process = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)

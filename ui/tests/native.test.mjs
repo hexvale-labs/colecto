@@ -10,7 +10,7 @@ import { appBinary as binary } from './host-binary.mjs';
 test('native window starts with its loopback service and bundled registry', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'colecto-native-'));
   const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('COLECTO_')));
-  const child = spawn(binary, { env: { ...environment, COLECTO_PORT: '0', COLECTO_DATA_DIR: directory }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(binary, { env: { ...environment, COLECTO_PORT: '0', COLECTO_DATA_DIR: directory, COLECTO_UPDATE_CHECK: 'off' }, stdio: ['ignore', 'pipe', 'pipe'] });
   const exited = once(child, 'exit');
   let output = ''; let errors = '';
   child.stdout.on('data', data => output += data);

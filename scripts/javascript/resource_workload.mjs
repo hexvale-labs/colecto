@@ -14,6 +14,8 @@ try {
   const ownerToken = readFileSync(join(process.env.COLECTO_DATA_DIR, 'owner-token'), 'utf8').trim();
   await page.addInitScript(({ origin, token }) => { if (window.location.origin === origin) sessionStorage.setItem('colecto.token', token); }, { origin: base, token: ownerToken });
   await page.goto(base);
+  // A fresh data directory starts at first-run onboarding with the demo account off.
+  await page.getByRole('button', { name: 'Explore with sample mail first' }).click();
   await page.getByRole('button', { name: /Maya Chen/ }).waitFor();
   console.log('READY');
   if ((await lines.next()).value !== 'RUN') throw Error('Expected RUN');

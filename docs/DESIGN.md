@@ -57,6 +57,23 @@ Settings → Extensions. The layout is an owner preference in the Host's databas
 it follows you between devices. Panes stay mounted while they move or sit behind
 another tab, so rearranging never loses a draft.
 
+Every setting has a name and a one-line description. A settings page reads in four steps:
+the page title, a group label, the setting's name, then its muted description. Only those
+first three carry weight; everything else is regular text. Shared classes in `style.css` give
+every page the same rhythm, and new pages (built-in or extension) use them:
+
+| Class | Use |
+| --- | --- |
+| `.section-head` | Page title (`h2`) and one-paragraph description |
+| `.settings-group` | A group of settings, separated from the next by space; `.group-label` (an `h3` or a fieldset `legend`) names it, and an optional `p` after the label describes it |
+| `.setting` | One setting; a wide control (picker, slider, drop zone) sits under its text |
+| `.setting.setting-row` | Text on the left, the control (switch, segmented control) on the right; under 520 px a segmented control drops below the text |
+| `.setting-text` | The setting's name (`h3`) and description (`p`) |
+| `.settings-list` | A list of things (accounts, extensions, keys, requests); the only place hairlines appear |
+
+`.settings-card` is the older name for `.settings-group`, still used by the Accounts and
+Connection pages.
+
 Settings controls follow the value's shape: a switch for on/off, a segmented control
 for two to four choices, a list for more, and a slider (`.slider`, accent-filled up to
 the thumb) for a bounded number, with the current value beside its label and the ends
@@ -82,8 +99,9 @@ the shell itself uses media queries.
 
 ## Surfaces
 
-Not everything deserves a card. Settings groups are sections divided by hairlines,
-extensions and keys are rows, and notes sit directly on the page. Rounded, raised
+Not everything deserves a card. Settings groups are separated by space, not lines;
+extensions, keys and accounts are rows of a list with a hairline between them, and notes
+sit directly on the page. Rounded, raised
 surfaces are kept for things that float (menus, the palette, dialogs) and for small
 controls. If a container needs a border, a background and a radius to make sense,
 the content probably needs better spacing instead.
@@ -140,8 +158,11 @@ Follows Emil Kowalski's rules. Presses scale to 0.97. Listboxes grow from their
 trigger in about 200 ms with a strong ease-out (`--ease-out`), a 2 px blur that clears
 as they arrive, and leave in 120 ms back toward the trigger; the chosen option's check
 pops in. Typing a letter jumps to a matching option. The Settings card rises 6 px and
-scales from 0.97 in 220 ms. Notifications enter from the edge they are docked to,
-leave the same way, and the stack slides (FLIP) when one goes. The command palette opens
+scales from 0.97 in 220 ms. Notifications enter from the edge they are docked to and
+leave the same way, fading in place while the rest of the stack slides (FLIP) into the
+space. Their transitions move only `translate`, `scale` and `opacity`: Svelte holds a
+leaving toast in place with a `transform`, and an exit that animated `transform` would
+throw it to the wrong spot for its last frames. The command palette opens
 instantly, because it is used hundreds of times a day. Docking previews slide
 between zones in 160 ms; resizing and tab switches do not animate. The palette closes
 on Escape or a click outside it. HTML mail appears
@@ -164,14 +185,28 @@ a close button; approvals carry Approve, Reject and Review and stay until acted 
 others leave after six seconds unless hovered or focused. Owners can turn them off
 entirely or by type, choose one of eight positions on a drawn window (corners and edge
 midpoints, never a screenshot), and opt into desktop notifications, which only fire while
-Colecto is in the background. Notifications sit below Settings. The default is top center.
+Colecto is in the background. The default is top center. Action buttons start at the
+toast's left edge, under the icon.
+
+Notifications show above everything in the window, Settings and menus included: the region
+is a `popover="manual"` element in the browser's top layer. A modal dialog opened later
+(an account sheet, the install warning) goes above it, and the next notification raises the
+region over the dialog again. Where popovers are missing, the overlay's layer (1250) still
+keeps it above Settings.
+
+**New updates** (on by default) tells the owner once per version when a newer stable
+release is published, with a **View release** button that opens the release page (in the
+desktop app, in the system browser). The UI asks the Host's `GET /api/v1/releases/latest`
+once per start; turned off, it asks nothing. The version already announced is the owner
+preference `notified_release`.
 
 ## Controls
 
 No native `<select>`. Use `Select.svelte` (an accessible listbox) for choices with
 more than a few options, and a segmented control for two or three. Checkboxes,
 switches, file pickers (`FilePick.svelte`: a labelled drop zone over the native
-input) and scrollbars are themed from the palette. Icons come from
+input; `ondropfiles` lets a page check dropped files itself, and `dropping` highlights it
+while a file is dragged anywhere over the page) and scrollbars are themed from the palette. Icons come from
 `Icon.svelte` (Lucide paths, one stroke weight).
 
 ## Connection status and startup
@@ -209,6 +244,18 @@ layout maths do not change with text size.
 
 Owner preferences store `font` (a bundled id or a system family, at most 64
 characters) and `font_size` (13 to 18).
+
+## Message list
+
+Settings → Appearance → Message list chooses the density and whether date headings show.
+
+| Preference | Values | Default | Effect |
+| --- | --- | --- | --- |
+| `list_density` | `full`, `medium`, `compact` | `full` | Full: sender and date, subject, preview. Medium: no preview, tighter rows. Compact: one line (sender, subject, date); in a wide mailbox the preview stays on that line |
+| `date_groups` | `true`, `false` | `true` | Headings such as Today, Yesterday and month names between rows (only when sorted by date) |
+
+Density changes padding and lines, never type size. On touch layouts a compact row stays at
+least 44 px tall.
 
 Keep switches for booleans, radio segments for small exclusive choices, accent
 swatches for colours and the corner picker for notification placement. Native

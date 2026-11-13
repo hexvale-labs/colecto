@@ -85,8 +85,11 @@ just perf-check       # verification plus three recorded resource runs
 
 The browser tests run a separate Host on port 4179 with temporary sample data and do
 not touch your `.colecto` directory. Set `COLECTO_TEST_PORT` to use another port
-when checkouts run tests concurrently. Set `COLECTO_ASSETS` to the absolute path of
-this checkout’s `ui/dist` when reusing a Host binary built in another checkout.
+when checkouts run tests concurrently. The test Host always serves this checkout’s
+`ui/dist` (`COLECTO_ASSETS`), and `COLECTO_TEST_HOST_BINARY` runs a copied Host binary
+instead of the one in the Cargo target dir, for checkouts that share a target dir. The
+test Host never contacts GitHub (`COLECTO_UPDATE_CHECK=off`); tests that need a release
+answer mock `/api/v1/releases/latest`.
 The shared Playwright fixture skips the startup-screen delay; timing tests opt back
 in. Playwright may need system browser libraries.
 

@@ -207,17 +207,28 @@ impl MailAccount {
                 error => imap_error(error),
             })
     }
+    /// List a folder over one session, downloading only messages missing from `known`.
+    pub(crate) fn list(
+        &self,
+        folder: &str,
+        search: &str,
+        known: &std::collections::HashMap<String, Message>,
+        progress: &mut dyn FnMut(usize, usize),
+    ) -> Result<crate::Listing, Error> {
+        self.validate()?;
+        crate::validate_query(folder, search)?;
+        let mut session = self.login()?;
+        let result = query_session_with_identity(&mut session, folder, search, known, progress);
+        let _ = session.logout();
+        result
+    }
     pub(crate) fn query_with_identity(
         &self,
         folder: &str,
         search: &str,
     ) -> Result<(Vec<Message>, String), Error> {
-        self.validate()?;
-        crate::validate_query(folder, search)?;
-        let mut session = self.login()?;
-        let result = query_session_with_identity(&mut session, folder, search);
-        let _ = session.logout();
-        result
+        let listing = self.list(folder, search, &Default::default(), &mut |_, _| {})?;
+        Ok((listing.messages, listing.identity.unwrap_or_default()))
     }
     /// IMAP IDLE (RFC 2177) on a read-only Inbox: `Ok(true)` when the server reports a change,
     /// `Ok(false)` when `timeout` passes quietly.
@@ -234,6 +245,20 @@ impl MailAccount {
         let (name, validity, uid) = parse_id(id)?;
         let mut session = self.login()?;
         let result = fetch_session(&mut session, &name, validity, uid);
+        let _ = session.logout();
+        result
+    }
+    /// Download several messages over one session in batched `UID FETCH` commands, without
+    /// marking them seen. Messages over `max_size` bytes are skipped.
+    pub(crate) fn fetch_many(
+        &self,
+        ids: &[String],
+        max_size: usize,
+        found: &mut dyn FnMut(String, Vec<u8>),
+    ) -> Result<(), Error> {
+        self.validate()?;
+        let mut session = self.login()?;
+        let result = fetch_many_session(&mut session, ids, max_size, found);
         let _ = session.logout();
         result
     }
@@ -400,13 +425,48 @@ fn query_session<T: std::io::Read + std::io::Write>(
     folder: &str,
     search: &str,
 ) -> Result<Vec<Message>, Error> {
-    query_session_with_identity(session, folder, search).map(|(messages, _)| messages)
+    query_session_with_identity(session, folder, search, &Default::default(), &mut |_, _| {})
+        .map(|listing| listing.messages)
 }
+
+/// Messages up to this size are listed from their full text; larger ones from headers only.
+const FULL_LISTING_BYTES: u32 = 2_000_000;
+/// One `UID FETCH` asks for at most this many messages or bytes, so progress stays visible
+/// and a response never holds more than a few megabytes.
+const BATCH_MESSAGES: usize = 25;
+const BATCH_BYTES: usize = 4_000_000;
+
+/// Group `(uid, size)` pairs into UID sets that respect the batch bounds.
+fn batches(entries: &[(u32, u32)]) -> Vec<Vec<u32>> {
+    let mut batches: Vec<Vec<u32>> = Vec::new();
+    let mut bytes = 0usize;
+    for &(uid, size) in entries {
+        let size = size as usize;
+        if batches.last().is_none_or(|batch| {
+            batch.len() >= BATCH_MESSAGES || (!batch.is_empty() && bytes + size > BATCH_BYTES)
+        }) {
+            batches.push(Vec::new());
+            bytes = 0;
+        }
+        batches.last_mut().unwrap().push(uid);
+        bytes += size;
+    }
+    batches
+}
+fn uid_set(uids: &[u32]) -> String {
+    uids.iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn query_session_with_identity<T: std::io::Read + std::io::Write>(
     session: &mut imap::Session<T>,
     folder: &str,
     search: &str,
-) -> Result<(Vec<Message>, String), Error> {
+    known: &std::collections::HashMap<String, Message>,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<crate::Listing, Error> {
     let name = if folder == "inbox" {
         "INBOX".to_owned()
     } else {
@@ -423,13 +483,19 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
         let namespace: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
         format!("imap-{namespace}-{validity}-")
     };
+    let empty = |identity| crate::Listing {
+        messages: Vec::new(),
+        identity: Some(identity),
+        raws: Vec::new(),
+    };
     if mailbox.exists == 0 {
-        return Ok((Vec::new(), identity));
+        return Ok(empty(identity));
     }
+    // One round trip for every UID, size and flag; message text only for what is new.
     let headers = if search.is_empty() {
         let range = format!("{}:*", mailbox.exists.saturating_sub(99).max(1));
         session
-            .fetch(&range, "(UID RFC822.SIZE)")
+            .fetch(&range, "(UID FLAGS RFC822.SIZE)")
             .map_err(imap_error)?
     } else {
         let mut ids: Vec<_> = session
@@ -442,48 +508,161 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
             .into_iter()
             .rev()
             .take(crate::MAX_LIST_MESSAGES)
-            .map(|id| id.to_string())
             .collect();
         if selected.is_empty() {
-            return Ok((Vec::new(), identity));
+            return Ok(empty(identity));
         }
         session
-            .uid_fetch(selected.join(","), "(UID RFC822.SIZE)")
+            .uid_fetch(uid_set(&selected), "(UID FLAGS RFC822.SIZE)")
             .map_err(imap_error)?
     };
-    let mut messages = Vec::new();
+    struct Entry {
+        uid: u32,
+        size: u32,
+        seen: bool,
+        flagged: bool,
+    }
+    let mut entries = Vec::new();
     for header in headers.iter().rev() {
         let uid = header.uid.ok_or_else(|| remote("Missing UID"))?;
-        // Large messages list from headers only; the reader fetches them on demand.
-        let large = header.size.unwrap_or(u32::MAX) > 2_000_000;
-        let fetched = session
-            .uid_fetch(
-                uid.to_string(),
-                if large {
-                    "(UID FLAGS BODY.PEEK[HEADER])"
-                } else {
-                    "(UID FLAGS BODY.PEEK[])"
-                },
-            )
+        if entries.iter().any(|entry: &Entry| entry.uid == uid) {
+            continue;
+        }
+        entries.push(Entry {
+            uid,
+            size: header.size.unwrap_or(u32::MAX),
+            seen: header.flags().contains(&imap::types::Flag::Seen),
+            flagged: header.flags().contains(&imap::types::Flag::Flagged),
+        });
+    }
+    let id_of = |uid: u32| format!("{identity}{uid}");
+    let missing: Vec<&Entry> = entries
+        .iter()
+        .filter(|entry| !known.contains_key(&id_of(entry.uid)))
+        .collect();
+    let small: Vec<(u32, u32)> = missing
+        .iter()
+        .filter(|entry| entry.size <= FULL_LISTING_BYTES)
+        .map(|entry| (entry.uid, entry.size))
+        .collect();
+    let large: Vec<u32> = missing
+        .iter()
+        .filter(|entry| entry.size > FULL_LISTING_BYTES)
+        .map(|entry| entry.uid)
+        .collect();
+    let total = missing.len();
+    let mut done = 0;
+    progress(done, total);
+    let mut fetched = std::collections::HashMap::new();
+    let mut raws = Vec::new();
+    for batch in batches(&small) {
+        let items = session
+            .uid_fetch(uid_set(&batch), "(UID BODY.PEEK[])")
             .map_err(imap_error)?;
-        for item in fetched.iter() {
-            let raw = if large { item.header() } else { item.body() }
-                .ok_or_else(|| remote("Missing body"))?;
+        for item in items.iter() {
+            let (Some(uid), Some(raw)) = (item.uid, item.body()) else {
+                continue;
+            };
+            if !batch.contains(&uid) {
+                continue;
+            }
             let mut message = parse_message(raw, validity, uid)?;
-            message.seen = item.flags().contains(&imap::types::Flag::Seen);
-            message.flagged = item.flags().contains(&imap::types::Flag::Flagged);
-            if large {
-                message.body =
-                    "This message is larger than 2 MB. Open it to load everything.".into();
-            }
-            if folder != "inbox" {
-                let namespace: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
-                message.id = format!("imap-{namespace}-{validity}-{uid}");
-            }
-            messages.push(message);
+            message.id = id_of(uid);
+            raws.push((message.id.clone(), raw.to_vec()));
+            fetched.insert(uid, message);
+        }
+        done += batch.len();
+        progress(done.min(total), total);
+    }
+    if !large.is_empty() {
+        // Large messages list from headers only; the reader fetches them on demand.
+        let items = session
+            .uid_fetch(uid_set(&large), "(UID BODY.PEEK[HEADER])")
+            .map_err(imap_error)?;
+        for item in items.iter() {
+            let (Some(uid), Some(raw)) = (item.uid, item.header()) else {
+                continue;
+            };
+            let mut message = parse_message(raw, validity, uid)?;
+            message.id = id_of(uid);
+            message.body = "This message is larger than 2 MB. Open it to load everything.".into();
+            fetched.insert(uid, message);
+        }
+        progress(total, total);
+    }
+    let messages = entries
+        .iter()
+        .filter_map(|entry| {
+            let mut message = fetched
+                .remove(&entry.uid)
+                .or_else(|| known.get(&id_of(entry.uid)).cloned())?;
+            message.seen = entry.seen;
+            message.flagged = entry.flagged;
+            Some(message)
+        })
+        .collect();
+    Ok(crate::Listing {
+        messages,
+        identity: Some(identity),
+        raws,
+    })
+}
+
+fn fetch_many_session<T: std::io::Read + std::io::Write>(
+    session: &mut imap::Session<T>,
+    ids: &[String],
+    max_size: usize,
+    found: &mut dyn FnMut(String, Vec<u8>),
+) -> Result<(), Error> {
+    let mut mailboxes: Vec<(String, u32, Vec<u32>)> = Vec::new();
+    for id in ids {
+        let Ok((name, validity, uid)) = parse_id(id) else {
+            continue;
+        };
+        match mailboxes
+            .iter_mut()
+            .find(|(n, v, _)| *n == name && *v == validity)
+        {
+            Some((_, _, uids)) => uids.push(uid),
+            None => mailboxes.push((name, validity, vec![uid])),
         }
     }
-    Ok((messages, identity))
+    for (name, validity, uids) in mailboxes {
+        let mailbox = session.examine(&name).map_err(imap_error)?;
+        if mailbox.uid_validity != Some(validity) {
+            continue;
+        }
+        let prefix = if name == "INBOX" {
+            format!("imap-{validity}-")
+        } else {
+            let namespace: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
+            format!("imap-{namespace}-{validity}-")
+        };
+        let sizes = session
+            .uid_fetch(uid_set(&uids), "(UID RFC822.SIZE)")
+            .map_err(imap_error)?;
+        // Keep the caller's order (newest first) so the most likely reads arrive first.
+        let wanted: Vec<(u32, u32)> = uids
+            .iter()
+            .filter_map(|uid| {
+                let size = sizes.iter().find(|item| item.uid == Some(*uid))?.size?;
+                ((size as usize) <= max_size).then_some((*uid, size))
+            })
+            .collect();
+        for batch in batches(&wanted) {
+            let items = session
+                .uid_fetch(uid_set(&batch), "(UID BODY.PEEK[])")
+                .map_err(imap_error)?;
+            for item in items.iter() {
+                if let (Some(uid), Some(raw)) = (item.uid, item.body())
+                    && batch.contains(&uid)
+                {
+                    found(format!("{prefix}{uid}"), raw.to_vec());
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn search_expression(search: &str) -> String {
@@ -577,9 +756,16 @@ mod tests {
         client.read_greeting().unwrap();
         let mut session = client.login("me", "secret").unwrap();
         for (search, identity) in [("", "imap-7-"), ("needle", "imap-8-")] {
-            let result = query_session_with_identity(&mut session, "inbox", search).unwrap();
-            assert!(result.0.is_empty());
-            assert_eq!(result.1, identity);
+            let result = query_session_with_identity(
+                &mut session,
+                "inbox",
+                search,
+                &Default::default(),
+                &mut |_, _| {},
+            )
+            .unwrap();
+            assert!(result.messages.is_empty());
+            assert_eq!(result.identity.as_deref(), Some(identity));
         }
         server.join().unwrap();
     }
@@ -623,11 +809,11 @@ mod tests {
                 ),
                 ("UID SEARCH TEXT \"needle\"", "* SEARCH 42\r\n".into()),
                 (
-                    "UID FETCH 42 (UID RFC822.SIZE)",
+                    "UID FETCH 42 (UID FLAGS RFC822.SIZE)",
                     "* 1 FETCH (UID 42 RFC822.SIZE 80)\r\n".into(),
                 ),
                 (
-                    "UID FETCH 42 (UID FLAGS BODY.PEEK[])",
+                    "UID FETCH 42 (UID BODY.PEEK[])",
                     format!("* 1 FETCH (UID 42 BODY[] {{{}}}\r\n{})\r\n", raw.len(), raw),
                 ),
             ];
@@ -847,12 +1033,12 @@ mod tests {
             ),
             (
                 "FETCH 1:*",
-                "* 1 FETCH (UID 5 RFC822.SIZE 3000000)\r\n".into(),
+                "* 1 FETCH (UID 5 FLAGS (\\Seen \\Flagged) RFC822.SIZE 3000000)\r\n".into(),
             ),
             (
-                "UID FETCH 5 (UID FLAGS BODY.PEEK[HEADER])",
+                "UID FETCH 5 (UID BODY.PEEK[HEADER])",
                 format!(
-                    "* 1 FETCH (UID 5 FLAGS (\\Seen \\Flagged) BODY[HEADER] {{{}}}\r\n{header})\r\n",
+                    "* 1 FETCH (UID 5 BODY[HEADER] {{{}}}\r\n{header})\r\n",
                     header.len()
                 ),
             ),
@@ -888,6 +1074,69 @@ mod tests {
             raw.as_bytes()
         );
         server.join().unwrap();
+    }
+    #[test]
+    fn refresh_downloads_only_new_messages_and_prefetch_batches_without_marking_seen() {
+        let body = |uid: u32| {
+            let raw = format!("From: a@example.test\r\nSubject: S{uid}\r\n\r\nText {uid}");
+            format!(
+                "* {uid} FETCH (UID {uid} BODY[] {{{}}}\r\n{raw})\r\n",
+                raw.len()
+            )
+        };
+        let server = mock_imap(vec![
+            ("LOGIN", String::new()),
+            ("EXAMINE", "* 3 EXISTS\r\n* OK [UIDVALIDITY 7] ok\r\n".into()),
+            (
+                "FETCH 1:* (UID FLAGS RFC822.SIZE)",
+                "* 1 FETCH (UID 1 FLAGS (\\Seen) RFC822.SIZE 50)\r\n* 2 FETCH (UID 2 FLAGS () RFC822.SIZE 50)\r\n* 3 FETCH (UID 3 FLAGS (\\Flagged) RFC822.SIZE 50)\r\n".into(),
+            ),
+            // UID 1 is already known, so only the two new messages download, in one command.
+            ("UID FETCH 3,2 (UID BODY.PEEK[])", format!("{}{}", body(3), body(2))),
+            ("EXAMINE", "* 3 EXISTS\r\n* OK [UIDVALIDITY 7] ok\r\n".into()),
+            (
+                "UID FETCH 2,1 (UID RFC822.SIZE)",
+                "* 2 FETCH (UID 2 RFC822.SIZE 50)\r\n* 1 FETCH (UID 1 RFC822.SIZE 900)\r\n".into(),
+            ),
+            ("UID FETCH 2 (UID BODY.PEEK[])", body(2)),
+        ]);
+        let mut session = mock_session();
+        let mut old = crate::sample_messages().remove(0);
+        old.id = "imap-7-1".into();
+        let known = std::collections::HashMap::from([(old.id.clone(), old)]);
+        let mut steps = Vec::new();
+        let listing =
+            query_session_with_identity(&mut session, "inbox", "", &known, &mut |done, total| {
+                steps.push((done, total))
+            })
+            .unwrap();
+        assert_eq!(steps, [(0, 2), (2, 2)]);
+        let ids: Vec<_> = listing.messages.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["imap-7-3", "imap-7-2", "imap-7-1"]);
+        assert!(listing.messages[0].flagged && !listing.messages[0].seen);
+        assert!(listing.messages[2].seen);
+        assert_eq!(listing.raws.len(), 2);
+        let mut found = Vec::new();
+        fetch_many_session(
+            &mut session,
+            &["imap-7-2".into(), "imap-7-1".into()],
+            100,
+            &mut |id, raw| found.push((id, raw)),
+        )
+        .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "imap-7-2");
+        server.join().unwrap();
+    }
+    #[test]
+    fn batches_respect_message_and_byte_bounds() {
+        let entries: Vec<_> = (0..30).map(|uid| (uid, 10)).collect();
+        assert_eq!(
+            batches(&entries).iter().map(Vec::len).collect::<Vec<_>>(),
+            [25, 5]
+        );
+        let large = [(1, 3_000_000), (2, 3_000_000), (3, 5_000_000)];
+        assert_eq!(batches(&large), [vec![1], vec![2], vec![3]]);
     }
     #[test]
     fn message_ids_round_trip_folder_names() {

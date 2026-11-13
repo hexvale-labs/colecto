@@ -46,9 +46,14 @@ binary against preserved legacy files loses changes made after migration.
 Host extension policy and Wasm modules, API key verifiers, the send-approval journal
 and owner preferences are versioned records in the `host` namespace of the same
 database, reached through `Accounts::database()`. The Host keeps these records only in
-`colecto.db` and ignores old JSON files. Owner preferences hold the
-workspace layout (a bounded JSON object the UI validates), the selected account and
-whether MCP is on. The browser keeps only the session's access token in
+`colecto.db` and ignores old JSON files. AI settings, saved summaries
+and the auto-label handled list are the `ai`, `ai-summaries` and `ai-autolabel-seen`
+records (see [AI features](ai.md)); AI API keys are `host:` secrets inside the encrypted
+credential vault, never in a plain record. Owner preferences hold the
+workspace layout (a bounded JSON object the UI validates), the selected account,
+which accounts are on, whether onboarding finished, whether MCP is on, appearance,
+notification and message-list choices, and the newest release version the owner was
+already told about (`notified_release`). The browser keeps only the session's access token in
 `sessionStorage`. No device replication is introduced.
 
 

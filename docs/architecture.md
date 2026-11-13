@@ -72,8 +72,8 @@ in the app origin. Details and limits are in [accounts and credentials](accounts
 
 One embedded Turso database, `colecto.db`, per data directory holds the account
 registry and encrypted credential vault, drafts, local labels, mail snapshots, folder
-catalogs, extension policy and packages, API keys, the send-approval journal and owner
-preferences. The OS keyring and password-derived keys stay outside it. Only one
+catalogs, extension policy and packages, API keys, the send-approval journal, owner
+preferences and the optional AI settings and summaries. The OS keyring and password-derived keys stay outside it. Only one
 process may open a data directory at a time. Mail snapshots and drafts are not
 encrypted at rest. See [storage](storage.md).
 

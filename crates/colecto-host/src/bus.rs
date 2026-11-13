@@ -274,6 +274,7 @@ mod tests {
                 events: tokio::sync::broadcast::channel(16).0,
                 bus_replies: Default::default(),
                 keys: Arc::new(Mutex::new(ApiKeys::open(db.clone()).unwrap())),
+                ai: Arc::new(crate::ai::Ai::open(db.clone()).unwrap()),
                 preferences: Arc::new(Mutex::new(
                     preferences::PreferenceStore::open(db.clone()).unwrap(),
                 )),
@@ -286,6 +287,7 @@ mod tests {
                 authority: "localhost".into(),
                 origin: "http://localhost".into(),
                 execution: Arc::new(tokio::sync::Semaphore::new(2)),
+                sync: Arc::default(),
             },
             dir,
         )
