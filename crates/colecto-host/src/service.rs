@@ -59,12 +59,7 @@ impl AccessPolicy {
             );
         }
         let origin = url.origin().ascii_serialization();
-        if token.len() < 64
-            || token.len() > 512
-            || !token
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
-        {
+        if !valid_token(&token) {
             return Err(
                 "Access token must contain 64–512 ASCII letters, digits, hyphens or underscores"
                     .into(),
@@ -79,6 +74,13 @@ impl AccessPolicy {
             token: Some(Arc::new(Zeroizing::new(token))),
         })
     }
+}
+/// Owner tokens are 64–512 ASCII letters, digits, hyphens or underscores.
+pub(crate) fn valid_token(token: &str) -> bool {
+    (64..=512).contains(&token.len())
+        && token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
 }
 #[derive(Clone)]
 struct Authentication {
