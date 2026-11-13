@@ -368,3 +368,21 @@ before displaying the body. HTML replacements stay in its sandboxed iframe and s
 “<extension name> changed how this message is shown”; banners are text only (at most
 280 characters, the latest three kept). Notifications label the calling
 extension. Mail shell and accounts have no bus exposure.
+
+### Reader slots
+
+The reader offers two bundled-only slots that the mail shell fills with other bundled
+extensions' Svelte components, so the reader never imports them. They are props on
+`ui/src/extensions/reader/Reader.svelte`, each a snippet receiving a `ReaderSlot`
+(`ui/src/lib/reader-slots.ts`): `{id, message, content, reply?(body)}`. `reply` opens the
+normal reply composer with `body` above the quoted message and is absent while the
+composer is off.
+
+| Slot | Where | Filled by |
+| --- | --- | --- |
+| `actions` | Reader toolbar, after Reply / Reply all / Forward | `ai` (the AI button), only while the `ai` extension is enabled |
+| `aboveBody` | Above the message body | `ai` (the saved summary) |
+
+Slots are trusted Svelte composition, not a bus surface: third-party Wasm extensions
+cannot use them and should keep using reader banners. See [AI features](../ai.md).
+

@@ -13,7 +13,7 @@
   import ExtensionPanel from '../../ExtensionPanel.svelte';
   import DockArea, { type PaneInfo } from '../../DockArea.svelte';
   import { activate as showPane, defaultLayout, dock, dockEdge, groupOf, parseLayout, reconcile, setVisible, type Edge, type Layout } from '../../lib/layout';
-  import { mailExtensions } from '../registry';
+  import { aiExtension, mailExtensions } from '../registry';
   import ApiKeys from '../../ApiKeys.svelte';
   import SendApprovals from '../../SendApprovals.svelte';
   import ExtensionSettings from './ExtensionSettings.svelte';
@@ -33,6 +33,8 @@
   let Mailbox = $derived(extensionStates.find(e => e.manifest.id === 'inbox')?.enabled ? mailExtensions.inbox : null);
   let Reader = $derived(extensionStates.find(e => e.manifest.id === 'reader')?.enabled ? mailExtensions.reader : null);
   let Composer = $derived(extensionStates.find(e => e.manifest.id === 'composer')?.enabled ? mailExtensions.composer : null);
+  // Optional AI actions in the reader; the reader itself knows nothing about them.
+  let aiOn = $derived(!!extensionStates.find(e => e.manifest.id === 'ai')?.enabled);
   let switcher = $derived(!!extensionStates.find(e => e.manifest.id === 'accounts')?.enabled);
   type View = { kind: 'message'; id: string; folder: 'Inbox' | 'Sent' } | { kind: 'draft'; draft: Draft | null } | null;
   let connected = $state(false);
@@ -517,6 +519,7 @@
           {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
           {:else if settingsPage === 'servers'}<ServerSettings />
           {:else if settingsPage === 'send-approvals'}<SendApprovals requestId={reviewRequest} />
+          {:else if settingsPage === 'ai'}<aiExtension.settings account={accountId} accountName={accountLabel} extensionOn={aiOn} />
           {:else if settingsPage === 'api-keys'}<ApiKeys {accounts} />
           {:else}{@render extensionSettings(workspace)}{/if}
         </div>
@@ -526,6 +529,8 @@
 {/if}
 
 
+{#snippet aiActions(slot: import('../../lib/reader-slots').ReaderSlot)}<aiExtension.actions reader={slot} account={accountId} />{/snippet}
+{#snippet aiSummary(slot: import('../../lib/reader-slots').ReaderSlot)}<aiExtension.summary reader={slot} account={accountId} />{/snippet}
 {#snippet extensionNav(extension: import('../../lib/api').ExtensionState)}
   {@const id = `extension:${extension.manifest.id}` as const}
   <button class="nav-item" class:active={settingsPage === id} aria-current={settingsPage === id ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(id)}><span class="nav-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1).toUpperCase()}</span><span class="nav-label">{extension.manifest.name}</span></button>
@@ -583,7 +588,7 @@
     {#if compact}{@render messageTabs()}{/if}
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
-        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} {remoteImages} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />
+        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} {remoteImages} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} actions={aiOn ? aiActions : undefined} aboveBody={aiOn ? aiSummary : undefined} />
         {:else if view?.kind === 'draft' && Composer}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
         {:else}
           <section class="welcome">

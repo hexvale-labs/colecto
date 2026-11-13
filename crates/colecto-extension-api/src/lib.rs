@@ -252,6 +252,7 @@ pub const NAVIGATION_TARGETS: &[&str] = &[
     "settings/privacy",
     "settings/servers",
     "settings/extensions",
+    "settings/ai",
     "settings/api-keys",
     "settings/send-approvals",
 ];

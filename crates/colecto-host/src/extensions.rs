@@ -52,6 +52,7 @@ impl Extensions {
             include_str!("../../../ui/src/extensions/composer/extension.toml"),
             include_str!("../../../ui/src/extensions/accounts/extension.toml"),
             include_str!("../../../ui/src/extensions/notifications/extension.toml"),
+            include_str!("../../../ui/src/extensions/ai/extension.toml"),
         ]
         .into_iter()
         .map(|source| parse_manifest(source).expect("valid bundled manifest"))

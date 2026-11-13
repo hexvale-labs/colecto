@@ -1,4 +1,5 @@
 //! Trusted HTTP adapter for bundled UI and isolated Wasm extensions.
+mod ai;
 pub mod api_keys;
 pub mod approvals;
 mod bus;
@@ -79,6 +80,7 @@ struct Host {
     authority: String,
     origin: String,
     execution: Arc<tokio::sync::Semaphore>,
+    ai: Arc<ai::Ai>,
 }
 
 struct Failure(StatusCode, String);
@@ -229,6 +231,17 @@ fn build_app(host: Host, assets: Assets) -> Router {
         .route("/drafts/{id}", get(draft))
         .route("/version", get(version))
         .route("/releases/latest", get(latest_release))
+        .route("/ai/settings", get(ai::get_settings).post(ai::put_settings))
+        .route("/ai/keys", axum::routing::post(ai::put_key))
+        .route("/ai/test", axum::routing::post(ai::test_connection))
+        .route("/ai/labels/preview", axum::routing::post(ai::preview))
+        .route(
+            "/ai/summaries/{id}",
+            get(ai::get_summary)
+                .post(ai::create_summary)
+                .delete(ai::delete_summary),
+        )
+        .route("/ai/reply", axum::routing::post(ai::draft_reply))
         .fallback(|| async { Failure(StatusCode::NOT_FOUND, "API route not found".into()) });
     let router = Router::new().nest("/api/v1", api);
     let router = match assets {
@@ -790,11 +803,17 @@ async fn update_label(
 ) -> Result<Json<std::collections::BTreeMap<String, Vec<String>>>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesLabel)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
-    with_store(host, account, move |s| {
+    let ai = host.ai.clone();
+    let unlabeled = input.message_id.clone().filter(|_| input.remove);
+    let labels = with_store(host, account.clone(), move |s| {
         s.update_label(&input.name, input.message_id.as_deref(), input.remove)
     })
-    .await
-    .map(Json)
+    .await?;
+    // Auto-labelling never touches a message the owner has unlabelled by hand.
+    if let Some(message) = unlabeled {
+        ai.owner_unlabeled(&account, &message);
+    }
+    Ok(Json(labels))
 }
 fn redact_list_bodies(
     host: &Host,
@@ -1064,6 +1083,7 @@ async fn remove_account(
     host_grant(&headers)?;
     tokio::task::spawn_blocking(move || {
         host.accounts.lock().map_err(|_| forbidden())?.remove(&id)?;
+        host.ai.remove_account(&id);
         host.preferences
             .lock()
             .map_err(|_| forbidden())?
@@ -1475,6 +1495,7 @@ mod extension_service_tests {
             events: tokio::sync::broadcast::channel(1).0,
             bus_replies: Default::default(),
             keys: Arc::new(Mutex::new(ApiKeys::open(database.clone()).unwrap())),
+            ai: Arc::new(ai::Ai::open(database.clone()).unwrap()),
             preferences: Arc::new(Mutex::new(
                 preferences::PreferenceStore::open(database.clone()).unwrap(),
             )),

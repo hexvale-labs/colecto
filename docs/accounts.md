@@ -234,6 +234,10 @@ failure stops the Host with an actionable error rather than silently leaving a
 protection transition incomplete. Preserve the data directory on corruption;
 Colecto does not overwrite unsupported or malformed records or legacy files.
 
+The vault also holds Host-owned secrets whose names start with `host:`, today the
+optional [AI service keys](ai.md). They share the vault's protection: locking makes them
+unavailable and **Reset saved credentials** deletes them too.
+
 **Reset saved credentials** forgets credentials for all accounts without deleting
 local drafts. It requires confirmation and every account must then be reconnected.
 This is the recovery path for a forgotten password, not password recovery.

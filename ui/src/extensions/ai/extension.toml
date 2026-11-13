@@ -1,0 +1,7 @@
+id = "ai"
+name = "AI"
+api_version = 1
+slot = "reader"
+capabilities = ["messages.read", "messages.list"]
+description = "Optional summaries, drafted replies and automatic labels using AI services you configure. Off until you turn it on in Settings → AI."
+author = "Colecto"
