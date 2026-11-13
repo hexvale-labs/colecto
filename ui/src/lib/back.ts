@@ -121,7 +121,10 @@ function leave(entry: BackEntry, animate: boolean) {
     : { transform: `translateX(${ios ? el.clientWidth : offset(el)}px)`, opacity: ios ? '1' : '0' };
   const run = el.animate([from, to], { duration: ios ? 240 : 180, easing: ios ? EASE_DRAWER : EASE_OUT, fill: 'forwards' });
   if (under && ios) under.animate([{ transform: under.style.transform || 'translateX(-25%)' }, { transform: 'none' }], { duration: 240, easing: EASE_DRAWER });
-  run.finished.catch(() => {}).finally(() => { finish(entry, el, under); run.cancel(); });
+  // The screen underneath is visible but not yet current: a tap there would be undone when
+  // this one closes, so the app ignores input until it has.
+  document.body.inert = true;
+  run.finished.catch(() => {}).finally(() => { document.body.inert = false; finish(entry, el, under); run.cancel(); });
 }
 
 function finish(entry: BackEntry, el: HTMLElement | null | undefined, under: HTMLElement | null | undefined) {

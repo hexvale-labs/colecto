@@ -48,6 +48,20 @@ test('back closes the newest screen first and only then leaves the app', async (
   expect(await page.evaluate(() => history.length)).toBeGreaterThanOrEqual(base);
 });
 
+test('a message opened right after going back stays open', async ({ page }) => {
+  await inbox(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Maya Chen/ }).click();
+  await page.getByRole('button', { name: 'Back to list' }).click();
+  // The list shows while the message slides away; the tap lands once it has gone.
+  await page.getByRole('button', { name: /Alex Rivera/ }).click();
+  await expect(page.getByRole('heading', { name: 'Plain text' })).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(page.getByRole('heading', { name: 'Plain text' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => history.state)).toEqual({ colectoBack: 1 });
+});
+
 test('back closes dialogs and listboxes before the page under them', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
