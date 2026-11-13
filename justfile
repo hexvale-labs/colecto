@@ -27,6 +27,17 @@ perf: build::rust build::ui test::perf
 # Run the normal verification suite and record resource usage for feature changes.
 perf-check: verify perf
 
+# Set the release version in Cargo.toml, Cargo.lock and ui/package.json, for example `just bump-version 0.3.0`.
+bump-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "expected X.Y.Z, got {{version}}" >&2; exit 1; }
+    sed -i -E '/^\[workspace\.package\]/,/^\[/ s/^version = "[^"]+"/version = "{{version}}"/' Cargo.toml
+    sed -i -E '0,/"version": "[^"]+"/ s//"version": "{{version}}"/' ui/package.json
+    cargo update --workspace --offline --quiet
+    grep -q '^version = "{{version}}"' Cargo.toml && grep -q '"version": "{{version}}"' ui/package.json
+    echo "Version set to {{version}}"
+
 # Android and iOS icons are generated into their projects by the release workflow.
 # Regenerate the desktop app icons from the single source, crates/colecto-app/icons/icon.svg.
 icons:

@@ -110,13 +110,29 @@ Every app icon comes from `crates/colecto-app/icons/icon.svg`. `just icons`
 regenerates the desktop set; the release workflow generates the Android and iOS sets
 from the same file.
 
+## Branches
+
+| Branch | Holds | Receives |
+| --- | --- | --- |
+| `develop` | Work merged since the last release | Every feature, fix, docs and CI pull request |
+| `main` | The latest release; each release tag points at a commit on it | Only `develop`, through a release pull request |
+| `release/vX.Y.Z` | The version bump and release notes for one release | Branched off `develop`, merged back into it |
+
+Branch off `develop` and open pull requests against it (`gh pr create --base develop`).
+`main` stays the GitHub default branch, so links to `blob/main/...` show the released
+docs and the build caches stay on `main` (see below). Both branches require the
+`verify` check.
+
+There is no hotfix path: a fix lands on `develop` and goes out as the next patch
+release, together with anything else already merged there.
+
 ## Releases
 
 The version lives in one place: `[workspace.package] version` in the root
 `Cargo.toml`. Every crate inherits it and the binaries compile it in (reported by
-`GET /api/v1/version` and `colecto-daemon --version`). To release, bump it (and
-`ui/package.json`) on `main`, then tag; a tag that does not match `Cargo.toml` fails
-the release before anything builds. Release CI, the Docker image (build argument
+`GET /api/v1/version` and `colecto-daemon --version`). `just bump-version X.Y.Z` sets
+it there, in `Cargo.lock` and in `ui/package.json`. A tag that does not match
+`Cargo.toml` fails the release before anything builds. Release CI, the Docker image (build argument
 `COLECTO_COMMIT`) and the `colecto-git` AUR package also compile in the Git commit
 through the `COLECTO_COMMIT` environment variable.
 
@@ -140,11 +156,51 @@ updates the `colecto`, `colecto-bin` and `colecto-git` AUR packages (see
 
 `just build release` builds optimized binaries locally.
 
+### Choosing the version
+
+Agents pick the version from what changed since the last tag. Major versions are the
+maintainer's call only.
+
+| Bump | When |
+| --- | --- |
+| Major (`X`) | Only when the maintainer asks for it in so many words |
+| Minor (`Y`) | Anything new for users, extension authors or self-hosters: a feature, setting, endpoint, API or extension capability. Also any breaking change (storage format, API, configuration), since majors are reserved |
+| Patch (`Z`) | Nothing new and nothing breaking: bug and security fixes, performance, docs, CI, build, refactors and dependency updates |
+
+If nothing has merged into `develop` since the last tag, there is nothing to release.
+
+### Shipping a release
+
+An agent ships a release only when the maintainer asks for one in the current session
+("ship a new release"). The steps:
+
+1. `git fetch --tags origin`. The last release is
+   `git tag --list 'v*' --sort=-v:refname | head -1`.
+2. Read what changed: `git log --first-parent <last tag>..origin/develop` and the
+   pull requests merged into `develop` since then. Open the diff when a title does not
+   say what users will notice.
+3. Choose the version with the table above, and say why in the pull request.
+4. Branch `release/vX.Y.Z` off `origin/develop`, run `just bump-version X.Y.Z`, and
+   write `.github/release-notes/vX.Y.Z.md`. Follow the earlier notes: a one-line
+   summary, then short sections grouped by what users notice. Write for users, not
+   commit by commit, link docs at the tag (`blob/vX.Y.Z/docs/...`), and leave out
+   changes nobody outside the repository would notice. Mark roadmap items shipped in
+   `docs/roadmap.md`.
+5. Open `chore: release vX.Y.Z` against `develop` and merge it once `verify` passes.
+6. Open a pull request from `develop` into `main` titled `release: vX.Y.Z` and merge it
+   with a merge commit (not squash or rebase), so `main` keeps `develop`'s commits.
+7. Tag that merge commit and push the tag, which publishes:
+   `git tag -a vX.Y.Z -m "Colecto vX.Y.Z" <merge commit> && git push origin vX.Y.Z`.
+8. Follow the Release run and report the release link, or the failing job.
+
 ## CI build caches
 
 GitHub lets a run restore caches saved on its own branch or tag, or on `main`. Pull
 requests and tags never save; they restore what `main` saved, so an unchanged
 dependency tree is never rebuilt from scratch.
+`develop` saves nothing either, because the 10 GB budget has no room for a second set:
+a dependency change merged into `develop` builds cold in each pull request until the
+next release brings it to `main`.
 
 | Cache | Saved by | Key |
 | --- | --- | --- |
