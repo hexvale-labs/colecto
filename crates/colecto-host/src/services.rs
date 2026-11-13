@@ -189,13 +189,7 @@ async fn proxy(upstream: Upstream, mut request: Request) -> Result<Response, Str
     let token = zeroize::Zeroizing::new(
         crate::runtime::read_token(&upstream.token_file).map_err(|e| e.to_string())?,
     );
-    let stream = tokio::time::timeout(
-        Duration::from_secs(10),
-        tokio::net::UnixStream::connect(&upstream.address[5..]),
-    )
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    let stream = connect_upstream(Path::new(&upstream.address[5..]), RESTART_GRACE).await?;
     let (mut sender, connection) =
         hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(stream))
             .await
@@ -226,6 +220,33 @@ async fn proxy(upstream: Upstream, mut request: Request) -> Result<Response, Str
     let mut response = response.map(axum::body::Body::new);
     strip_hop_headers(response.headers_mut());
     Ok(response)
+}
+/// How long a request waits for the daemon's socket. Restarting the systemd unit (as
+/// "Update" does) removes its runtime directory, so the socket is briefly missing or refuses
+/// connections; requests in that window wait instead of failing with ENOENT.
+const RESTART_GRACE: Duration = Duration::from_secs(10);
+#[cfg(unix)]
+async fn connect_upstream(path: &Path, grace: Duration) -> Result<tokio::net::UnixStream, String> {
+    let deadline = tokio::time::Instant::now() + grace;
+    loop {
+        match tokio::time::timeout_at(deadline, tokio::net::UnixStream::connect(path)).await {
+            Ok(Ok(stream)) => return Ok(stream),
+            Ok(Err(error))
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                ) && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Ok(Err(error)) => {
+                return Err(format!(
+                    "The background mail service is not running ({error}). Start it in Settings → Connection."
+                ));
+            }
+            Err(_) => return Err("The background mail service did not answer in time.".into()),
+        }
+    }
 }
 #[cfg(not(unix))]
 async fn proxy(_: Upstream, _: Request) -> Result<Response, String> {
@@ -530,6 +551,31 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::FORBIDDEN);
         }
+    }
+    /// Regression: updating the daemon unit restarts it, and systemd removes the socket's
+    /// runtime directory meanwhile. Requests in that window must wait, not fail with ENOENT.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn upstream_connect_waits_for_a_restarting_daemon() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("colecto/mail.sock");
+        let path = socket.clone();
+        let restart = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let listener = tokio::net::UnixListener::bind(&path).unwrap();
+            listener.accept().await.unwrap();
+        });
+        connect_upstream(&socket, Duration::from_secs(5))
+            .await
+            .expect("waits for the socket to come back");
+        restart.await.unwrap();
+        // A daemon that stays down still fails, with a message that says what to do.
+        let missing = dir.path().join("gone.sock");
+        let error = connect_upstream(&missing, Duration::from_millis(300))
+            .await
+            .unwrap_err();
+        assert!(error.contains("not running"), "{error}");
     }
     #[cfg(unix)]
     #[tokio::test]
