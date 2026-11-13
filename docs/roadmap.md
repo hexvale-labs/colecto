@@ -33,7 +33,12 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Named extension bus: guest requests/events and bundled integrations | Done |
 | Rust extension SDK (`colecto-extension`): typed calls, bus messages, mock Host; Oneko ported | Done |
 | `cargo colecto` tool: build, check `[bus] subscribe` against registered handlers, write `.colectoext` | Done |
-| Onboarding for the first account; demo account off by default | Next |
+| Onboarding for the first account; demo account off by default; accounts can be switched off | Done |
+| Optional AI: summaries, drafted replies with tones, regex and decision-model auto-labels | Done; not yet tried against real providers |
+| Content cache, prefetch of recent mail, instant folder switches, sync status with progress | Done |
+| Desktop app connects to a remote daemon over HTTPS through its local Host | Done; not yet tried against a real remote server |
+| Calmer settings, notifications above Settings, drag-and-drop extension install | Done |
+| Message list density and date headings; new-release notification | Done |
 | Font choice and text size, account rows and add/edit account dialog, account removal | Done |
 | Loading screen and selection polish | Done |
 | Custom ports in every server field | Done |
@@ -48,6 +53,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Item | Status |
 | --- | --- |
 | Linux, Windows, browser; Docker image `ghcr.io/hexvale-labs/colectod`; AUR packages | Done |
+| Mobile feel: system back and predictive back, press sounds and haptics, compact/medium/expanded layouts, phone Settings | Done; real-device validation pending |
 | Android: UnifiedPush from a self-hosted daemon (Web Push, no foreground service) | Next |
 | Android: optional foreground service for local accounts without a daemon | Next |
 | Signed macOS and iOS builds | Later (needs an Apple developer account) |

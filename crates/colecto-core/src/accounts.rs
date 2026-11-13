@@ -21,6 +21,18 @@ pub struct Accounts {
 fn invalid(message: &str) -> Error {
     Error::Invalid(message.into())
 }
+fn host_secret_name(name: &str) -> Result<(), Error> {
+    let rest = name.strip_prefix("host:").unwrap_or("");
+    if rest.is_empty()
+        || rest.len() > 64
+        || !rest
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return Err(invalid("Invalid secret name"));
+    }
+    Ok(())
+}
 fn busy() -> Error {
     invalid("Mail operation in progress. Try again when it finishes.")
 }
@@ -383,6 +395,42 @@ impl Accounts {
         // and remove_account_data can safely be retried.
         self.database.remove_account_data(id)
     }
+    /// A Host-owned secret (such as an AI service key) sealed in the credential vault beside
+    /// account credentials. Names start with `host:` so they never collide with account ids.
+    /// Locking the vault makes them unavailable; resetting credentials deletes them.
+    pub fn host_secret(&self, name: &str) -> Result<Option<zeroize::Zeroizing<String>>, Error> {
+        host_secret_name(name)?;
+        let secrets = self
+            .vault
+            .secrets
+            .as_ref()
+            .ok_or_else(|| invalid("Unlock credentials first"))?;
+        Ok(secrets
+            .get(name)
+            .map(|s| zeroize::Zeroizing::new(s.0.clone())))
+    }
+    /// Store or, with `None`, delete a Host-owned secret.
+    pub fn set_host_secret(&mut self, name: &str, value: Option<String>) -> Result<(), Error> {
+        host_secret_name(name)?;
+        let value = value.map(Secret);
+        if value
+            .as_ref()
+            .is_some_and(|v| v.0.is_empty() || v.0.len() > 8192)
+        {
+            return Err(invalid("Secrets must be 1 to 8192 bytes"));
+        }
+        let mut secrets = self
+            .vault
+            .secrets
+            .as_ref()
+            .ok_or_else(|| invalid("Unlock credentials first"))?
+            .clone();
+        match value {
+            Some(value) => secrets.insert(name.to_owned(), value),
+            None => secrets.remove(name),
+        };
+        self.vault.commit(self.vault.accounts().to_vec(), secrets)
+    }
     pub fn security(&self) -> SecurityInfo {
         SecurityInfo {
             cleanup_pending: self.vault.cleanup_pending(),
@@ -440,6 +488,8 @@ impl Accounts {
                     {
                         connect(store, &record.settings, &secret.0)?;
                     }
+                } else {
+                    store.restore_demo();
                 }
                 Ok(())
             });

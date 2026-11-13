@@ -9,30 +9,34 @@
   import mark from '../../assets/logo-square.svg';
   import wordmark from '../../assets/wordmark.svg';
   import { setAccessToken } from '../../lib/api';
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
+  import { claimBack, goBack } from '../../lib/back';
   import ExtensionPanel from '../../ExtensionPanel.svelte';
   import DockArea, { type PaneInfo } from '../../DockArea.svelte';
   import { activate as showPane, defaultLayout, dock, dockEdge, groupOf, parseLayout, reconcile, setVisible, type Edge, type Layout } from '../../lib/layout';
-  import { mailExtensions } from '../registry';
+  import { aiExtension, mailExtensions } from '../registry';
   import ApiKeys from '../../ApiKeys.svelte';
   import SendApprovals from '../../SendApprovals.svelte';
   import ExtensionSettings from './ExtensionSettings.svelte';
   import AccountSettings from '../../AccountSettings.svelte';
   import { applyTypography, DEFAULT_FONT, DEFAULT_TEXT_SIZE } from '../../lib/typography';
   import { setBusAccount } from '../../lib/bus';
-  import { createServices, hostService } from '../../lib/api';
-  import type { Draft, MailItem, AccountInfo, SecurityInfo } from '../../lib/api';
+  import { createServices, hostService, prefetchContent, rememberMessages } from '../../lib/api';
+  import type { AccountSync, Draft, MailItem, Message, AccountInfo, PrefetchPreferences, SecurityInfo } from '../../lib/api';
+  import MailSettings from './MailSettings.svelte';
   import type { Workspace } from '../../App.svelte';
   import NotificationSettings from '../../NotificationSettings.svelte';
   import PrivacySettings from '../../PrivacySettings.svelte';
   import AppearanceSettings from '../../AppearanceSettings.svelte';
   import { notify, dismissKey, notificationPosition, type Toast } from '../notifications/store.svelte';
-  import { subscribeEvents, type NotificationPreferences } from '../../lib/api';
+  import { accountOn, subscribeEvents, type ListDensity, type NotificationPreferences, type PreferencesInput } from '../../lib/api';
   import { destinations, isDestination, resolve, settingsPages, type Destination, type Folder, type SettingsPage } from '../../lib/navigation';
   let { extensionStates, extensionSettings, onsettings }: { extensionSettings: import('svelte').Snippet<[Workspace?]>; onsettings: () => void; extensionStates: import('../../lib/api').ExtensionState[] } = $props();
   let Mailbox = $derived(extensionStates.find(e => e.manifest.id === 'inbox')?.enabled ? mailExtensions.inbox : null);
   let Reader = $derived(extensionStates.find(e => e.manifest.id === 'reader')?.enabled ? mailExtensions.reader : null);
   let Composer = $derived(extensionStates.find(e => e.manifest.id === 'composer')?.enabled ? mailExtensions.composer : null);
+  // Optional AI actions in the reader; the reader itself knows nothing about them.
+  let aiOn = $derived(!!extensionStates.find(e => e.manifest.id === 'ai')?.enabled);
   let switcher = $derived(!!extensionStates.find(e => e.manifest.id === 'accounts')?.enabled);
   type View = { kind: 'message'; id: string; folder: 'Inbox' | 'Sent' } | { kind: 'draft'; draft: Draft | null } | null;
   let connected = $state(false);
@@ -46,22 +50,41 @@
   let extensionPages = $derived(extensionStates.filter(e => e.enabled && e.manifest.settings?.length));
   let currentExtension = $derived(extensionPages.find(e => `extension:${e.manifest.id}` === settingsPage));
   let settingsPage = $state<SettingsPage>('accounts');
+  // On a phone Settings is a list of sections that opens one page at a time; wider, the list is
+  // a sidebar that collapses to icons (remembered on this device only).
+  let phone = $state(false);
+  let settingsPageShown = $state(false);
+  const NAV_KEY = 'colecto.settingsNavCollapsed';
+  let navCollapsed = $state(false);
+  function toggleNav() {
+    navCollapsed = !navCollapsed;
+    try { localStorage.setItem(NAV_KEY, navCollapsed ? '1' : '0'); } catch { /* Kept for this session. */ }
+  }
   let settingsDirty = $state(false);
   let reviewRequest = $state<string | null>(null);
-  let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'top' });
+  let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'top', updates: true });
+  let listDensity = $state<ListDensity>('full');
+  let dateGroups = $state(true);
   let accent = $state<string | null>(null);
   let remoteImages = $state(false);
+  let prefetch = $state<PrefetchPreferences>({ enabled: true, count: 50 });
+  let syncStatus = $state<Record<string, AccountSync>>({});
   let font = $state(DEFAULT_FONT);
   let textSize = $state(DEFAULT_TEXT_SIZE);
   $effect(() => { void applyTypography(font, textSize); });
   $effect(() => setBusAccount(accountId));
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); });
-  function savePreferences(input: { accent?: string; notifications?: NotificationPreferences; remote_images?: boolean; font?: string; font_size?: number }) {
+  let accountsEnabled = $state<Record<string, boolean>>({});
+  const isOn = (id: string) => accountOn(accountsEnabled, id);
+  function savePreferences(input: PreferencesInput) {
+    if (input.prefetch) prefetch = input.prefetch;
     if (input.accent !== undefined) accent = input.accent || null;
-    if (input.font !== undefined) font = input.font;
-    if (input.font_size !== undefined) textSize = input.font_size;
+    if (input.font) font = input.font;
+    if (input.font_size) textSize = input.font_size;
     if (input.notifications) notificationPrefs = input.notifications;
     if (input.remote_images !== undefined) remoteImages = input.remote_images;
+    if (input.list_density) listDensity = input.list_density;
+    if (input.date_groups !== undefined) dateGroups = input.date_groups;
     void hostService.savePreferences(input).catch(e => notify({ title: 'Could not save your preference', body: (e as Error).message }));
   }
   let tabs = $state<{ account: string; id: string; subject: string; folder: 'Inbox' | 'Sent' }[]>([]);
@@ -109,11 +132,16 @@
     catch { serverError = 'Enter an HTTPS server address, or HTTP for a local server. Do not include credentials or an access token.'; }
   }
   const discardSettings = () => !settingsDirty || window.confirm('Discard unsaved settings changes?');
-  function settingsTab(next: SettingsPage) { if (next === settingsPage || !discardSettings()) return; settingsDirty = false; settingsPage = next; if (next === 'extensions') onsettings(); }
-  function openSettings(page: SettingsPage = 'accounts') {
+  function settingsTab(next: SettingsPage) {
+    if (next === settingsPage) { settingsPageShown = true; return; }
+    if (!discardSettings()) return;
+    settingsDirty = false; settingsPage = next; settingsPageShown = true; if (next === 'extensions') onsettings();
+  }
+  /** Open Settings, at `page` when given; without one a phone shows the list of sections. */
+  function openSettings(page?: SettingsPage) {
     if (busy || !initialized) return;
-    if (settingsOpen) { settingsTab(page); return; }
-    settingsOpen = true; settingsDirty = false; settingsPage = page;
+    if (settingsOpen) { if (page) settingsTab(page); return; }
+    settingsOpen = true; settingsDirty = false; settingsPage = page ?? 'accounts'; settingsPageShown = !!page;
     if (page === 'extensions') onsettings();
     void refreshAccounts().catch(e => accountError = (e as Error).message);
   }
@@ -125,6 +153,27 @@
     return true;
   }
   function closeSettings() { if (leaveSettings()) void tick().then(() => document.querySelector<HTMLElement>('.topbar [aria-label="Settings"]')?.focus()); }
+  // Back (the system button or gesture, the browser, the in-app arrows) closes the newest of:
+  // Settings, a Settings page on a phone, and on narrow windows whatever replaced the list.
+  $effect(() => {
+    if (!settingsOpen) return;
+    return claimBack({ close: closeSettings, isOpen: () => settingsOpen, surface: () => document.querySelector<HTMLElement>('.settings-window'), push: untrack(() => phone) });
+  });
+  $effect(() => {
+    if (!settingsOpen || !phone || !settingsPageShown) return;
+    return claimBack({ close: () => settingsPageShown = false, isOpen: () => settingsOpen && phone && settingsPageShown, surface: () => document.querySelector<HTMLElement>('.settings-main'), under: () => document.querySelector<HTMLElement>('.settings-nav'), push: true });
+  });
+  $effect(() => {
+    if (!compact || !layoutReady || focus === 'mailbox') return;
+    const pane = focus;
+    return claimBack({
+      close: () => { if (view) back(); else activate('mailbox'); },
+      isOpen: () => compact && focus === pane,
+      surface: () => document.getElementById(`pane-${pane}`),
+      under: () => document.getElementById('pane-mailbox'),
+      push: true,
+    });
+  });
   function focusCard(node: HTMLElement) { node.focus(); }
   /** Open any page by its shared destination name: the command runner and MCP both come through here. */
   function go(target: Destination) {
@@ -201,14 +250,26 @@
     accounts = nextAccounts; security = nextSecurity;
     connected = nextAccounts.find(a => a.id === accountId)?.connected ?? false;
   }
-  let accountOptions = $derived(accounts.length ? accounts.map(account => ({ value: account.id, label: account.settings?.name || account.settings?.address || 'Demo account', hint: !account.settings ? 'Sample mail' : account.settings.name ? account.settings.address : account.settings.protocol === 'jmap' ? 'JMAP' : account.settings.imap_host })) : [{ value: 'demo', label: 'Demo account', hint: 'Sample mail' }]);
+  let accountOptions = $derived(accounts.some(account => isOn(account.id)) ? accounts.filter(account => isOn(account.id)).map(account => ({ value: account.id, label: account.settings?.name || account.settings?.address || 'Demo account', hint: !account.settings ? 'Sample mail' : account.settings.name ? account.settings.address : account.settings.protocol === 'jmap' ? 'JMAP' : account.settings.imap_host })) : [{ value: 'demo', label: 'Demo account', hint: 'Sample mail' }]);
   const folders = [{ name: 'Inbox', icon: 'inbox' }, { name: 'Drafts', icon: 'drafts' }, { name: 'Sent', icon: 'sent' }] as const;
   function selectAccount(next: string) {
     if (!accounts.some(account => account.id === next) || !leaveSettings() || !canLeave()) return;
-    clearView(); invalidateList(); items = []; fetchedAt = null; labels = {}; labelFilter = ''; labelError = '';
+    switchAccount(next);
+  }
+  function switchAccount(next: string) {
+    clearView(); invalidateList(); labels = {}; labelFilter = ''; labelError = '';
+    const saved = folderCache.get(listKey(next, 'Inbox'));
+    items = saved?.items ?? []; fetchedAt = saved?.fetchedAt ?? null;
     accountId = next; void hostService.savePreferences({ account: next }).catch(() => { /* Selection still applies for this session. */ });
     connected = accounts.find(a => a.id === next)?.connected ?? false;
     query = ''; appliedQuery = ''; folder = 'Inbox'; void loadList();
+  }
+  /** Turning an account off hides it and stops its background sync; Settings stays open. */
+  function toggleAccount(id: string, on: boolean) {
+    accountsEnabled = { ...accountsEnabled, [id]: on };
+    savePreferences({ accounts_enabled: { [id]: on } });
+    if (!on && id === accountId) { const next = accounts.find(account => isOn(account.id)); if (next && canLeave()) switchAccount(next.id); }
+    else if (on && !isOn(accountId) && canLeave()) switchAccount(id);
   }
   let folder = $state<Folder>('Inbox');
   let items = $state<MailItem[]>([]);
@@ -266,7 +327,7 @@
       { id: `show-${pane.id}`, name: `Layout: ${shownPane(pane.id) ? 'Hide' : 'Show'} ${pane.title}`, run: () => commitLayout(setVisible(layout, pane.id, !shownPane(pane.id))), disabled: settingsOpen },
     ]),
     { id: 'layout-reset', name: 'Layout: Reset to default', run: () => commitLayout(defaultLayout()), disabled: settingsOpen || compact },
-    ...accounts.map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
+    ...accounts.filter(account => isOn(account.id)).map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
     ...currentTabs.map(tab => ({ id: `tab-${tab.id}`, name: `Open message: ${tab.subject}`, run: () => activateTab(tab) })),
     ...extensionStates.filter(extension => !extension.bundled && extension.enabled && !extension.manifest.capabilities.includes('window.overlay')).map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => openPanel(extension.manifest.id) })),
     ...Object.keys(labels).map(name => ({ id: `label-${name}`, name: `Filter label: ${name}`, run: () => { navigate('Inbox'); if (!dirty && folder === 'Inbox' && !settingsOpen) labelFilter = name; } })),
@@ -275,6 +336,19 @@
     ...(currentTabs.length > 1 ? [{ id: 'close-all-tabs', name: 'Close all message tabs', run: closeAllTabs }] : []),
   ] as Command[]).map(command => ({ ...command, disabled: command.disabled || busy || labeling || !initialized })));
   function invalidateList() { ++listGeneration; loading = false; fetching = false; searching = false; }
+  // Each folder's last list stays in memory, so switching back shows it at once while it refreshes.
+  const folderCache = new Map<string, { items: MailItem[]; fetchedAt: number | null }>();
+  const listKey = (account: string, name: Folder) => `${account}\u0000${name}`;
+  const toItems = (messages: Message[]) => messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date }));
+  function showList(account: string, name: Folder, next: MailItem[], at: number | null) {
+    items = next; fetchedAt = at;
+    folderCache.set(listKey(account, name), { items: next, fetchedAt: at });
+  }
+  /** Fill the in-memory content cache for the newest listed messages, so opening them is instant. */
+  function warm(account: string, list: MailItem[]) {
+    if (!prefetch.enabled || !prefetch.count || !Reader) return;
+    void prefetchContent(account, list.slice(0, Math.min(prefetch.count, 25)).map(item => item.id));
+  }
   /** Refresh from the provider, or with `searchOnly`, apply the search box without refreshing the folder. */
   async function loadList(searchOnly = false) {
     if (labeling) return;
@@ -284,25 +358,37 @@
     const requestedQuery = query.trim();
     const requestedAccount = accountId;
     const inboxService = services.inbox;
+    const current = () => generation === listGeneration && requestedAccount === accountId;
     error = ''; openError = '';
     if (searchOnly) searching = true; else { loading = items.length === 0; fetching = true; }
     try {
-      if (requestedFolder !== 'Drafts' && !requestedQuery) {
-        const snapshot = await inboxService.cached(requestedFolder === 'Sent' ? 'sent' : 'inbox');
-        if (generation !== listGeneration || requestedAccount !== accountId) return;
-        items = snapshot.messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date }));
-        fetchedAt = snapshot.fetched_at; loading = false;
-        // Clearing a search goes back to the saved folder; it does not fetch it again.
-        if (searchOnly) { appliedQuery = ''; return; }
-      }
+      const remoteFolder = requestedFolder === 'Sent' ? 'sent' : 'inbox';
       const normalizedQuery = requestedQuery.toLocaleLowerCase();
-      const [nextLabels, result] = await Promise.all([
-        searchOnly ? labels : inboxService.labels(),
-        requestedFolder !== 'Drafts'
-          ? inboxService.messages(requestedFolder === 'Sent' ? 'sent' : 'inbox', requestedQuery).then(messages => messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date })))
-          : inboxService.drafts().then(drafts => drafts.filter(draft => [draft.recipient, draft.subject, draft.body].some(text => text.toLocaleLowerCase().includes(normalizedQuery))).slice().reverse().map(d => ({ id: d.id, name: d.recipient || 'No recipient', subject: d.subject, preview: d.body, date: 'Draft' }))),
-      ]);
-      if (generation === listGeneration && requestedAccount === accountId) { items = result; labels = nextLabels; appliedQuery = requestedQuery; if (!requestedQuery) fetchedAt = Math.floor(Date.now() / 1000); }
+      // Start everything at once: the saved snapshot paints first, labels and the fresh
+      // list arrive in parallel instead of one after another.
+      const snapshot = requestedFolder !== 'Drafts' && !requestedQuery ? inboxService.cached(remoteFolder) : null;
+      let arrived = false;
+      // Clearing a search goes back to the saved folder; it does not fetch it again.
+      const fresh = (searchOnly && !requestedQuery ? null : requestedFolder !== 'Drafts'
+        ? inboxService.messages(remoteFolder, requestedQuery).then(messages => { rememberMessages(requestedAccount, messages); return toItems(messages); })
+        : inboxService.drafts().then(drafts => drafts.filter(draft => [draft.recipient, draft.subject, draft.body].some(text => text.toLocaleLowerCase().includes(normalizedQuery))).slice().reverse().map(d => ({ id: d.id, name: d.recipient || 'No recipient', subject: d.subject, preview: d.body, date: 'Draft' }))))
+        ?.then(list => { arrived = true; return list; });
+      const nextLabels = searchOnly ? Promise.resolve(labels) : inboxService.labels();
+      fresh?.catch(() => {}); nextLabels.catch(() => {});
+      if (snapshot) {
+        const saved = await snapshot;
+        if (!current()) return;
+        rememberMessages(requestedAccount, saved.messages);
+        // A fresh list that already arrived wins over the older snapshot.
+        if (!arrived) { showList(requestedAccount, requestedFolder, toItems(saved.messages), saved.fetched_at); loading = false; warm(requestedAccount, items); }
+        if (!fresh) { appliedQuery = ''; return; }
+      }
+      const [labelResult, result] = await Promise.all([nextLabels, fresh!]);
+      if (!current()) return;
+      labels = labelResult; appliedQuery = requestedQuery;
+      if (requestedQuery) items = result;
+      else showList(requestedAccount, requestedFolder, result, requestedFolder === 'Drafts' ? null : Math.floor(Date.now() / 1000));
+      if (requestedFolder !== 'Drafts') warm(requestedAccount, result);
     } catch (e) { if (generation === listGeneration) error = (e as Error).message; }
     finally { if (generation === listGeneration) { loading = false; fetching = false; searching = false; } }
   }
@@ -313,10 +399,19 @@
     try {
       const snapshot = await services.inbox.cached(requested === 'Sent' ? 'sent' : 'inbox');
       if (generation !== listGeneration || account !== accountId || requested !== folder) return;
-      items = snapshot.messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date }));
-      fetchedAt = snapshot.fetched_at;
+      rememberMessages(account, snapshot.messages);
+      showList(account, requested, toItems(snapshot.messages), snapshot.fetched_at);
+      warm(account, items);
     } catch { /* The next refresh shows it. */ }
   }
+  function onSync(event: Partial<AccountSync>) {
+    if (typeof event.account !== 'string' || typeof event.mode !== 'string') return;
+    const previous = syncStatus[event.account];
+    syncStatus[event.account] = event as AccountSync;
+    // Background downloads just finished: warm the reader cache from what the Host now holds.
+    if (event.account === accountId && previous && previous.activity !== 'idle' && event.activity === 'idle' && folder !== 'Drafts') warm(accountId, items);
+  }
+  const loadSync = () => hostService.sync().then(list => { syncStatus = Object.fromEntries(list.map(status => [status.account, status])); }).catch(() => { /* An older mail service has no sync status. */ });
   const nameOf = (account?: AccountInfo) => account?.settings?.name || account?.settings?.address || 'Demo account';
   /** Show an in-app notification, and a desktop one too while Colecto is in the background. */
   $effect(() => { notificationPosition.value = notificationPrefs.position; });
@@ -370,7 +465,10 @@
   function navigate(next: Folder) {
     if (!leaveSettings() || !canLeave()) return;
     clearView(); query = ''; labelFilter = '';
-    if (next !== folder) { items = []; fetchedAt = null; appliedQuery = ''; }
+    if (next !== folder) {
+      const saved = folderCache.get(listKey(accountId, next));
+      items = saved?.items ?? []; fetchedAt = saved?.fetchedAt ?? null; appliedQuery = '';
+    }
     folder = next; activate('mailbox'); void loadList();
   }
   function compose(draft: Draft | null = null) { if (!Composer || !leaveSettings() || !canLeave()) return; clearView(); view = { kind: 'draft', draft }; activate('reader'); }
@@ -402,8 +500,12 @@
   const hour = new Date().getHours();
   const greeting = hour < 5 ? 'Up late?' : hour < 12 ? 'Good morning.' : hour < 18 ? 'Good afternoon.' : 'Good evening.';
   onMount(() => {
-    const narrow = window.matchMedia('(max-width: 800px)');
-    const sync = () => compact = narrow.matches; sync(); narrow.addEventListener('change', sync);
+    // Android window size classes: compact (< 600 dp) and medium (< 840 dp) show one pane at a time.
+    const narrow = window.matchMedia('(max-width: 839.98px)');
+    const small = window.matchMedia('(max-width: 599.98px)');
+    const sync = () => { compact = narrow.matches; phone = small.matches; }; sync();
+    narrow.addEventListener('change', sync); small.addEventListener('change', sync);
+    try { const saved = localStorage.getItem(NAV_KEY); navCollapsed = saved ? saved === '1' : narrow.matches; } catch { navCollapsed = narrow.matches; }
     const preferences = hostService.preferences().catch(() => null);
     void preferences.then(saved => {
       savedLayout = parseLayout(saved?.workspace); layoutReady = true;
@@ -411,6 +513,9 @@
       font = saved?.font || DEFAULT_FONT; textSize = saved?.font_size || DEFAULT_TEXT_SIZE;
       if (saved?.notifications) notificationPrefs = saved.notifications;
       remoteImages = saved?.remote_images ?? false;
+      accountsEnabled = saved?.accounts_enabled ?? {};
+      listDensity = saved?.list_density ?? 'full'; dateGroups = saved?.date_groups ?? true;
+      if (saved?.prefetch) prefetch = saved.prefetch;
     });
     // Events act on accounts and pages, so they start once both are known.
     let stopEvents = () => {};
@@ -419,12 +524,16 @@
       if (name === 'mail') void onMail(event);
       else if (name === 'approval') onApproval(event);
       else if (name === 'navigate') onNavigate(event);
+      else if (name === 'sync') onSync(event);
+      else if (name === 'ready' || name === 'resync') void loadSync();
     }); };
     void Promise.all([refreshAccounts(), preferences]).then(([, saved]) => {
-      if (accounts.some(a => a.id === saved?.account)) accountId = saved!.account!;
+      accountsEnabled = saved?.accounts_enabled ?? {};
+      if (accounts.some(a => a.id === saved?.account && isOn(a.id))) accountId = saved!.account!;
+      else accountId = accounts.find(a => isOn(a.id))?.id ?? accountId;
       connected = accounts.find(a => a.id === accountId)?.connected ?? false;
     }).catch(e => accountError = (e as Error).message).finally(() => { initialized = true; void loadList(); listen(); });
-    return () => { narrow.removeEventListener('change', sync); stopEvents(); clearTimeout(searchTimer); };
+    return () => { narrow.removeEventListener('change', sync); small.removeEventListener('change', sync); stopEvents(); clearTimeout(searchTimer); };
   });
 </script>
 
@@ -460,7 +569,7 @@
       {:else if pane === 'accounts'}<div class="account-pane">{@render accountSwitcher('above')}</div>
       {:else}
         {@const id = pane.slice(4)}
-        {#if panelRuns[id] || groupOf(layout, pane)?.active === pane}{#key `${accountId}:${id}:${panelRuns[id] ?? 0}`}<ExtensionPanel {id} account={accountId} onback={() => activate('mailbox')} />{/key}{/if}
+        {#if panelRuns[id] || groupOf(layout, pane)?.active === pane}{#key `${accountId}:${id}:${panelRuns[id] ?? 0}`}<ExtensionPanel {id} account={accountId} onback={() => goBack() || activate('mailbox')} />{/key}{/if}
       {/if}
     {/snippet}
   </DockArea>{/if}
@@ -472,12 +581,16 @@
   <!-- Pressing the dimmed backdrop closes Settings, like Escape; the card itself is the dialog. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="settings-overlay" onpointerdown={(event) => { if (event.target === event.currentTarget) closeSettings(); }}>
-    <div class="settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" use:focusCard>
-      <nav class="settings-nav" aria-label="Settings sections">
-        <h1 id="settings-title">Settings</h1>
+    <div class="settings-window" class:collapsed={navCollapsed && !phone} data-view={phone ? settingsPageShown ? 'page' : 'list' : undefined} role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" use:focusCard>
+      <nav class="settings-nav" aria-label="Settings sections" inert={phone && settingsPageShown}>
+        <header class="settings-nav-head">
+          {#if phone}<button class="icon-button" aria-label="Close settings" disabled={busy} onclick={() => goBack() || closeSettings()}><Icon name="back" size={20} /></button>{/if}
+          <h1 id="settings-title">Settings</h1>
+          {#if !phone}<button class="icon-button nav-toggle" aria-label={navCollapsed ? 'Expand the section list' : 'Collapse the section list'} aria-expanded={!navCollapsed} title={navCollapsed ? 'Expand' : 'Collapse'} onclick={toggleNav}><Icon name="sidebar" size={17} /></button>{/if}
+        </header>
         <div class="nav-group" role="group" aria-labelledby="settings-built-in">
           <span class="nav-group-label" id="settings-built-in">Built-in</span>
-          {#each settingsPages as page (page.id)}<button class="nav-item" class:active={settingsPage === page.id} aria-current={settingsPage === page.id ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(page.id)}><Icon name={page.icon} /><span class="nav-label">{page.name}</span></button>{/each}
+          {#each settingsPages as page (page.id)}<button class="nav-item" class:active={settingsPage === page.id} aria-current={settingsPage === page.id ? 'page' : undefined} title={navCollapsed && !phone ? page.name : undefined} disabled={busy} onclick={() => settingsTab(page.id)}><Icon name={page.icon} /><span class="nav-label">{page.name}</span><Icon name="next" /></button>{/each}
           {#each extensionPages.filter(e => e.bundled) as extension (extension.manifest.id)}{@render extensionNav(extension)}{/each}
         </div>
         {#if extensionPages.some(e => !e.bundled)}
@@ -487,16 +600,22 @@
           </div>
         {/if}
       </nav>
-      <div class="settings-main">
-        <header class="settings-head"><p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name ?? currentExtension?.manifest.name ?? 'Extension'}</strong></p><button class="icon-button" aria-label="Close settings" title="Close  Esc" disabled={busy} onclick={closeSettings}><Icon name="close" size={16} /></button></header>
+      <div class="settings-main" inert={phone && !settingsPageShown}>
+        <header class="settings-head">
+          {#if phone}<button class="icon-button" aria-label="Back to Settings" disabled={busy} onclick={() => goBack() || (settingsPageShown = false)}><Icon name="back" size={20} /></button>{/if}
+          <p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name ?? currentExtension?.manifest.name ?? 'Extension'}</strong></p>
+          {#if !phone}<button class="icon-button" aria-label="Close settings" title="Close  Esc" disabled={busy} onclick={closeSettings}><Icon name="close" size={16} /></button>{/if}
+        </header>
         <div class="settings-page">
           {#if settingsPage.startsWith('extension:')}{#if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
-          {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
-          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences} />
+          {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} enabled={isOn} ontoggle={toggleAccount} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
+          {:else if settingsPage === 'mail'}<MailSettings {prefetch} onchange={(next) => savePreferences({ prefetch: next })} />
+          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} density={listDensity} {dateGroups} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences} onlist={savePreferences} />
           {:else if settingsPage === 'notifications'}<NotificationSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
           {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
           {:else if settingsPage === 'servers'}<ServerSettings />
           {:else if settingsPage === 'send-approvals'}<SendApprovals requestId={reviewRequest} />
+          {:else if settingsPage === 'ai'}<aiExtension.settings account={accountId} accountName={accountLabel} extensionOn={aiOn} />
           {:else if settingsPage === 'api-keys'}<ApiKeys {accounts} />
           {:else}{@render extensionSettings(workspace)}{/if}
         </div>
@@ -506,9 +625,11 @@
 {/if}
 
 
+{#snippet aiActions(slot: import('../../lib/reader-slots').ReaderSlot)}<aiExtension.actions reader={slot} account={accountId} />{/snippet}
+{#snippet aiSummary(slot: import('../../lib/reader-slots').ReaderSlot)}<aiExtension.summary reader={slot} account={accountId} />{/snippet}
 {#snippet extensionNav(extension: import('../../lib/api').ExtensionState)}
   {@const id = `extension:${extension.manifest.id}` as const}
-  <button class="nav-item" class:active={settingsPage === id} aria-current={settingsPage === id ? 'page' : undefined} disabled={busy} onclick={() => settingsTab(id)}><span class="nav-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1).toUpperCase()}</span><span class="nav-label">{extension.manifest.name}</span></button>
+  <button class="nav-item" class:active={settingsPage === id} aria-current={settingsPage === id ? 'page' : undefined} title={navCollapsed && !phone ? extension.manifest.name : undefined} disabled={busy} onclick={() => settingsTab(id)}><span class="nav-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1).toUpperCase()}</span><span class="nav-label">{extension.manifest.name}</span><Icon name="next" /></button>
 {/snippet}
 {#snippet folderNav()}
 <nav class="folder-nav" aria-label="Mail folders">
@@ -527,7 +648,9 @@
       <input id="mail-search" type="search" enterkeyhint="search" autocapitalize="none" maxlength="1024" bind:value={query} oninput={scheduleSearch} placeholder={`Search ${folder.toLowerCase()}`} />
     </form>{@render composeButton(false)}</div>{/if}
     {#if !compact}{@render folderNav()}{/if}
-    {#if Mailbox}
+    {#if Mailbox && initialized && !isOn(accountId)}
+      <p class="pane-note">All your accounts are turned off. <button class="text-button inline" onclick={() => openSettings('accounts')}>Turn one on in Settings → Accounts</button></p>
+    {:else if Mailbox}
       {#if sort !== 'newest'}<div class="sort-note"><Icon name="sort" size={14} />Sorted {sorts[sort].toLocaleLowerCase()}<button class="chip-remove plain" aria-label="Clear sorting" onclick={() => sort = 'newest'}><Icon name="close" size={12} /></button></div>{/if}
       {#if folder !== 'Drafts'}<div class="label-bar" role="group" aria-label="Filter by label">
         {#if Object.keys(labels).length}<button class="chip" aria-pressed={!labelFilter} onclick={() => labelFilter = ''}>All</button>{/if}
@@ -541,7 +664,7 @@
         </form>
       </div>{/if}
       {#if labelError}<p class="error-box" role="alert">{labelError}</p>{/if}
-      <Mailbox grouped={sort === 'newest' || sort === 'oldest'} items={visibleItems} filtered={!!appliedQuery || !!query.trim() || !!labelFilter} {searching} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={() => void loadList()} />
+      <Mailbox grouped={dateGroups && (sort === 'newest' || sort === 'oldest')} density={listDensity} items={visibleItems} filtered={!!appliedQuery || !!query.trim() || !!labelFilter} {searching} {selected} {folder} {loading} {fetching} {fetchedAt} sync={syncStatus[accountId] ?? null} error={error || openError} disabled={busy || opening} onopen={open} onretry={() => void loadList()} />
     {:else}<p class="pane-note">The mailbox extension is turned off. Turn it on in Settings → Extensions.</p>{/if}
   </div>
 {/snippet}
@@ -561,8 +684,8 @@
     {#if compact}{@render messageTabs()}{/if}
     <div class="reading-pane">
       {#key view?.kind === 'message' ? `message:${accountId}:${view.id}` : view}
-        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} {remoteImages} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={back} />
-        {:else if view?.kind === 'draft' && Composer}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={back} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
+        {#if view?.kind === 'message' && Reader}<Reader id={view.id} service={services.reader} {remoteImages} folder={view.folder} {labels} labeling={labeling || loading || busy} {labelError} self={activeAccount?.settings?.address ?? ''} onreply={Composer ? compose : undefined} onlabel={(name, remove) => void label(name, view?.kind === 'message' ? view.id : undefined, remove)} onback={() => goBack() || back()} actions={aiOn ? aiActions : undefined} aboveBody={aiOn ? aiSummary : undefined} />
+        {:else if view?.kind === 'draft' && Composer}<Composer {connected} draft={view.draft} service={services.composer} {sender} onback={() => goBack() || back()} ondirty={(value) => dirty = value} onbusy={(value) => busy = value} onsaved={saved} />
         {:else}
           <section class="welcome">
             <img src={mark} alt="" width="48" height="48" />

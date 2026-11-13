@@ -72,8 +72,8 @@ in the app origin. Details and limits are in [accounts and credentials](accounts
 
 One embedded Turso database, `colecto.db`, per data directory holds the account
 registry and encrypted credential vault, drafts, local labels, mail snapshots, folder
-catalogs, extension policy and packages, API keys, the send-approval journal and owner
-preferences. The OS keyring and password-derived keys stay outside it. Only one
+catalogs, extension policy and packages, API keys, the send-approval journal, owner
+preferences and the optional AI settings and summaries. The OS keyring and password-derived keys stay outside it. Only one
 process may open a data directory at a time. Mail snapshots and drafts are not
 encrypted at rest. See [storage](storage.md).
 
@@ -87,6 +87,16 @@ belong in the Host or the Tauri app, never in the core. Tauri 2 hosts the deskto
 mobile apps; the browser reaches the same Rust service over HTTP. Linux, Windows,
 Android and the browser are supported. macOS and iOS builds are produced but unsigned
 and untested (see [installing](install.md#experimental-apple-builds)).
+
+On Android and iOS the app also loads `tauri-plugin-colecto-native`
+(`crates/colecto-native/`), which carries its own Kotlin and Swift because CI generates
+the mobile projects fresh on every build. It claims the Android back gesture while the
+page has history to go back through and streams predictive-back progress to it as
+`colecto:back` window events, and its one command, `press`, plays the system click
+sound and haptics. The capability `native-feedback`
+(`crates/colecto-app/capabilities/native.json`) grants only that command, and only to
+the app's own loopback page (`http://127.0.0.1:*`); nothing else on that page can reach
+Tauri. On desktop the plugin does nothing.
 
 On Linux the app sets its GTK program name to `Colecto` so the Wayland `app_id`
 matches the `Colecto.desktop` entry every package installs; compositors use that

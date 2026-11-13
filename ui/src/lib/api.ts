@@ -14,6 +14,10 @@ export interface AccountInfo { id: string; settings: AccountSettings | null; con
 /** `version` is the Colecto that wrote the unit; `update_to` is set when this app can rewrite it. */
 export interface BackgroundService { installed: boolean; version?: string | null; update_to?: string | null; enabled: boolean; active: boolean; supported: boolean; reason?: string | null; socket?: string | null; token_file?: string | null }
 export interface Upstream { address: string; token_file: string }
+/** A socket names its daemon's token file; a remote origin sends its access token once. */
+export type UpstreamInput = { address: string; token_file: string } | { address: string; token?: string };
+/** How an account syncs right now (`GET /sync`, and the `sync` event). */
+export interface AccountSync { account: string; protocol: 'imap' | 'jmap' | 'demo'; mode: 'local' | 'jmap_push' | 'imap_idle' | 'polling' | 'offline'; interval: number; activity: 'idle' | 'syncing' | 'prefetching'; progress: [number, number] | null; error: string | null; updated_at: number | null }
 export interface SecurityInfo { cleanup_pending: boolean; protected: boolean; locked: boolean }
 
 let transientToken = '';
@@ -51,6 +55,42 @@ export async function request<T>(extension: string, account: string, path: strin
   return data as T;
 }
 
+// Opened mail stays in memory so going back to a message, or opening one that was warmed
+// ahead of time, never waits for the network. Content of a message id never changes.
+const MAX_CACHED = 150;
+const contentCache = new Map<string, Promise<MessageContent>>();
+const messageCache = new Map<string, Message>();
+const cacheKey = (account: string, id: string) => `${account}\u0000${id}`;
+function remember<T>(cache: Map<string, T>, key: string, value: T) {
+  cache.delete(key); cache.set(key, value);
+  while (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value!);
+}
+function cachedContent(account: string, id: string, onlyCached = false): Promise<MessageContent> {
+  const key = cacheKey(account, id);
+  const load = (only: boolean) => {
+    const pending = request<MessageContent>('reader', account, `/messages/${encodeURIComponent(id)}/content${only ? '?cached=true' : ''}`);
+    remember(contentCache, key, pending);
+    pending.catch(() => { if (contentCache.get(key) === pending) contentCache.delete(key); });
+    return pending;
+  };
+  const hit = contentCache.get(key);
+  if (!hit) return load(onlyCached);
+  remember(contentCache, key, hit);
+  // A warm-up that found nothing cached must not fail a real open: fetch it properly then.
+  return onlyCached ? hit : hit.catch(() => load(false));
+}
+/** List results double as message headers, so the reader can show a listed message at once. */
+export function rememberMessages(account: string, messages: Message[]) {
+  for (const message of messages.slice(0, MAX_CACHED).reverse()) remember(messageCache, cacheKey(account, message.id), message);
+}
+/** Warm the content cache for `ids` (newest first), a few at a time. Only content the mail
+ *  service already holds is fetched, so this never adds provider downloads of its own. */
+export async function prefetchContent(account: string, ids: string[], concurrency = 3) {
+  const queue = ids.filter(id => !contentCache.has(cacheKey(account, id))).slice(0, MAX_CACHED / 2);
+  const worker = async () => { for (let id = queue.shift(); id !== undefined; id = queue.shift()) await cachedContent(account, id, true).catch(() => {}); };
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
+}
+
 // Supplied service clients capture an immutable account, including during async work.
 export function createServices(account: string) {
   return {
@@ -69,8 +109,9 @@ export function createServices(account: string) {
       setFlags: (ids: string[], seen?: boolean, flagged?: boolean) => request<{ ok: true }>('reader', account, '/messages/flags', { ids, seen, flagged }),
       moveTo: (ids: string[], folder: string) => request<{ ok: true }>('reader', account, '/messages/move', { ids, folder }),
       archive: (ids: string[]) => request<{ ok: true }>('reader', account, '/messages/archive', { ids }),
-      delete: (ids: string[]) => request<{ ok: true }>('reader', account, '/messages/delete', { ids }), label: (name: string, message_id?: string, remove = false) => request<Labels>('reader', account, '/labels', { name, message_id, remove }), read: (id: string) => request<Message>('reader', account, `/messages/${encodeURIComponent(id)}`),
-      content: (id: string) => request<MessageContent>('reader', account, `/messages/${encodeURIComponent(id)}/content`),
+      delete: (ids: string[]) => request<{ ok: true }>('reader', account, '/messages/delete', { ids }), label: (name: string, message_id?: string, remove = false) => request<Labels>('reader', account, '/labels', { name, message_id, remove }),
+      read: (id: string) => { const known = messageCache.get(cacheKey(account, id)); return known ? Promise.resolve(known) : request<Message>('reader', account, `/messages/${encodeURIComponent(id)}`); },
+      content: (id: string) => cachedContent(account, id),
       attachment: (id: string, index: number) => download('reader', account, `/messages/${encodeURIComponent(id)}/attachments/${index}`) },
     composer: {
       send: (draft: DraftInput) => request<boolean>('composer', account, '/send', draft),
@@ -83,13 +124,23 @@ export type ReaderService = Pick<ReturnType<typeof createServices>['reader'], 'r
 export type ComposerService = ReturnType<typeof createServices>['composer'];
 /** Owner preferences, stored by the Host in Turso. `workspace` is the dock layout. */
 export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right' | 'bottom' | 'bottom-left' | 'left';
-export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner }
-export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; notifications: NotificationPreferences; remote_images: boolean }
+export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner; updates: boolean }
+/** Message list rows: two lines with a preview, a shorter version, or one line. */
+export type ListDensity = 'full' | 'medium' | 'compact';
+export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; notifications: NotificationPreferences; remote_images: boolean; list_density: ListDensity; date_groups: boolean; notified_release: string | null; accounts_enabled: Record<string, boolean>; onboarded: boolean; prefetch: PrefetchPreferences }
+/** A stable release newer than the running build, from the Host's cached GitHub check. */
+export interface LatestRelease { current: string; latest: { version: string; url: string } | null }
+/** Accounts the owner never switched use this: the demo account starts off, every other account on. */
+export const accountOn = (choices: Record<string, boolean>, id: string) => choices[id] ?? id !== 'demo';
+/** After each Inbox refresh, download the newest `count` uncached messages (0–100). */
+export interface PrefetchPreferences { enabled: boolean; count: number }
 /** An empty accent restores the default. */
+/** `accounts_enabled` entries are merged into the stored choices. */
 export type PreferencesInput = Partial<Omit<Preferences, 'accent'>> & { accent?: string };
 export const hostService = {
   preferences: () => request<Preferences>('host', 'demo', '/preferences'),
   savePreferences: (input: PreferencesInput) => request<Preferences>('host', 'demo', '/preferences', input),
+  latestRelease: () => request<LatestRelease>('host', 'demo', '/releases/latest'),
   sendRequests: () => request<PendingSend[]>('host', 'demo', '/send-requests'),
   decideSend: (id: string, decision: 'approve' | 'reject') => request<PendingSend>('host', 'demo', `/send-requests/${encodeURIComponent(id)}/${decision}`, {}),
   apiKeys: () => request<ApiKey[]>('host', 'demo', '/api-keys'),
@@ -103,9 +154,10 @@ export const hostService = {
   /** Linux user services this app can install (local service only). */
   services: () => request<Record<'daemon' | 'notifications', BackgroundService>>('host', 'demo', '/services'),
   serviceAction: (name: 'daemon' | 'notifications', input: { action: 'install'; autostart: boolean } | { action: 'autostart'; enabled: boolean } | { action: 'start' | 'stop' | 'uninstall' | 'update' }) => request<boolean>('host', 'demo', `/services/${name}`, input),
-  /** The daemon socket this app forwards to, or null for its built-in service. */
+  /** The daemon (socket or remote origin) this app forwards to, or null for its built-in service. */
   upstream: async () => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream')).upstream,
-  setUpstream: async (value: Upstream | null) => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream', value, 'PUT')).upstream,
+  setUpstream: async (value: UpstreamInput | null) => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream', value, 'PUT')).upstream,
+  sync: () => request<AccountSync[]>('host', 'demo', '/sync'),
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 
@@ -146,7 +198,7 @@ export interface ApiKey extends ApiKeyInput { id: string; created_at: number; la
 export interface PendingSend { id: string; requester: string; account: string; from: string; snapshot: DraftInput | null; created_at: number; expires_at: number; status: 'pending' | 'rejected' | 'expired' | 'submitting' | 'sent' | 'uncertain' }
 
 /**
- * Follow the Host's server-sent events (`mail`, `approval`, `navigate`), reconnecting with backoff.
+ * Follow the Host's server-sent events (`mail`, `approval`, `navigate`, `sync`), reconnecting with backoff.
  * Uses fetch rather than EventSource so the owner token can travel in a header. Returns a stop function.
  */
 function openEvents(onevent: (name: string, data: unknown) => void): () => void {

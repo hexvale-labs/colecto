@@ -165,6 +165,58 @@ JMAP server, the Cyrus test server in Docker, then receives it, searches for it,
 downloads the attachment and finds it in Sent. Push is covered by unit tests, because
 that server does not emit push events.
 
+## Opening mail quickly
+
+Opened messages come from caches before the network, and the newest Inbox mail is
+downloaded ahead of time so it opens without waiting for the provider.
+
+| Layer | Where | Bound | Notes |
+| --- | --- | --- | --- |
+| Content cache | `colecto.db` (`colecto-core/src/content.rs`) | 1000 messages and 256 MB per account; oldest evicted first | Complete raw messages keyed by account, provider identity and id. Reads take no account lock, so opening mail never waits behind a refresh |
+| Prefetch | Host, after each background Inbox refresh (`colecto-host/src/sync.rs`) | Owner preference `prefetch: {enabled, count}`, default on and 50, at most 100 | Downloads the newest uncached Inbox messages, a few accounts at a time; never marks mail read. Skipped for accounts that are off |
+| Reader cache | UI memory (`ui/src/lib/api.ts`) | 150 messages | Warmed from the Host with `GET …/messages/{id}/content?cached=true`, which answers only from the content cache and never reaches the provider |
+| Folder lists | UI memory (`MailShell.svelte`) | Per account and folder | Switching Inbox, Drafts and Sent shows the last list at once, then refreshes it |
+
+Settings → Mail turns prefetch on or off and sets how many messages to keep ready.
+
+### Sync status
+
+`GET /api/v1/sync` (owner only) lists each account's sync state; changes stream as `sync`
+events on `/api/v1/events`. The message list footer shows it.
+
+| Field | Values |
+| --- | --- |
+| `mode` | `local` (sample mail), `jmap_push`, `imap_idle`, `polling` (with `interval` seconds), `offline` (last refresh failed; `error` says why) |
+| `activity` | `idle`, `syncing`, `prefetching` |
+| `progress` | `[done, total]` while syncing or prefetching, such as "Downloading 12/50", otherwise `null` |
+
+## First run and turning accounts on or off
+
+On first launch the app opens a short onboarding screen instead of the workspace:
+welcome, then the same account form as Settings → Accounts, then a confirmation that
+opens the new account's Inbox. **Explore with sample mail first** skips setup and
+turns the demo account on. Onboarding shows while the owner preference `onboarded`
+is false and no real account exists; the built-in demo account never counts as an
+added account. Finishing or skipping sets `onboarded` to true. It lives in the shell
+(`ui/src/Onboarding.svelte`), not an extension, because it is bootstrapping and
+handles credentials.
+
+Every account row in Settings → Accounts has an on/off switch, stored in the owner
+preference `accounts_enabled` (`{ "<account id>": bool }`, merged on update, at most
+256 entries). Accounts without an entry use the default: **the demo account is off,
+every other account is on.**
+
+| | On | Off |
+| --- | --- | --- |
+| Account switcher and "Switch account" commands | Listed | Hidden |
+| Background polling, IMAP IDLE / JMAP push, prefetch | Runs | Skipped; a running push watcher stops at its next check |
+| Saved settings, credentials, cached mail, drafts | Kept | Kept |
+| HTTP API, MCP and API keys | Available | Still available; the switch is a workspace choice, not an access control |
+
+Turning off the open account switches to another account that is on. With every
+account off, the mail pane says so and links to Settings → Accounts. Removing an
+account also forgets its on/off choice.
+
 ## Remove an account
 
 The owner-only `DELETE /api/v1/accounts/{id}` removes the saved account and its
@@ -206,6 +258,10 @@ the UI reports pending cleanup; unlock the OS store and retry. A startup cleanup
 failure stops the Host with an actionable error rather than silently leaving a
 protection transition incomplete. Preserve the data directory on corruption;
 Colecto does not overwrite unsupported or malformed records or legacy files.
+
+The vault also holds Host-owned secrets whose names start with `host:`, today the
+optional [AI service keys](ai.md). They share the vault's protection: locking makes them
+unavailable and **Reset saved credentials** deletes them too.
 
 **Reset saved credentials** forgets credentials for all accounts without deleting
 local drafts. It requires confirmation and every account must then be reconnected.
@@ -284,7 +340,8 @@ hosts under Server, and username and password under Sign in. Username starts fro
 the email address; JMAP API-token sign-in can leave it empty. Show password reveals
 the credential only in the dialog. Cancel and Escape ask before discarding edits.
 
-Each saved account has Reconnect, Edit and Remove icon buttons. Reconnect and Edit
+Each saved account has Reconnect, Edit and Remove icon buttons, and every account,
+including the demo account, has an on/off switch (see above). Reconnect and Edit
 open the same prefilled dialog; leave the credential blank to keep it. Remove asks
 before disconnecting and forgetting the saved credential. The account record,
 local mail and drafts remain. Protocol tags expose server hosts on hover. Connected

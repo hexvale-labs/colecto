@@ -65,6 +65,8 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
       await settings.getByRole('button', { name: section, exact: true }).click();
       await expect(settings.getByRole('heading', { level: 2 }).first()).toBeVisible();
       await scrollAll(); await expectNoOverscroll(page, `settings: ${section}`);
+      // A phone shows one Settings page at a time over the list of sections.
+      if (viewport.width < 600) await settings.getByRole('button', { name: 'Back to Settings' }).click();
     }
   });
 }
@@ -112,10 +114,9 @@ test('approval requests arrive as notifications with decisions, a close button a
   await toasts.getByRole('status', { name: '2 new messages' }).getByRole('button', { name: 'Dismiss notification' }).click();
   await expect(toasts.getByRole('status')).toHaveCount(0);
   await expect(toasts).toHaveAttribute('data-position', 'top');
-  // Settings covers the notification layer.
+  // Notifications stay visible over Settings (settings.spec.ts checks the stacking).
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.locator('.settings-overlay')).toBeVisible();
-  expect(await page.locator('.settings-overlay').evaluate(el => Number(getComputedStyle(el).zIndex))).toBeGreaterThan(await page.locator('.extension-overlay').first().evaluate(el => Number(getComputedStyle(el).zIndex)));
+  await expect(request).toBeVisible();
   await page.getByRole('button', { name: 'Close settings', exact: true }).click();
   await expect(request.getByRole('button', { name: 'Approve and send' })).toHaveCount(0);
   const snapshot = { id: 'r1', requester: 'key', account: 'demo', from: 'me@example.test', status: 'pending', expires_at: 2000000000, snapshot: { recipient: 'unexpected@example.test', subject: 'Quarterly numbers', body: 'Sensitive body' } };

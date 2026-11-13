@@ -35,8 +35,9 @@
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   <p role="status">{status}</p>
   {#if !requests.length && !busy}<p class="empty-note">Nothing waiting for you. Automation is behaving.</p>{/if}
+  <div class="settings-list">
   {#each requests.slice().reverse() as request (request.id)}
-    <article id={`send-request-${request.id}`} tabindex="-1" class="settings-card" aria-label={`Delivery request: ${request.snapshot?.subject || '(no subject)'}`}>
+    <article id={`send-request-${request.id}`} tabindex="-1" aria-label={`Delivery request: ${request.snapshot?.subject || '(no subject)'}`}>
       <h3>{request.snapshot?.subject || '(no subject)'}</h3>
       <dl><dt>Requested by</dt><dd>{keys.find(key => key.id === request.requester)?.name || request.requester}</dd><dt>Account</dt><dd>{request.account}</dd><dt>From</dt><dd>{request.from}</dd><dt>Status</dt><dd>{request.status}</dd><dt>Expires</dt><dd>{new Date(request.expires_at * 1000).toLocaleString()}</dd></dl>
       {#if request.snapshot}<dl>{#each Object.entries(request.snapshot).filter(([key]) => key !== 'id') as [key, value]}<dt>{key === 'recipient' ? 'To' : key === 'subject' ? 'Subject' : key === 'body' ? 'Body' : key}</dt><dd class="snapshot">{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</dd>{/each}</dl>{/if}
@@ -45,10 +46,11 @@
       {:else if request.status === 'uncertain' || request.status === 'submitting'}<p>Delivery may have started. Do not submit a duplicate; check Sent or contact the recipient.</p>{/if}
     </article>
   {/each}
+  </div>
 </section>
 <style>
-  article { display: grid; gap: 4px; margin-bottom: 12px; overflow-wrap: anywhere; }
-  h3 { margin: 0 0 8px; font-size: calc(16px * var(--text-scale)); }
+  article { display: grid; gap: 4px; overflow-wrap: anywhere; outline: none; }
+  h3 { margin: 0 0 8px; font-size: calc(15px * var(--text-scale)); font-weight: 600; }
   dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 8px 0; font-size: calc(13.5px * var(--text-scale)); }
   dt { color: var(--ink-3); font-weight: 540; } dd { margin: 0; color: var(--ink); }
   dl + dl { padding-top: 12px; border-top: 1px solid var(--line-soft); }

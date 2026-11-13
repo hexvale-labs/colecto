@@ -53,43 +53,39 @@
     <p>{manifest.description}</p>
   </header>
   {#if data}
-    <div class="settings-stack">
+    <div class="settings-group">
       {#each data.schema as setting (setting.key)}
         {@const value = data.values[setting.key]}
         {#if setting.type === 'toggle'}
-          <div class="settings-card setting-row">
-            <div><h3 id={`${field(setting.key)}-label`}>{setting.label}</h3>{#if setting.description}<p>{setting.description}</p>{/if}</div>
+          <div class="setting setting-row">
+            <div class="setting-text"><h3 id={`${field(setting.key)}-label`}>{setting.label}</h3>{#if setting.description}<p>{setting.description}</p>{/if}</div>
             <label class="switch"><input type="checkbox" aria-labelledby={`${field(setting.key)}-label`} checked={value === true} onchange={(event) => change(setting.key, event.currentTarget.checked)} /></label>
           </div>
         {:else if setting.type === 'range'}
-          <div class="settings-card range">
-            <div class="range-head"><label for={field(setting.key)}>{setting.label}</label><output for={field(setting.key)}>{shown(setting, value)}</output></div>
-            {#if setting.description}<p>{setting.description}</p>{/if}
-            <input id={field(setting.key)} class="slider" type="range" min={setting.min} max={setting.max} step={setting.step ?? 'any'} value={Number(value)} style:--fill={fill(setting, value)} aria-valuetext={shown(setting, value)} oninput={(event) => change(setting.key, Number(event.currentTarget.value), 300)} onchange={() => void flush()} />
-            <div class="range-ends" aria-hidden="true"><span>{shown(setting, setting.min ?? 0)}</span><span>{shown(setting, setting.max ?? 0)}</span></div>
+          <div class="setting range">
+            <div class="setting-text"><div class="range-head"><label for={field(setting.key)}>{setting.label}</label><output for={field(setting.key)}>{shown(setting, value)}</output></div>{#if setting.description}<p>{setting.description}</p>{/if}</div>
+            <div><input id={field(setting.key)} class="slider" type="range" min={setting.min} max={setting.max} step={setting.step ?? 'any'} value={Number(value)} style:--fill={fill(setting, value)} aria-valuetext={shown(setting, value)} oninput={(event) => change(setting.key, Number(event.currentTarget.value), 300)} onchange={() => void flush()} />
+            <div class="range-ends" aria-hidden="true"><span>{shown(setting, setting.min ?? 0)}</span><span>{shown(setting, setting.max ?? 0)}</span></div></div>
           </div>
+        {:else if setting.type === 'choice' && (setting.options?.length ?? 0) <= 4}
+          <fieldset class="setting setting-row">
+            <legend class="sr-only">{setting.label}</legend>
+            <div class="setting-text"><h3>{setting.label}</h3>{#if setting.description}<p>{setting.description}</p>{/if}</div>
+            <div class="segmented">{#each setting.options ?? [] as option (option.value)}<label><input type="radio" name={field(setting.key)} value={option.value} checked={value === option.value} onchange={() => change(setting.key, option.value)} />{option.label}</label>{/each}</div>
+          </fieldset>
         {:else if setting.type === 'choice'}
-          <div class="settings-card">
-            {#if (setting.options?.length ?? 0) <= 4}
-              <fieldset class="segmented-field">
-                <legend>{setting.label}</legend>
-                {#if setting.description}<p>{setting.description}</p>{/if}
-                <div class="segmented">{#each setting.options ?? [] as option (option.value)}<label><input type="radio" name={field(setting.key)} value={option.value} checked={value === option.value} onchange={() => change(setting.key, option.value)} />{option.label}</label>{/each}</div>
-              </fieldset>
-            {:else}
-              <h3>{setting.label}</h3>
-              {#if setting.description}<p>{setting.description}</p>{/if}
-              <div class="choice-select"><Select label={setting.label} value={String(value)} options={setting.options ?? []} onchange={(next) => change(setting.key, next)} /></div>
-            {/if}
+          <div class="setting">
+            <div class="setting-text"><h3>{setting.label}</h3>{#if setting.description}<p>{setting.description}</p>{/if}</div>
+            <div class="choice-select"><Select label={setting.label} value={String(value)} options={setting.options ?? []} onchange={(next) => change(setting.key, next)} /></div>
           </div>
         {:else}
-          <div class="settings-card">
-            <label class="field">{setting.label}<input type="text" value={String(value)} oninput={(event) => change(setting.key, event.currentTarget.value, 300)} onblur={() => void flush()} /></label>
-            {#if setting.description}<p class="hint">{setting.description}</p>{/if}
+          <div class="setting">
+            <div class="setting-text"><h3><label for={field(setting.key)}>{setting.label}</label></h3>{#if setting.description}<p>{setting.description}</p>{/if}</div>
+            <input id={field(setting.key)} class="text-setting" type="text" value={String(value)} oninput={(event) => change(setting.key, event.currentTarget.value, 300)} onblur={() => void flush()} />
           </div>
         {/if}
       {/each}
-      <div class="settings-card footer">
+      <div class="footer">
         <button type="button" class="text-button" disabled={isDefault} onclick={reset}>Reset to defaults</button>
         <span class="save-state" class:visible={saved} role="status">{saved ? 'Saved' : ''}</span>
       </div>
@@ -101,17 +97,16 @@
 </section>
 
 <style>
-  .range-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
-  .range-head label { color: var(--ink); font-size: calc(15px * var(--text-scale)); font-weight: 640; letter-spacing: -0.01em; }
+  .range-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+  .range-head label { color: var(--ink); font-size: calc(14px * var(--text-scale)); font-weight: 540; }
   .range > * { max-width: 480px; }
-  .range-head output { min-width: 6ch; color: var(--ink-2); font-size: calc(13px * var(--text-scale)); font-weight: 560; text-align: right; }
-  .settings-card > p, .segmented-field > p { margin: 0 0 4px; max-width: 58ch; color: var(--ink-2); font-size: calc(13.5px * var(--text-scale)); line-height: 1.55; }
-  .slider { margin-top: 12px; }
+  .range-head output { min-width: 6ch; color: var(--ink-2); font-size: calc(13px * var(--text-scale)); font-variant-numeric: tabular-nums; text-align: right; }
+  .range-head + p { margin-top: 3px; }
   .range-ends { display: flex; justify-content: space-between; margin-top: 6px; color: var(--ink-3); font-size: calc(11.5px * var(--text-scale)); }
-  .segmented-field .segmented { margin-top: 10px; }
-  .choice-select { margin-top: 10px; max-width: 280px; }
-  .field { margin-top: 0; max-width: 440px; }
-  .hint { margin-top: 6px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
+  .choice-select { max-width: 280px; }
+  .text-setting { width: 100%; max-width: 440px; height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunk); font-size: calc(14px * var(--text-scale)); outline: none; transition: border-color 140ms ease; }
+  .text-setting:focus { border-color: var(--mint); }
+  .setting-text label { font: inherit; }
   .footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .footer .text-button:disabled { color: var(--ink-3); }
   .save-state { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); opacity: 0; transition: opacity 200ms var(--ease-out); }

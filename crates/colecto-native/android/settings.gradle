@@ -1,0 +1,3 @@
+// Only used when this project is opened on its own; the app build includes it by path.
+include ':tauri-android'
+project(':tauri-android').projectDir = new File('./.tauri/tauri-api')

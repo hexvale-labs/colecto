@@ -6,7 +6,7 @@ default-members = ["crates/cargo-colecto", "crates/colecto-core", "crates/colect
 resolver = "3"
 
 [workspace.package]
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 publish = false
 license = "MIT OR Apache-2.0"
@@ -44,6 +44,7 @@ colecto-extension-api = { path = "crates/colecto-extension-api" }
 colecto-extension-sys = { path = "crates/colecto-extension-sys" }
 colecto-package = { path = "crates/colecto-package" }
 colecto-host = { path = "crates/colecto-host" }
+tauri-plugin-colecto-native = { path = "crates/colecto-native" }
 
 imap = "2.4.1"
 native-tls = "0.2"
@@ -54,6 +55,8 @@ base64 = "0.22"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # zip leaves the Deflate backend to us; this is the pure-Rust miniz_oxide one already in the tree.
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Auto-label rules; linear-time matching with size limits, already in the tree.
+regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
 
 argon2 = "0.5"

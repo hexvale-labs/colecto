@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-press"
+description = "Enables the press command without any pre-configured scope."
+commands.allow = ["press"]
+
+[[permission]]
+identifier = "deny-press"
+description = "Denies the press command without any pre-configured scope."
+commands.deny = ["press"]

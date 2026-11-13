@@ -323,38 +323,62 @@ impl JmapAccount {
                 "This message is larger than 30 MB and cannot be opened here".into(),
             ));
         }
-        // JMAP Ids are URL-safe; refuse anything else rather than escaping it into a URL.
-        let blob = field(email, "blobId")?;
-        if [blob, session.id.as_str()].iter().any(|value| {
-            value.is_empty()
-                || !value
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-        }) {
-            return Err(failed());
+        session.download(field(email, "blobId")?)
+    }
+    /// Download several messages from one session with at most three downloads at a time.
+    /// Messages over `max_size` bytes are skipped.
+    pub(crate) fn fetch_many(
+        &self,
+        ids: &[String],
+        max_size: usize,
+        found: &mut dyn FnMut(String, Vec<u8>),
+    ) -> Result<(), Error> {
+        let wanted: Vec<&str> = ids
+            .iter()
+            .filter_map(|id| id.strip_prefix("jmap-"))
+            .collect();
+        if wanted.is_empty() {
+            return Ok(());
         }
-        let url = session
-            .download
-            .replace("{accountId}", &session.id)
-            .replace("{blobId}", blob)
-            .replace("{type}", "message%2Frfc822")
-            .replace("{name}", "message.eml");
-        let response = self
-            .authorize(session.client.get(secure_url(&url)?))
-            .send()
-            .map_err(http_error)?;
-        if !response.status().is_success() {
-            return Err(failed());
-        }
-        let mut bytes = Vec::new();
-        response
-            .take(crate::mime::MAX_RAW as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| failed())?;
-        if bytes.len() > crate::mime::MAX_RAW {
-            return Err(failed());
-        }
-        Ok(bytes)
+        let session = self.session()?;
+        let data = session.call(
+            "Email/get",
+            json!({"ids":wanted,"properties":["id","blobId","size"]}),
+        )?;
+        let emails = list(&data)?;
+        // Keep the caller's order (newest first) so likely reads arrive first.
+        let blobs: Vec<(String, String)> = wanted
+            .iter()
+            .filter_map(|id| {
+                let email = emails.iter().find(|email| email["id"] == *id)?;
+                if email["size"].as_u64()? > max_size as u64 {
+                    return None;
+                }
+                Some((format!("jmap-{id}"), email["blobId"].as_str()?.to_owned()))
+            })
+            .collect();
+        let queue = std::sync::Mutex::new(blobs.into_iter());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            for _ in 0..3 {
+                let sender = sender.clone();
+                let (queue, session) = (&queue, &session);
+                scope.spawn(move || {
+                    while let Some((id, blob)) = queue.lock().ok().and_then(|mut q| q.next()) {
+                        if sender.send((id, session.download(&blob))).is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+            drop(sender);
+            for (id, raw) in receiver {
+                if let Ok(raw) = raw {
+                    found(id, raw);
+                }
+            }
+        });
+        Ok(())
     }
     pub(crate) fn send(&self, input: &DraftInput, attachments: &[Attachment]) -> Result<(), Error> {
         self.send_inner(input, attachments).map_err(|error| match error {
@@ -525,6 +549,41 @@ impl Session<'_> {
             .enumerate()
             .map(|(index, (method, _))| method_result(&data, method, &index.to_string()))
             .collect()
+    }
+    /// Download one blob as RFC 5322 bytes, bounded by the largest message Colecto opens.
+    fn download(&self, blob: &str) -> Result<Vec<u8>, Error> {
+        // JMAP Ids are URL-safe; refuse anything else rather than escaping it into a URL.
+        if [blob, self.id.as_str()].iter().any(|value| {
+            value.is_empty()
+                || !value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        }) {
+            return Err(failed());
+        }
+        let url = self
+            .download
+            .replace("{accountId}", &self.id)
+            .replace("{blobId}", blob)
+            .replace("{type}", "message%2Frfc822")
+            .replace("{name}", "message.eml");
+        let response = self
+            .account
+            .authorize(self.client.get(secure_url(&url)?))
+            .send()
+            .map_err(http_error)?;
+        if !response.status().is_success() {
+            return Err(failed());
+        }
+        let mut bytes = Vec::new();
+        response
+            .take(crate::mime::MAX_RAW as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| failed())?;
+        if bytes.len() > crate::mime::MAX_RAW {
+            return Err(failed());
+        }
+        Ok(bytes)
     }
     /// Upload one attachment and return its blob id (RFC 8620 §6.1).
     fn upload(&self, file: &Attachment) -> Result<String, Error> {

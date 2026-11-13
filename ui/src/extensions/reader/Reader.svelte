@@ -15,11 +15,12 @@
   });
   import Icon from '../../Icon.svelte';
   import type { Labels } from '../../lib/api';
-  import { onMount } from 'svelte';
+  import { onMount, type Snippet } from 'svelte';
+  import type { ReaderSlot } from '../../lib/reader-slots';
   import type { Draft, Message, MessageContent, ReaderService, AttachmentInfo } from '../../lib/api';
   import { replyDraft, type ReplyMode } from '../../lib/reply';
   import { copyText } from '../../lib/copy';
-  let { id, service, self = '', folder = 'Inbox', labels, labeling, labelError = '', remoteImages: alwaysRemote = false, onlabel, onback, onreply }: { remoteImages?: boolean; labelError?: string; labels: Labels; labeling: boolean; onlabel: (name: string, remove: boolean) => void; id: string; folder?: string; self?: string; service: ReaderService; onback: () => void; onreply?: (draft: Draft) => void } = $props();
+  let { id, service, self = '', folder = 'Inbox', labels, labeling, labelError = '', remoteImages: alwaysRemote = false, onlabel, onback, onreply, actions, aboveBody }: { actions?: Snippet<[ReaderSlot]>; aboveBody?: Snippet<[ReaderSlot]>; remoteImages?: boolean; labelError?: string; labels: Labels; labeling: boolean; onlabel: (name: string, remove: boolean) => void; id: string; folder?: string; self?: string; service: ReaderService; onback: () => void; onreply?: (draft: Draft) => void } = $props();
   let message = $state<Message | null>(null);
   let content = $state<MessageContent | null>(null);
   let contentError = $state('');
@@ -67,6 +68,8 @@
     clearTimeout(copiedTimer); copiedTimer = setTimeout(() => copied = null, 1600);
   }
   function reply(mode: ReplyMode) { if (message) onreply?.(replyDraft(mode, message, content, self)); }
+  // Slots filled by other bundled extensions; they get the message and a way to start a reply.
+  let slot = $derived<ReaderSlot | null>(message ? { id, message, content, reply: onreply && ((text: string) => { const draft = replyDraft('reply', message!, content, self); onreply?.({ ...draft, body: text + draft.body }); }) } : null);
   async function save(file: AttachmentInfo) {
     downloading = file.index; contentError = '';
     try {
@@ -89,6 +92,7 @@
       <button class="tool" aria-label="Reply all" title="Reply all" onclick={() => reply('all')}><Icon name="replyAll" /><span>Reply all</span></button>
       <button class="tool" aria-label="Forward" title="Forward" onclick={() => reply('forward')}><Icon name="forward" /><span>Forward</span></button>
     </div>{/if}
+    {#if slot && actions}{@render actions(slot)}{/if}
     {#if message}<button class="tool copy-tool" class:push={!onreply} aria-label="Copy message text" title="Copy message text" onclick={copy}><Icon name={copied ? 'check' : 'copy'} /><span aria-live="polite">{copied === null ? 'Copy' : copied ? 'Copied' : 'Copy failed'}</span></button>{/if}
   </header>
   {#if loading}<div class="detail-state" role="status">Opening message…</div>
@@ -106,6 +110,7 @@
       {#if labelError}<p class="error-box" role="alert">{labelError}</p>{/if}
       {#if Object.keys(labels).length}<fieldset class="message-labels" disabled={labeling}><legend class="sr-only">Labels</legend>{#each Object.keys(labels) as name (name)}<label class="chip toggle"><input type="checkbox" aria-label={`Label ${name}`} checked={labels[name].includes(id)} onchange={(event) => onlabel(name, !event.currentTarget.checked)} /><Icon name="check" size={12} />{name}</label>{/each}</fieldset>{/if}
       {#if content?.attachments.length}<ul class="attachments" aria-label="Attachments">{#each content.attachments as file (file.index)}<li><button class="attachment" disabled={downloading !== null} onclick={() => save(file)} aria-label={`Download ${file.name}`}><Icon name="attach" /><span class="attachment-name">{file.name}</span><small>{downloading === file.index ? 'Downloading…' : size(file.size)}</small></button></li>{/each}</ul>{/if}
+      {#if slot && aboveBody}{@render aboveBody(slot)}{/if}
       {#if contentError}<p class="content-note" role="status">Showing saved text. {contentError}</p>{/if}
       {#if content?.html}<div class="body-controls">
         {#if showHtml && !remoteImages}<span class="body-note"><Icon name="image" />Remote images are blocked.</span><button class="text-button" onclick={() => allowRemote = true}>Load remote images</button>{/if}

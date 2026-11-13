@@ -9,7 +9,7 @@
   "app": {
     "windows": [],
     "security": {
-      "capabilities": [],
+      "capabilities": ["native-feedback"],
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'self'"
     }
   },
