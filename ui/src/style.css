@@ -626,7 +626,15 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .warning-text strong { color: var(--ink); overflow-wrap: anywhere; }
 .warning-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
-.list-status { display: inline-flex; align-items: center; gap: 8px; }
+.list-status { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.list-status .status-text { flex-shrink: 0; }
+.list-status .status-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.75; }
+.list-status .status-detail::before { content: '·'; margin-right: 6px; }
+.list-status.offline .status-text { color: var(--danger); }
+.list-footer .refresh { flex-shrink: 0; }
+/* New mail from a refresh settles in from just above its slot, a few rows at a time. */
+.mail-item.arrived { animation: arrive 240ms var(--ease-out) backwards; animation-delay: calc(var(--arrival, 0) * 40ms); }
+@keyframes arrive { from { opacity: 0; transform: translateY(-6px); } }
 .copy-tool.push { margin-left: auto; }
 
 .app-shell { position: relative; isolation: isolate; z-index: var(--layer-workspace); }

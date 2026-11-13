@@ -735,6 +735,11 @@ async fn with_reader<T: Send + 'static>(
     })?
 }
 #[derive(serde::Deserialize, Default)]
+struct ContentQuery {
+    #[serde(default)]
+    cached: bool,
+}
+#[derive(serde::Deserialize, Default)]
 struct MessageQuery {
     #[serde(default = "inbox_folder")]
     folder: String,
@@ -932,6 +937,7 @@ async fn message_content(
     axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(query): Query<ContentQuery>,
 ) -> Result<Json<MessageContent>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesRead)?;
     let demo = id.clone();
@@ -939,7 +945,13 @@ async fn message_content(
         host,
         account,
         move |store| store.content(&demo),
-        move |reader| reader.content(&id),
+        move |reader| {
+            // Clients warm their own caches with `cached=true`; that never reaches the provider.
+            if query.cached && !reader.is_cached(&id) {
+                return Err(Error::Missing);
+            }
+            reader.content(&id)
+        },
     )
     .await
     .map(Json)

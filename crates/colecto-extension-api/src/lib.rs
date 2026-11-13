@@ -247,6 +247,7 @@ pub const NAVIGATION_TARGETS: &[&str] = &[
     "sent",
     "compose",
     "settings/accounts",
+    "settings/mail",
     "settings/appearance",
     "settings/notifications",
     "settings/privacy",
