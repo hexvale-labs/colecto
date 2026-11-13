@@ -58,6 +58,7 @@ Set these under `environment:` in `compose.yaml`.
 | `COLECTO_DATA_DIR` | `/data` | Database, owner token and extension data |
 | `COLECTO_SYNC_SECONDS` | `60` | How often to poll for mail (at least 10); push still applies |
 | `COLECTO_LOG` | `info` | Log filter, such as `debug` or `warn,colecto_core=debug` |
+| `COLECTO_UPDATE_CHECK` | unset | `off` stops the Host from ever asking GitHub for new releases |
 | `COLECTO_BIND`, `COLECTO_PORT` | `0.0.0.0`, `4173` | Listener inside the container |
 
 Keep the `colecto` service off the public network; only Caddy should reach port 4173.
@@ -282,6 +283,18 @@ web client subscribes with `fetch` and shows these as in-app notifications. The
 stream is bounded and has no historical replay. Desktop notifications may be
 missed during disconnection; opening the client fetches the current mail state.
 The agent deliberately ignores initial `ready` and does not notify for old mail.
+
+### Release check
+
+`GET /api/v1/releases/latest` (owner only, called by the UI at start when update
+notifications are on) asks GitHub's `repos/hexvale-labs/colecto/releases/latest` for the
+newest stable release and answers `{current, latest}`, where `latest` is
+`{version, url}` only when that release is newer than the running build; drafts,
+pre-releases and links outside the repository's release pages are ignored. The request
+has an 8 second timeout. The answer is cached in memory for six hours (30 minutes after a
+failure), so the server contacts GitHub at most that often. A failed check answers 502
+and the UI stays quiet. Set `COLECTO_UPDATE_CHECK=off` to never contact GitHub; the route
+then always answers `latest: null`.
 
 ### Version
 

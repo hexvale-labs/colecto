@@ -36,7 +36,9 @@ Extensions**, pick that package and press **Install**. A warning explains that t
 permission system cannot stop an extension from lying about its purpose or misusing data
 it is allowed to read, and recommends open-source extensions from known authors; its
 Install button unlocks after five seconds. Installation enables the extension with every requested capability on all accounts.
-Disable or remove it through Settings → Extensions. Saved mail is never removed.
+Dropping a `.colectoext` file anywhere on Settings → Extensions opens the same warning
+directly; any other file gets a short message instead. Disable or remove it through
+Settings → Extensions. Saved mail is never removed.
 
 The runtime accepts binary Wasm, not JavaScript, Svelte, HTML, arbitrary URLs or
 WASI applications. Third-party UI currently contributes **panels and overlays**; replacing the
@@ -194,9 +196,9 @@ server descriptions, URLs and credentials are never copied into errors.
 
 Declare `window.overlay`, `slot = "overlay"` and `z_index = 10` (a good default).
 `z_index` is required with this capability, forbidden without it, and must be an
-integer from 1 through 10000. Bundled overlays use 500. Settings uses 1000;
-menus use 1100, the command runner 1200, and the install dialog 1300. Native
-modal dialogs also use the browser top layer. Oneko uses 10000 intentionally.
+integer from 1 through 10000. Settings uses 1000; menus use 1100, the command
+runner 1200, bundled notifications 1250, and the install dialog 1300. Native
+modal dialogs and the notification region also use the browser top layer. Oneko uses 10000 intentionally.
 
 The Host renders each enabled overlay in a fixed viewport container with
 `pointer-events: none`. Guests remain fresh Wasmi instances with the same fuel,
