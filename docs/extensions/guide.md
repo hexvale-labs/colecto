@@ -31,7 +31,11 @@ The integer must be between 1 and 10000 and is forbidden without that capability
 
 ## 3. Write the module
 
-Use the readable WAT in `examples/connection-panel/module.wat` as a panel starting
+For Rust, use the [Rust SDK](rust-sdk.md): you write plain functions, register them
+with `colecto_extension::export!`, and the SDK handles the imports, JSON and dispatch.
+`examples/oneko` is a complete overlay built with it.
+
+For other languages, use the readable WAT in `examples/connection-panel/module.wat` as a panel starting
 point. Export `memory` and `run`. Only three imports are available, all in the
 `colecto` namespace: `action(ptr, capacity)`, `emit(ptr, len)` and
 `request(ptr, len, output, capacity)`. Return values are byte lengths (action and
@@ -42,9 +46,7 @@ The selected action is passed back on the next invocation. Service requests use
 an `operation` capability and operation-specific arguments. Identity and account
 come from the Host and cannot be supplied by the guest.
 
-For Rust, copy the standalone `examples/oneko` crate. It uses `#![no_std]`, imports
-the ABI directly, and exports `run`. Build for `wasm32-unknown-unknown`, without
-WASI. Keep the module below 16 MiB. Every invocation starts fresh; overlays store
+Build for `wasm32-unknown-unknown`, without WASI. Keep the module below 16 MiB. Every invocation starts fresh; overlays store
 state in the emitted string and receive it back in the next frame action.
 See [the contract](README.md#overlay-extensions) for exact frame JSON and limits.
 
@@ -140,9 +142,9 @@ step = 1
 unit = "px"
 ```
 
-The owner edits this in Settings. See Oneko's `src/lib.rs` for a no_std guest
-that reads speed, opacity and stopping distance once per frame using one bridge
-call. The [contract](README.md#extension-settings) lists validation and routes.
+The owner edits this in Settings. With the Rust SDK, read the values into your own
+struct with `cx.settings::<Settings>()`; Oneko's `src/lib.rs` reads speed, opacity and
+stopping distance that way once per frame. The [contract](README.md#extension-settings) lists validation and routes.
 
 ## Talk to another extension
 
@@ -157,4 +159,6 @@ Read `data` from the service response; null also means no answer. To answer a re
 on your own bus, inspect the `bus.request` action and emit
 `{"bus":{"response":{"example":true}}}`. Each delivery starts a fresh instance,
 so keep needed context in the payload. Use versioned names such as `v1/example`.
-See the [bus contract](README.md#extension-bus) for limits and bundled surfaces.
+See the [bus contract](README.md#extension-bus) for limits and bundled surfaces. In
+Rust, the [SDK's bus types](rust-sdk.md#bus-messages) build these requests and answers
+for you.

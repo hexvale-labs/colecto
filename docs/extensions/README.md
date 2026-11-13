@@ -80,7 +80,8 @@ invocations. Modules may import only these functions from module `colecto`:
 Only text and buttons are rendered, through Svelte's escaping. Strings never
 become HTML, script, CSS, URLs or Tauri commands. Actions are untrusted labels;
 the Host owns actual buttons and invocation. See the WAT example for a complete
-module, or compile your language to this minimal ABI without WASI.
+module, or compile your language to this minimal ABI without WASI. Rust extensions can
+use the [Rust SDK](rust-sdk.md), which implements this ABI.
 
 ## Resource and trust boundaries
 
