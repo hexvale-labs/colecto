@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Select from '../../Select.svelte';
   import { extensionHost, subscribeEvents, type ExtensionSetting, type ExtensionSettings, type ExtensionState } from '../../lib/api';
+  import { touchSlider } from '../../lib/slider';
   let { manifest }: { manifest: ExtensionState['manifest'] } = $props();
   type Value = ExtensionSettings['values'][string];
   let data = $state<ExtensionSettings>();
@@ -64,7 +65,7 @@
         {:else if setting.type === 'range'}
           <div class="setting range">
             <div class="setting-text"><div class="range-head"><label for={field(setting.key)}>{setting.label}</label><output for={field(setting.key)}>{shown(setting, value)}</output></div>{#if setting.description}<p>{setting.description}</p>{/if}</div>
-            <div><input id={field(setting.key)} class="slider" type="range" min={setting.min} max={setting.max} step={setting.step ?? 'any'} value={Number(value)} style:--fill={fill(setting, value)} aria-valuetext={shown(setting, value)} oninput={(event) => change(setting.key, Number(event.currentTarget.value), 300)} onchange={() => void flush()} />
+            <div><input id={field(setting.key)} class="slider" type="range" use:touchSlider min={setting.min} max={setting.max} step={setting.step ?? 'any'} value={Number(value)} style:--fill={fill(setting, value)} aria-valuetext={shown(setting, value)} oninput={(event) => change(setting.key, Number(event.currentTarget.value), 300)} onchange={() => void flush()} />
             <div class="range-ends" aria-hidden="true"><span>{shown(setting, setting.min ?? 0)}</span><span>{shown(setting, setting.max ?? 0)}</span></div></div>
           </div>
         {:else if setting.type === 'choice' && (setting.options?.length ?? 0) <= 4}

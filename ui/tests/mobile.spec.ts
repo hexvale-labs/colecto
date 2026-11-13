@@ -136,3 +136,32 @@ test.describe('on a touch screen', () => {
     expect(await refresh.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
   });
 });
+
+// Regression: in the Android app a finger never moved a slider. Synthetic touch pointer events
+// get no native range handling in any engine, so this checks the slider's own touch path.
+test('sliders follow a finger and ignore a swipe that becomes a scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Mail', exact: true }).click();
+  const slider = page.getByRole('slider', { name: 'Messages to keep ready' });
+  await expect(slider).toBeEnabled();
+  const touch = (type: string, ratio: number) => slider.evaluate((input, [type, ratio]) => {
+    const box = input.getBoundingClientRect();
+    input.dispatchEvent(new PointerEvent(type as string, { pointerId: 7, pointerType: 'touch', bubbles: true, clientX: box.left + box.width * (ratio as number), clientY: box.top + box.height / 2 }));
+  }, [type, ratio] as const);
+  const saved = page.waitForRequest(request => request.url().endsWith('/api/v1/preferences') && request.method() === 'POST' && 'prefetch' in (request.postDataJSON() ?? {}));
+  await touch('pointerdown', 0.5);
+  for (const ratio of [0.6, 0.75, 0.9, 1.2]) await touch('pointermove', ratio);
+  await expect(slider).toHaveValue('100');
+  await expect(page.locator('output[for="prefetch-count"]')).toHaveText('100');
+  await touch('pointerup', 1.2);
+  expect((await saved).postDataJSON().prefetch.count).toBe(100);
+  // A tap jumps to where it lands.
+  await touch('pointerdown', 0.2); await touch('pointerup', 0.2);
+  await expect(slider).not.toHaveValue('100');
+  const tapped = await slider.inputValue();
+  // A vertical swipe: the browser takes it for scrolling and cancels the pointer.
+  await touch('pointerdown', 0.9); await touch('pointercancel', 0.9);
+  await expect(slider).toHaveValue(tapped);
+});
