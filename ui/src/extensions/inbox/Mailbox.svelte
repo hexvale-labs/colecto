@@ -1,12 +1,14 @@
 <script lang="ts">
-  import type { MailItem } from '../../lib/api';
+  import type { ListDensity, MailItem } from '../../lib/api';
   import { when } from '../../lib/when';
   import { extensionBus } from '../../lib/bus';
   const bus = extensionBus('inbox');
   import Icon from '../../Icon.svelte';
-  let { items, grouped = true, fetching = false, fetchedAt = null, filtered = false, searching = false, selected, folder, loading, error, disabled, onopen, onretry }: {
+  let { items, grouped = true, density = 'full', fetching = false, fetchedAt = null, filtered = false, searching = false, selected, folder, loading, error, disabled, onopen, onretry }: {
     /** A search or label narrows the list. */ filtered?: boolean;
-    /** A search is on its way to the mail service. */ searching?: boolean; grouped?: boolean; items: MailItem[]; selected: string | null; folder: 'Inbox' | 'Drafts' | 'Sent';
+    /** A search is on its way to the mail service. */ searching?: boolean;
+    /** Group rows under date headings such as Today and November. */ grouped?: boolean;
+    /** Full rows show a preview line, medium rows drop it, compact rows are one line. */ density?: ListDensity; items: MailItem[]; selected: string | null; folder: 'Inbox' | 'Drafts' | 'Sent';
     fetching?: boolean; fetchedAt?: number | null; loading: boolean; error: string; disabled: boolean;
     onopen: (id: string) => void; onretry: () => void;
   } = $props();
@@ -20,7 +22,7 @@
   let fetched = $derived(fetchedAt ? new Date(fetchedAt * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '');
 </script>
 
-<section class="mailbox" aria-label={`${folder} messages`} aria-busy={loading}>
+<section class="mailbox" data-density={density} aria-label={`${folder} messages`} aria-busy={loading}>
   <h1 class="folder-title">{folder}</h1>
   {#if error}<div class="list-state error"><p role="alert">{error}</p>{#if items.length > 0}<p>Showing saved mail; it may be out of date.</p>{/if}<button class="secondary" onclick={onretry}>Try again</button></div>{/if}
   <div class="message-list">

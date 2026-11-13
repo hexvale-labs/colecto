@@ -488,9 +488,9 @@ mod tests {
         let source = include_str!("../../../ui/src/extensions/notifications/extension.toml");
         assert!(parse_manifest(source).is_ok());
         for invalid in [
-            source.replace("z_index = 500", ""),
-            source.replace("500", "0"),
-            source.replace("500", "10001"),
+            source.replace("z_index = 1250", ""),
+            source.replace("1250", "0"),
+            source.replace("1250", "10001"),
             source.replace("window.overlay", "account.read"),
             source.replace("window.overlay", "app.navigate"),
             format!("{source}\nunknown = true"),

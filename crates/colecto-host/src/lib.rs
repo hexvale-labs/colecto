@@ -4,6 +4,7 @@ pub mod approvals;
 mod bus;
 pub mod mcp;
 pub mod preferences;
+mod releases;
 pub mod services;
 mod store;
 use api_keys::{ApiKeys, Principal};
@@ -227,6 +228,7 @@ fn build_app(host: Host, assets: Assets) -> Router {
         .route("/drafts", get(drafts).post(save_draft))
         .route("/drafts/{id}", get(draft))
         .route("/version", get(version))
+        .route("/releases/latest", get(latest_release))
         .fallback(|| async { Failure(StatusCode::NOT_FOUND, "API route not found".into()) });
     let router = Router::new().nest("/api/v1", api);
     let router = match assets {
@@ -259,6 +261,19 @@ async fn version() -> Json<serde_json::Value> {
         "commit": commit(),
         "api": "v1",
     }))
+}
+
+/// Owner only: a newer stable release, or `null`. The UI calls it once per start, and only
+/// when the owner keeps update notifications on, so turning them off means no request.
+async fn latest_release(headers: HeaderMap) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    let latest = tokio::task::spawn_blocking(|| releases::latest(VERSION))
+        .await
+        .map_err(|_| forbidden())?
+        .map_err(|error| Failure(StatusCode::BAD_GATEWAY, error))?;
+    Ok(Json(
+        serde_json::json!({ "current": VERSION, "latest": latest }),
+    ))
 }
 
 async fn boundary(State(host): State<Host>, request: Request, next: Next) -> Response {

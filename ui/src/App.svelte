@@ -49,15 +49,31 @@
     finally { busy = false; }
   }
   let requested = $state<Capability[]>([]);
-  async function review(event: SubmitEvent) {
-    event.preventDefault();
+  let installError = $state('');
+  let dropping = $state(false);
+  /** Why a file cannot be an extension package, or an empty string. */
+  const unusable = (file: File) => !file.name.toLowerCase().endsWith('.colectoext') ? `${file.name} is not an extension package. Choose a .colectoext file.`
+    : file.size > 16 * 1024 * 1024 ? 'Extension packages must be at most 16 MiB.' : '';
+  async function review(event?: SubmitEvent) {
+    event?.preventDefault();
     const file = packageFile?.[0];
     if (!file) return;
-    if (!file.name.endsWith('.colectoext')) { error = 'Choose a .colectoext extension package.'; return; }
-    if (file.size > 16 * 1024 * 1024) { error = 'Extension packages must be at most 16 MiB.'; return; }
-    error = ''; installNotice = '';
-    try { requested = (await extensionHost.review(new Uint8Array(await file.arrayBuffer()))).capabilities; warning = file; } catch (e) { error = (e as Error).message; }
+    installNotice = '';
+    installError = unusable(file);
+    if (installError) return;
+    try { requested = (await extensionHost.review(new Uint8Array(await file.arrayBuffer()))).capabilities; warning = file; } catch (e) { installError = (e as Error).message; }
   }
+  // A package dropped anywhere on the Extensions page goes straight to the same review as Install.
+  function dropped(files: FileList) {
+    dropping = false;
+    if (busy || loading) return;
+    installNotice = '';
+    installError = files.length > 1 ? 'Drop one extension package at a time.' : unusable(files[0]);
+    if (installError) return;
+    packageFile = files;
+    void review();
+  }
+  const carriesFiles = (event: DragEvent) => !!event.dataTransfer?.types.includes('Files');
   async function install(file: File) {
     warning = null;
     busy = true; error = ''; installNotice = '';
@@ -87,37 +103,43 @@
 </script>
 
 {#snippet extensionSettings(workspace?: Workspace)}
-  <section class="extension-settings" aria-labelledby="extensions-title">
-    <header class="section-head"><h2 id="extensions-title">Extensions</h2><p>Enabled extensions have all declared capabilities on every account. Changes apply to new requests and are kept across restarts.</p></header>
-    <form class="settings-card" onsubmit={review}>
-      <fieldset disabled={busy || loading}><legend>Install extension</legend>
-        <p>Pick a <code>.colectoext</code> package. Installing enables every requested capability on all accounts. Author names are self-reported, not verified.</p>
-        <div class="file-grid single">
-          <FilePick id="extension-package" label="Extension package" hint=".colectoext, up to 16 MiB" accept=".colectoext" bind:files={packageFile} />
-        </div>
+  <!-- svelte-ignore a11y_no_static_element_interactions (dropping is a shortcut; the file picker is the accessible way in) -->
+  <section class="extension-settings" class:dropping aria-labelledby="extensions-title"
+    ondragover={(event) => { if (!carriesFiles(event)) return; event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; dropping = true; }}
+    ondragleave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) dropping = false; }}
+    ondrop={(event) => { if (!carriesFiles(event)) return; event.preventDefault(); if (event.dataTransfer) dropped(event.dataTransfer.files); }}>
+    <header class="section-head"><h2 id="extensions-title">Extensions</h2><p>Enabled extensions have every capability they declare, on every account. Changes apply to new requests and are kept across restarts.</p></header>
+    <form class="settings-group" onsubmit={review}>
+      <h3 class="group-label">Install an extension</h3>
+      <p>Pick or drop a <code>.colectoext</code> package. You review what it asks for before anything is installed. Author names are self-reported, not verified.</p>
+      <fieldset class="install-row" disabled={busy || loading}>
+        <legend class="sr-only">Install extension</legend>
+        <FilePick id="extension-package" label="Extension package" hint=".colectoext, up to 16 MiB" accept=".colectoext" {dropping} ondropfiles={dropped} bind:files={packageFile} />
         <button class="secondary" type="submit" disabled={!packageFile?.length}>Install</button>
       </fieldset>
+      {#if installError}<p class="error-box" role="alert">{installError}</p>{/if}
       {#if installNotice}<p class="settings-notice" role="status">{installNotice}</p>{/if}
     </form>
-    <div class="extension-list-head">
-      <h3>Installed</h3>
-
+    <div class="settings-group">
+      <h3 class="group-label">Installed</h3>
+      <div class="settings-list">
+        {#each extensions as extension (extension.manifest.id)}
+          {@const pane = extension.bundled ? bundledPanes[extension.manifest.id] : extension.manifest.slot === 'panel' && !extension.manifest.capabilities.includes('window.overlay') ? `ext:${extension.manifest.id}` : undefined}
+          <fieldset class="extension-card" class:off={!extension.enabled} disabled={busy || loading}>
+            <legend class="sr-only">{extension.manifest.name}</legend>
+            <div class="extension-top">
+              <span class="extension-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1)}</span>
+              <div class="extension-title"><strong class="extension-name" aria-hidden="true">{extension.manifest.name}</strong><p class="meta"><span class="tag" class:trusted={extension.bundled}>{extension.bundled ? 'Bundled' : 'Third-party · Wasm'}</span>By {extension.manifest.author} · API {extension.manifest.api_version}</p></div>
+              <label class="switch"><input type="checkbox" checked={extension.enabled} onchange={(event) => void update(extension, event.currentTarget.checked)} /><span class="sr-only">Enabled for all accounts</span></label>
+            </div>
+            <p class="extension-description">{extension.manifest.description}</p>
+            {#if workspace && pane && extension.enabled}<label class="choice show-pane"><input type="checkbox" checked={workspace.shown(pane)} onchange={(event) => workspace.toggle(pane, event.currentTarget.checked)} />Show in the workspace</label>{/if}
+            {#if extension.manifest.capabilities.length}<div class="grants"><span class="grants-title">Capabilities · all accounts</span><ul>{#each extension.manifest.capabilities as capability}<li>{capabilityLabel(capability)}</li>{/each}</ul></div>{/if}
+            {#if !extension.bundled}<button class="text-button danger-text" onclick={() => void remove(extension)}>Remove extension</button>{/if}
+          </fieldset>
+        {/each}
+      </div>
     </div>
-    {#each extensions as extension (extension.manifest.id)}
-      {@const pane = extension.bundled ? bundledPanes[extension.manifest.id] : extension.manifest.slot === 'panel' && !extension.manifest.capabilities.includes('window.overlay') ? `ext:${extension.manifest.id}` : undefined}
-      <fieldset class="settings-card extension-card" class:off={!extension.enabled} disabled={busy || loading}>
-        <legend class="sr-only">{extension.manifest.name}</legend>
-        <div class="extension-top">
-          <span class="extension-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1)}</span>
-          <div class="extension-title"><strong class="extension-name" aria-hidden="true">{extension.manifest.name}</strong><p class="meta"><span class="tag" class:trusted={extension.bundled}>{extension.bundled ? 'Bundled' : 'Third-party · Wasm'}</span>By {extension.manifest.author} · API {extension.manifest.api_version}</p></div>
-          <label class="switch"><input type="checkbox" checked={extension.enabled} onchange={(event) => void update(extension, event.currentTarget.checked)} /><span class="sr-only">Enabled for all accounts</span></label>
-        </div>
-        <p class="extension-description">{extension.manifest.description}</p>
-        {#if workspace && pane && extension.enabled}<label class="choice show-pane"><input type="checkbox" checked={workspace.shown(pane)} onchange={(event) => workspace.toggle(pane, event.currentTarget.checked)} />Show in the workspace</label>{/if}
-        {#if extension.manifest.capabilities.length}<div class="grants"><span class="grants-title">Capabilities · all accounts</span><ul>{#each extension.manifest.capabilities as capability}<li>{capabilityLabel(capability)}</li>{/each}</ul></div>{/if}
-        {#if !extension.bundled}<button class="text-button danger-text" onclick={() => void remove(extension)}>Remove extension</button>{/if}
-      </fieldset>
-    {/each}
   </section>
 {/snippet}
 

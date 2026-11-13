@@ -7,7 +7,8 @@ export const test = base.extend({
     await page.request.post(`${testOrigin}/api/v1/preferences`, {
       headers: { authorization: `Bearer ${ownerToken}`, origin: testOrigin, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' },
       // A fresh Host starts with the demo account off and onboarding pending; most specs use sample mail.
-      data: { workspace: {}, account: 'demo', accounts_enabled: { demo: true }, onboarded: true },
+      data: { workspace: {}, account: 'demo', list_density: 'full', date_groups: true, accounts_enabled: { demo: true }, onboarded: true,
+        notifications: { enabled: true, mail: true, approvals: true, system: false, position: 'top', updates: true } },
     });
     await page.addInitScript(({ token, origin }) => {
       if (window.location.origin === origin) {

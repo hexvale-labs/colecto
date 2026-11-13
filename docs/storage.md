@@ -47,8 +47,9 @@ Host extension policy and Wasm modules, API key verifiers, the send-approval jou
 and owner preferences are versioned records in the `host` namespace of the same
 database, reached through `Accounts::database()`. The Host keeps these records only in
 `colecto.db` and ignores old JSON files. Owner preferences hold the
-workspace layout (a bounded JSON object the UI validates), the selected account and
-whether MCP is on. The browser keeps only the session's access token in
+workspace layout (a bounded JSON object the UI validates), the selected account,
+whether MCP is on, appearance, notification and message-list choices, and the newest
+release version the owner was already told about (`notified_release`). The browser keeps only the session's access token in
 `sessionStorage`. No device replication is introduced.
 
 

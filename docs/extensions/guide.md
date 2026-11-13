@@ -56,16 +56,16 @@ See [the contract](README.md#overlay-extensions) for exact frame JSON and limits
 | --- | ---: |
 | Workspace | 0 |
 | Third-party overlay, a good default | 10 |
-| Bundled extension overlays | 500 |
 | Settings card | 1000 |
 | Menus and popovers, including Settings controls | 1100 |
 | Command runner | 1200 |
+| Bundled notifications (also in the top layer) | 1250 |
 | Install dialog | 1300 |
 | Oneko, an example of “always on top” | 10000 |
 
 The registry is `ui/src/lib/layers.ts`. Modal dialogs additionally occupy the
-browser's top layer. Notifications sit below Settings. Overlay containers never
-intercept pointer events.
+browser's top layer, and so does the notification region, which shows above Settings.
+Overlay containers never intercept pointer events.
 
 ## 5. Package and build
 
@@ -83,7 +83,7 @@ source files or directory entries.
 
 ## 6. Install and debug
 
-Open Settings → Extensions and choose your package. Read the warning and capability
+Open Settings → Extensions and choose your package, or drop the file anywhere on that page. Read the warning and capability
 list. After five seconds, Install enables it. Cancel leaves the app unchanged.
 Settings shows read-only capabilities, an enable switch, workspace visibility for
 panels, and Remove for third-party packages.
