@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { PrefetchPreferences } from '../../lib/api';
+  import { touchSlider } from '../../lib/slider';
   let { prefetch, onchange }: { prefetch: PrefetchPreferences; onchange: (next: PrefetchPreferences) => void } = $props();
   // A refresh lists the newest 100 messages, so prefetch can reach no further.
   const MAX = 100;
@@ -30,7 +31,7 @@
     <div class="setting" class:off={!prefetch.enabled}>
       <div class="setting-text range-head"><h3><label for="prefetch-count">Messages to keep ready</label></h3><output for="prefetch-count">{shown}</output></div>
       <p class="range-note">The newest messages in your Inbox. More uses more storage and bandwidth; messages over 10 MB still open on demand.</p>
-      <input id="prefetch-count" class="slider" type="range" min="0" max={MAX} step="5" value={shown} disabled={!prefetch.enabled} style:--fill={`${(shown / MAX) * 100}%`} aria-valuetext={`${shown} messages`} oninput={(event) => slide(Number(event.currentTarget.value))} onchange={commit} />
+      <input id="prefetch-count" class="slider" type="range" use:touchSlider min="0" max={MAX} step="5" value={shown} disabled={!prefetch.enabled} style:--fill={`${(shown / MAX) * 100}%`} aria-valuetext={`${shown} messages`} oninput={(event) => slide(Number(event.currentTarget.value))} onchange={commit} />
     </div>
   </div>
 </section>

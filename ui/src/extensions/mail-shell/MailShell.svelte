@@ -10,7 +10,7 @@
   import wordmark from '../../assets/wordmark.svg';
   import { setAccessToken } from '../../lib/api';
   import { onMount, tick, untrack } from 'svelte';
-  import { claimBack, goBack } from '../../lib/back';
+  import { claimBack, goBack, settled } from '../../lib/back';
   import ExtensionPanel from '../../ExtensionPanel.svelte';
   import DockArea, { type PaneInfo } from '../../DockArea.svelte';
   import { activate as showPane, defaultLayout, dock, dockEdge, groupOf, parseLayout, reconcile, setVisible, type Edge, type Layout } from '../../lib/layout';
@@ -334,7 +334,16 @@
     ...(view?.kind === 'draft' ? ['Save draft', ...(connected ? ['Send message'] : [])].map(name => ({ id: name, name, run: () => { document.querySelector<HTMLButtonElement>(`.composer [data-command="${name === 'Save draft' ? 'save' : 'send'}"]`)?.click(); } })) : []),
     ...(view?.kind === 'message' ? [{ id: 'close-tab', name: 'Close current message tab', run: () => { if (view?.kind === 'message') void closeTab(view.id); } }] : []),
     ...(currentTabs.length > 1 ? [{ id: 'close-all-tabs', name: 'Close all message tabs', run: closeAllTabs }] : []),
-  ] as Command[]).map(command => ({ ...command, disabled: command.disabled || busy || labeling || !initialized })));
+  ] as Command[]).map(command => ({ ...command, disabled: command.disabled || busy || labeling || !initialized })).concat(
+    // Outside the busy check: reloading is the way out when the app is stuck.
+    { id: 'reload', name: 'Reload the app', run: reloadApp, disabled: false },
+  ));
+  let reloading = false;
+  function reloadApp() {
+    if ((dirty || settingsDirty || busy) && !window.confirm('Reload Colecto? Unsaved changes will be lost.')) return;
+    // Closing the command runner moves history back; reloading during that move is cancelled.
+    reloading = true; void settled().then(() => window.location.reload());
+  }
   function invalidateList() { ++listGeneration; loading = false; fetching = false; searching = false; }
   // Each folder's last list stays in memory, so switching back shows it at once while it refreshes.
   const folderCache = new Map<string, { items: MailItem[]; fetchedAt: number | null }>();
@@ -496,7 +505,7 @@
     if (view?.kind === 'draft') view.draft = draft;
     if (folder === 'Drafts') void loadList();
   }
-  function beforeUnload(event: BeforeUnloadEvent) { if (dirty || settingsDirty || busy) { event.preventDefault(); event.returnValue = ''; } }
+  function beforeUnload(event: BeforeUnloadEvent) { if (!reloading && (dirty || settingsDirty || busy)) { event.preventDefault(); event.returnValue = ''; } }
   const hour = new Date().getHours();
   const greeting = hour < 5 ? 'Up late?' : hour < 12 ? 'Good morning.' : hour < 18 ? 'Good afternoon.' : 'Good evening.';
   onMount(() => {

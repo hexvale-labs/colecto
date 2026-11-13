@@ -74,6 +74,16 @@ export function claimBack(entry: BackEntry): () => void {
   };
 }
 
+/** Resolves once pending history moves have finished. A navigation started meanwhile (a
+ *  reload right after closing a dialog) would be cancelled by the traversal. The first check
+ *  waits a task, because a dialog's `close` event, which releases its entry, comes as one. */
+export function settled(): Promise<void> {
+  return new Promise(resolve => {
+    const check = () => scheduled || traversing ? setTimeout(check, 16) : resolve();
+    setTimeout(check);
+  });
+}
+
 /** For in-app back arrows: go back through history when the stack has something to close. */
 export function goBack() {
   if (!stack.length) return false;

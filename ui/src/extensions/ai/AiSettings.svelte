@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { touchSlider } from '../../lib/slider';
   import { aiHost, aiService, type AiSettings, type Effort, type LabelRule, type SettingsView } from './api';
   import { setEnabled } from './state.svelte';
   import KeyField from './KeyField.svelte';
@@ -89,7 +90,7 @@
         <KeyField label="API key" saved={view.keys.decision} onsave={async (key) => { view = await aiHost.key('decision', key); }} />
         <div class="field confidence">
           <span class="range-head"><label for="ai-threshold">Confidence needed</label><output for="ai-threshold">{percent(settings.decision.threshold)}</output></span>
-          <input id="ai-threshold" class="slider" type="range" min="0.5" max="0.99" step="0.01" value={settings.decision.threshold} style:--fill={`${((settings.decision.threshold - 0.5) / 0.49) * 100}%`} aria-valuetext={percent(settings.decision.threshold)}
+          <input id="ai-threshold" class="slider" type="range" use:touchSlider min="0.5" max="0.99" step="0.01" value={settings.decision.threshold} style:--fill={`${((settings.decision.threshold - 0.5) / 0.49) * 100}%`} aria-valuetext={percent(settings.decision.threshold)}
             oninput={(event) => { if (view) view.settings.decision.threshold = Number(event.currentTarget.value); }}
             onchange={(event) => { const value = Number(event.currentTarget.value); void save(draft => { draft.decision.threshold = value; }); }} />
           <span class="range-ends" aria-hidden="true"><span>More labels</span><span>Fewer, surer labels</span></span>

@@ -494,10 +494,29 @@ fn unit(name: &str, command: &[String]) -> Result<String, String> {
             "graphical-session.target",
         )
     };
+    // An AppImage mounts itself through the setuid `fusermount` helper, which
+    // NoNewPrivileges disables: the runtime then exits 127 with "open dir error" on
+    // every start, so the service never comes up.
+    let hardening = if appimage(Path::new(&command[0])) {
+        ""
+    } else {
+        "NoNewPrivileges=true\n"
+    };
     Ok(format!(
-        "# Managed by Colecto\n{VERSION_MARKER}{version}\n[Unit]\nDescription=Colecto {name}\n{ordering}\n\n[Service]\nType=simple\nExecStart={exec}\n{environment}\nUMask=0077\nRestart=on-failure\nRestartSec=5\nNoNewPrivileges=true\n\n[Install]\nWantedBy={target}\n",
+        "# Managed by Colecto\n{VERSION_MARKER}{version}\n[Unit]\nDescription=Colecto {name}\n{ordering}\n\n[Service]\nType=simple\nExecStart={exec}\n{environment}\nUMask=0077\nRestart=on-failure\nRestartSec=5\n{hardening}\n[Install]\nWantedBy={target}\n",
         version = crate::VERSION
     ))
+}
+/// Whether `path` is an AppImage, by its magic bytes ("AI" and the type at offset 8 of the
+/// ELF header), because AppImage managers rename the file.
+fn appimage(path: &Path) -> bool {
+    use std::io::Read;
+    let mut header = [0u8; 11];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .is_ok_and(|()| {
+            header.starts_with(b"\x7fELF") && header[8..10] == *b"AI" && matches!(header[10], 1 | 2)
+        })
 }
 const VERSION_MARKER: &str = "# Colecto-Version: ";
 fn release(value: &str) -> Option<(u64, u64, u64)> {
@@ -555,6 +574,39 @@ async fn systemctl(args: &[&str]) -> Result<bool, String> {
         .map_err(|_| "systemctl timed out".to_string())?
         .map(|s| s.success())
         .map_err(|e| e.to_string())
+}
+/// Confirm a service that systemd just started is still running. With `Restart=on-failure`
+/// a unit whose executable cannot start loops forever while `start` reports success, so
+/// watch it briefly: the daemon until its socket answers, the notifier for a moment.
+async fn started(control: &Control, name: &str, filename: &str) -> Result<(), String> {
+    let socket = if name == "daemon" {
+        socket_path()
+    } else {
+        None
+    };
+    let deadline = tokio::time::Instant::now()
+        + if socket.is_some() {
+            RESTART_GRACE
+        } else {
+            Duration::from_millis(1500)
+        };
+    loop {
+        if !control.run(&["is-active", filename]).await.unwrap_or(false) {
+            return Err(format!(
+                "The service did not start. Run `journalctl --user -u {filename}` to see why."
+            ));
+        }
+        #[cfg(unix)]
+        if let Some(socket) = &socket
+            && tokio::net::UnixStream::connect(socket).await.is_ok()
+        {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 async fn service_request(control: &Control, request: Request) -> Result<Response, String> {
     if !cfg!(target_os = "linux") {
@@ -615,6 +667,8 @@ async fn service_request(control: &Control, request: Request) -> Result<Response
     if action != "install" && !path.exists() {
         return Err("Service is not installed by Colecto".into());
     }
+    // Whether the action should leave the service running, checked once it has run.
+    let mut running = matches!(action, "install" | "start");
     let args = match action {
         "install" => {
             let autostart = input["autostart"].as_bool().ok_or("Missing autostart")?;
@@ -640,6 +694,7 @@ async fn service_request(control: &Control, request: Request) -> Result<Response
         // Rewrites the unit for this Colecto and its executable. Only a running service is
         // restarted, so it picks up the new binary; reenable moves links if WantedBy changed.
         "update" => {
+            running = control.run(&["is-active", &filename]).await?;
             let enabled = control.run(&["is-enabled", &filename]).await?;
             write_unit(&path, &unit(&name, control.command.as_ref().unwrap())?)?;
             if !control.run(&["daemon-reload"]).await? {
@@ -657,6 +712,9 @@ async fn service_request(control: &Control, request: Request) -> Result<Response
     };
     if !control.run(&args).await? {
         return Err("systemctl operation failed".into());
+    }
+    if running {
+        started(control, &name, &filename).await?;
     }
     if action == "uninstall" {
         std::fs::remove_file(path).map_err(|e| e.to_string())?;
@@ -681,6 +739,32 @@ mod tests {
         assert!(notify.contains("unix:%t/colecto/mail.sock"));
         assert!(notify.contains("WantedBy=graphical-session.target"));
         assert!(daemon.contains(&format!("\n# Colecto-Version: {}\n", crate::VERSION)));
+        assert!(daemon.contains("NoNewPrivileges=true"));
+    }
+    /// Regression: an AppImage cannot mount itself under NoNewPrivileges, so a unit for one
+    /// failed on every start (exit 127, "open dir error") after Update switched to it.
+    #[test]
+    fn appimage_units_allow_the_fuse_mount() {
+        let dir = tempfile::tempdir().unwrap();
+        // Renamed by an AppImage manager, so only the header tells.
+        let image = dir.path().join("colecto.appimage_0_4_0.appimage");
+        std::fs::write(&image, b"\x7fELF\x02\x01\x01\x00AI\x02\x00\x00rest").unwrap();
+        let binary = dir.path().join("colecto");
+        std::fs::write(&binary, b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00rest").unwrap();
+        for name in ["daemon", "notifications"] {
+            let command = |path: &Path| vec![path.to_string_lossy().into_owned(), "daemon".into()];
+            assert!(
+                !unit(name, &command(&image))
+                    .unwrap()
+                    .contains("NoNewPrivileges")
+            );
+            assert!(
+                unit(name, &command(&binary))
+                    .unwrap()
+                    .contains("NoNewPrivileges=true")
+            );
+        }
+        assert!(!appimage(&dir.path().join("missing")));
     }
     #[test]
     fn unit_updates() {
@@ -696,6 +780,25 @@ mod tests {
         // An older app never downgrades a unit written by a newer one.
         let newer = current.replace(crate::VERSION, "999.0.0");
         assert_eq!(update_to(&newer, &current), None);
+    }
+    /// Regression: a unit whose executable exits at once stays in systemd's restart loop
+    /// while `start` and `try-restart` succeed; Update must report it instead of success.
+    #[tokio::test]
+    async fn a_service_that_exits_after_starting_is_reported() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut control = Control::open(directory.path(), true, None).unwrap();
+        control.runner = |args| Box::pin(async move { Ok(args[0] != "is-active") });
+        let error = started(&control, "notifications", "colecto-notifications.service")
+            .await
+            .unwrap_err();
+        assert!(
+            error.contains("journalctl --user -u colecto-notifications.service"),
+            "{error}"
+        );
+        control.runner = |_| Box::pin(async { Ok(true) });
+        started(&control, "notifications", "colecto-notifications.service")
+            .await
+            .expect("a service that keeps running is fine");
     }
     #[test]
     fn foreign_units_refused() {
