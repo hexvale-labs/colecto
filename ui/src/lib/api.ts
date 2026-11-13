@@ -83,13 +83,18 @@ export type ReaderService = Pick<ReturnType<typeof createServices>['reader'], 'r
 export type ComposerService = ReturnType<typeof createServices>['composer'];
 /** Owner preferences, stored by the Host in Turso. `workspace` is the dock layout. */
 export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right' | 'bottom' | 'bottom-left' | 'left';
-export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner }
-export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; notifications: NotificationPreferences; remote_images: boolean }
+export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner; updates: boolean }
+/** Message list rows: two lines with a preview, a shorter version, or one line. */
+export type ListDensity = 'full' | 'medium' | 'compact';
+export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; notifications: NotificationPreferences; remote_images: boolean; list_density: ListDensity; date_groups: boolean; notified_release: string | null }
+/** A stable release newer than the running build, from the Host's cached GitHub check. */
+export interface LatestRelease { current: string; latest: { version: string; url: string } | null }
 /** An empty accent restores the default. */
 export type PreferencesInput = Partial<Omit<Preferences, 'accent'>> & { accent?: string };
 export const hostService = {
   preferences: () => request<Preferences>('host', 'demo', '/preferences'),
   savePreferences: (input: PreferencesInput) => request<Preferences>('host', 'demo', '/preferences', input),
+  latestRelease: () => request<LatestRelease>('host', 'demo', '/releases/latest'),
   sendRequests: () => request<PendingSend[]>('host', 'demo', '/send-requests'),
   decideSend: (id: string, decision: 'approve' | 'reject') => request<PendingSend>('host', 'demo', `/send-requests/${encodeURIComponent(id)}/${decision}`, {}),
   apiKeys: () => request<ApiKey[]>('host', 'demo', '/api-keys'),

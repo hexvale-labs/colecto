@@ -27,7 +27,7 @@
   import PrivacySettings from '../../PrivacySettings.svelte';
   import AppearanceSettings from '../../AppearanceSettings.svelte';
   import { notify, dismissKey, notificationPosition, type Toast } from '../notifications/store.svelte';
-  import { subscribeEvents, type NotificationPreferences } from '../../lib/api';
+  import { subscribeEvents, type ListDensity, type NotificationPreferences, type PreferencesInput } from '../../lib/api';
   import { destinations, isDestination, resolve, settingsPages, type Destination, type Folder, type SettingsPage } from '../../lib/navigation';
   let { extensionStates, extensionSettings, onsettings }: { extensionSettings: import('svelte').Snippet<[Workspace?]>; onsettings: () => void; extensionStates: import('../../lib/api').ExtensionState[] } = $props();
   let Mailbox = $derived(extensionStates.find(e => e.manifest.id === 'inbox')?.enabled ? mailExtensions.inbox : null);
@@ -48,7 +48,9 @@
   let settingsPage = $state<SettingsPage>('accounts');
   let settingsDirty = $state(false);
   let reviewRequest = $state<string | null>(null);
-  let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'top' });
+  let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'top', updates: true });
+  let listDensity = $state<ListDensity>('full');
+  let dateGroups = $state(true);
   let accent = $state<string | null>(null);
   let remoteImages = $state(false);
   let font = $state(DEFAULT_FONT);
@@ -56,12 +58,14 @@
   $effect(() => { void applyTypography(font, textSize); });
   $effect(() => setBusAccount(accountId));
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); });
-  function savePreferences(input: { accent?: string; notifications?: NotificationPreferences; remote_images?: boolean; font?: string; font_size?: number }) {
+  function savePreferences(input: PreferencesInput) {
     if (input.accent !== undefined) accent = input.accent || null;
-    if (input.font !== undefined) font = input.font;
-    if (input.font_size !== undefined) textSize = input.font_size;
+    if (input.font) font = input.font;
+    if (input.font_size) textSize = input.font_size;
     if (input.notifications) notificationPrefs = input.notifications;
     if (input.remote_images !== undefined) remoteImages = input.remote_images;
+    if (input.list_density) listDensity = input.list_density;
+    if (input.date_groups !== undefined) dateGroups = input.date_groups;
     void hostService.savePreferences(input).catch(e => notify({ title: 'Could not save your preference', body: (e as Error).message }));
   }
   let tabs = $state<{ account: string; id: string; subject: string; folder: 'Inbox' | 'Sent' }[]>([]);
@@ -411,6 +415,7 @@
       font = saved?.font || DEFAULT_FONT; textSize = saved?.font_size || DEFAULT_TEXT_SIZE;
       if (saved?.notifications) notificationPrefs = saved.notifications;
       remoteImages = saved?.remote_images ?? false;
+      listDensity = saved?.list_density ?? 'full'; dateGroups = saved?.date_groups ?? true;
     });
     // Events act on accounts and pages, so they start once both are known.
     let stopEvents = () => {};
@@ -492,7 +497,7 @@
         <div class="settings-page">
           {#if settingsPage.startsWith('extension:')}{#if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
           {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
-          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences} />
+          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} density={listDensity} {dateGroups} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences} onlist={savePreferences} />
           {:else if settingsPage === 'notifications'}<NotificationSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
           {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
           {:else if settingsPage === 'servers'}<ServerSettings />
@@ -541,7 +546,7 @@
         </form>
       </div>{/if}
       {#if labelError}<p class="error-box" role="alert">{labelError}</p>{/if}
-      <Mailbox grouped={sort === 'newest' || sort === 'oldest'} items={visibleItems} filtered={!!appliedQuery || !!query.trim() || !!labelFilter} {searching} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={() => void loadList()} />
+      <Mailbox grouped={dateGroups && (sort === 'newest' || sort === 'oldest')} density={listDensity} items={visibleItems} filtered={!!appliedQuery || !!query.trim() || !!labelFilter} {searching} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={() => void loadList()} />
     {:else}<p class="pane-note">The mailbox extension is turned off. Turn it on in Settings → Extensions.</p>{/if}
   </div>
 {/snippet}

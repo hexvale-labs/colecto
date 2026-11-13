@@ -219,6 +219,23 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
   .item-preview { flex: 1; }
   .item-date { order: 4; margin-left: auto; }
 }
+/* Density (owner preference): Full shows a preview line, Medium drops it, Compact is one line.
+   Rows only change padding and lines, never type size, so text size stays the owner's choice. */
+.mailbox[data-density='medium'] .mail-item { grid-template-areas: 'sender date' 'subject subject'; padding-top: 7px; padding-bottom: 7px; }
+.mailbox[data-density='medium'] .item-preview, .mailbox[data-density='compact'] .item-preview { display: none; }
+.mailbox[data-density='compact'] .mail-item { display: flex; align-items: baseline; gap: 10px; padding-top: 6px; padding-bottom: 6px; }
+.mailbox[data-density='compact'] .item-sender { flex: 0 0 clamp(84px, 32%, 180px); }
+.mailbox[data-density='compact'] .item-subject { flex: 1; margin: 0; }
+.mailbox[data-density='compact'] .item-date { order: 4; }
+.mailbox[data-density='compact'] .mail-item.selected::before { top: 50%; margin-top: -2.5px; }
+.mailbox:not([data-density='full']) .day { padding-top: 10px; padding-bottom: 4px; }
+@container mailbox (min-width: 640px) {
+  .mailbox[data-density='medium'] .mail-item { padding-top: 6px; padding-bottom: 6px; }
+  .mailbox[data-density='compact'] .mail-item { padding-top: 3px; padding-bottom: 3px; }
+  .mailbox[data-density='compact'] .item-preview { display: block; flex: 1; }
+  .mailbox[data-density='compact'] .item-subject { flex: 0 1 auto; max-width: 45%; }
+  .mailbox[data-density='compact'] .item-sender { flex: 0 0 clamp(140px, 22%, 220px); }
+}
 .list-state { padding: 28px 16px; color: var(--ink-3); font-size: calc(13.5px * var(--text-scale)); }
 .list-state h2 { margin-bottom: 4px; color: var(--ink); font-size: calc(15px * var(--text-scale)); }
 .list-state.error { padding: 14px 16px; display: grid; gap: 10px; justify-items: start; color: var(--danger); }
@@ -329,7 +346,7 @@ button.attachment:hover:not(:disabled) { background: var(--control); }
 .settings-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .settings-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; height: 52px; padding: 0 10px 0 24px; border-bottom: 1px solid var(--line-soft); }
 .settings-crumb { display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: calc(13.5px * var(--text-scale)); }
-.settings-crumb strong { color: var(--ink); font-weight: 600; }
+.settings-crumb strong { color: var(--ink); font-weight: 540; }
 .nav-back, .nav-item { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 8px; color: var(--ink-2); font-size: calc(13.5px * var(--text-scale)); font-weight: 560; text-align: left; transition: background-color 120ms ease, color 120ms ease, transform 120ms var(--ease-out); }
 .nav-back { color: var(--ink-3); }
 .nav-back:hover:not(:disabled), .nav-item:hover:not(:disabled) { background: var(--raise); color: var(--ink); }
@@ -338,27 +355,40 @@ button.attachment:hover:not(:disabled) { background: var(--control); }
 .settings-page { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding: 32px 48px 48px; container: settings / inline-size; }
 .settings-page > *, .settings-body { max-width: 720px; }
 .settings-page.standalone { height: 100dvh; display: grid; align-content: start; gap: 20px; max-width: none; margin: 0 auto; width: min(100%, 840px); }
-.section-head { margin-bottom: 24px; }
+/* Settings pages share one hierarchy: page title, group label, setting name, muted description.
+   Space separates groups; hairlines only divide items of a list (accounts, extensions, keys).
+   A setting row puts its text on the left and its control on the right; `.setting` alone stacks
+   a wide control (picker, slider, drop zone) under the text. `.settings-card` is the older name
+   of `.settings-group`, still used by the Accounts and Connection pages. */
+.section-head { margin-bottom: 32px; }
 .section-head.with-action { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.section-head h2, .settings-body h1 { margin-bottom: 8px; font-size: calc(24px * var(--text-scale)); font-stretch: 108%; letter-spacing: -0.02em; }
-.section-head p, .settings-card > p, .settings-card fieldset > p { max-width: 62ch; color: var(--ink-2); font-size: calc(14px * var(--text-scale)); line-height: 1.55; }
-.settings-card > p + p { margin-top: 8px; }
-/* Settings groups are sections divided by hairlines, not cards. */
-.settings-stack { display: grid; }
-.settings-card { padding: 22px 0 24px; border-top: 1px solid var(--line-soft); }
-.settings-card:last-child { padding-bottom: 0; }
-.setting-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
-.setting-row h3 { margin: 0 0 6px !important; font-size: calc(15px * var(--text-scale)); }
-.setting-row p { max-width: 58ch; color: var(--ink-2); font-size: calc(13.5px * var(--text-scale)); line-height: 1.55; }
-.setting-row > :first-child { min-width: 0; overflow-wrap: anywhere; }
-.setting-row .switch { flex-shrink: 0; margin-top: 2px; }
-.settings-card h2, .settings-card legend, .settings-card > h3 { margin-bottom: 6px; padding: 0; color: var(--ink); font-size: calc(15.5px * var(--text-scale)); font-weight: 640; letter-spacing: -0.01em; }
-.settings-card h3 { font-size: calc(14px * var(--text-scale)); margin: 20px 0 8px; }
+.section-head h2, .settings-body h1 { margin-bottom: 6px; font-size: calc(22px * var(--text-scale)); font-weight: 650; font-stretch: 108%; letter-spacing: -0.02em; }
+.section-head p { max-width: 62ch; color: var(--ink-2); font-size: calc(14px * var(--text-scale)); line-height: 1.55; }
+.settings-group, .settings-card { min-width: 0; margin: 0; padding: 0; border: 0; }
+:is(.settings-group, .settings-card) + :is(.settings-group, .settings-card) { margin-top: 40px; }
+:is(.settings-group, .settings-card) > * + * { margin-top: 20px; }
+.group-label, .settings-card > h2, .settings-card > legend, .settings-card fieldset > legend { margin-bottom: 0; padding: 0; color: var(--ink); font-size: calc(15px * var(--text-scale)); font-weight: 600; letter-spacing: -0.01em; }
+:is(.settings-group, .settings-card) > :is(.group-label, h2) + p { margin-top: 4px; }
+:is(.settings-group, .settings-card) > p, .settings-card fieldset > p, .setting-text p { max-width: 60ch; color: var(--ink-2); font-size: calc(13px * var(--text-scale)); line-height: 1.5; }
+:is(.settings-group, .settings-card) > p + p { margin-top: 6px; }
+.setting { min-width: 0; }
+:is(.settings-group, .settings-card) > .sr-only:first-child + * { margin-top: 0; }
+.setting > * + * { margin-top: 12px; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.setting-row > * + * { margin-top: 0; }
+.setting-text { min-width: 0; overflow-wrap: anywhere; }
+.setting-text h3, .settings-card h3 { margin: 0; color: var(--ink); font-size: calc(14px * var(--text-scale)); font-weight: 540; letter-spacing: -0.005em; }
+.setting-text h3 + p { margin-top: 3px; }
+.setting-row > .switch, .setting-row > .segmented { flex-shrink: 0; }
+.settings-card h3 { margin-top: 20px; }
 .settings-card > h3:first-child { margin-top: 0; }
+@container settings (max-width: 520px) {
+  .setting-row:has(> .segmented) { flex-direction: column; align-items: flex-start; gap: 12px; }
+}
 .settings-notice { padding: 10px 12px; margin: 14px 0 0; border-radius: 9px; background: var(--select); color: var(--mint-hi); font-size: calc(13.5px * var(--text-scale)); }
 .empty-note { padding: 12px 0; color: var(--ink-3); }
 p[role='status']:empty { display: none; }
-.protection-state { color: var(--ink) !important; font-weight: 600; }
+.protection-state { color: var(--ink) !important; font-weight: 540; }
 .security-disclosure { font-size: calc(12.5px * var(--text-scale)) !important; color: var(--ink-3) !important; }
 .account-actions { display: flex; gap: 14px; }
 details { margin-top: 14px; }
@@ -379,9 +409,14 @@ details[open] > summary { margin-bottom: 10px; }
 .segmented input { position: absolute; opacity: 0; pointer-events: none; }
 .field-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; color: var(--ink-2); font-size: calc(13px * var(--text-scale)); }
 
-/* Extensions page */
+/* Fieldsets inside a group (the master password form) keep their legend above the content. */
 .settings-card fieldset > legend { float: left; width: 100%; }
 .settings-card fieldset > p { clear: both; }
+/* Lists of things (accounts, extensions, keys, requests) are the one place for hairlines. */
+.settings-list > * + * { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line-soft); }
+/* Extensions page: a drop zone with Install beside it; the whole page accepts a dropped package. */
+.install-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.install-row .file-pick { flex: 1 1 280px; max-width: 420px; }
 .file-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
 .file-grid.single { grid-template-columns: minmax(0, 420px); }
 .file-grid + .secondary { margin-top: 16px; }
@@ -396,23 +431,22 @@ fieldset:disabled .file-pick { opacity: 0.5; cursor: default; }
 .file-icon { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px; border-radius: 9px; background: var(--control); color: var(--ink-2); }
 .file-pick.chosen .file-icon { background: var(--select); color: var(--mint-hi); }
 .file-text { display: grid; min-width: 0; }
-.file-label { color: var(--ink); font-size: calc(13.5px * var(--text-scale)); font-weight: 600; }
+.file-label { color: var(--ink); font-size: calc(13.5px * var(--text-scale)); font-weight: 540; }
 .file-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
 .file-action { margin-left: auto; flex-shrink: 0; color: var(--mint); font-size: calc(12.5px * var(--text-scale)); font-weight: 600; }
-.extension-list-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin: 30px 0 12px; }
-.extension-list-head h3 { font-size: calc(16px * var(--text-scale)); }
 .extension-card { display: block; }
 .show-pane { margin-top: 10px; }
 .extension-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
-.extension-badge { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--select); color: var(--mint-hi); font-size: calc(15px * var(--text-scale)); font-weight: 660; transition: opacity 160ms ease; }
+.extension-badge { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--select); color: var(--mint-hi); font-size: calc(14px * var(--text-scale)); font-weight: 600; transition: opacity 160ms ease; }
 .extension-card.off .extension-badge { background: var(--control); color: var(--ink-3); }
-.extension-name { display: block; font-size: calc(15px * var(--text-scale)); font-weight: 640; overflow-wrap: anywhere; }
+.extension-name { display: block; font-size: calc(14px * var(--text-scale)); font-weight: 540; overflow-wrap: anywhere; }
 .extension-title .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
 .tag { padding: 1px 7px; border-radius: 5px; background: var(--control); color: var(--ink-2); font-size: calc(11.5px * var(--text-scale)); font-weight: 600; }
 .tag.trusted { background: var(--select); color: var(--mint-hi); }
-.extension-description { margin-top: 12px; max-width: 62ch; color: var(--ink-2); line-height: 1.55; }
+.extension-description { margin-top: 10px; max-width: 62ch; color: var(--ink-2); font-size: calc(13px * var(--text-scale)); line-height: 1.5; }
 .grants { display: flex; flex-wrap: wrap; gap: 0 18px; margin-top: 12px; }
-.grants-title { width: 100%; color: var(--ink-3); font-size: calc(12px * var(--text-scale)); font-weight: 560; }
+.grants-title { width: 100%; margin-bottom: 2px; color: var(--ink-3); font-size: calc(12px * var(--text-scale)); }
+.grants li { color: var(--ink-2); font-size: calc(13px * var(--text-scale)); line-height: 1.6; }
 .extension-card > .text-button { margin-top: 12px; }
 .choice { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; color: var(--ink-2); font-size: calc(13px * var(--text-scale)); overflow-wrap: anywhere; cursor: pointer; }
 .switch { display: inline-flex; align-items: center; gap: 10px; font-size: calc(13.5px * var(--text-scale)); cursor: pointer; }
@@ -533,6 +567,9 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
   .label-bar .chip, .label-new { height: 32px; }
   .label-new input { font-size: calc(16px * var(--text-scale)); }
   .mail-item { padding: 11px 12px 12px 20px; }
+  /* Compact rows still leave a comfortable touch target. */
+  .mailbox[data-density='compact'] .mail-item { min-height: 44px; align-items: center; }
+  .mailbox[data-density='compact'] .item-date { align-self: center; }
   .detail-toolbar .back { display: inline-grid; }
   .detail-toolbar { padding-left: 16px; }
   .tool { height: 40px; }
@@ -565,25 +602,24 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 }
 
 /* Notifications */
-.toasts { position: fixed; z-index: var(--layer-bundledOverlay); display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 24px)); pointer-events: none; }
+/* Notifications: a manual popover in the top layer, so they show over Settings and menus.
+   Toasts enter and leave with Svelte transitions (translate, scale, opacity) and the rest slide
+   into place with FLIP; see Toasts.svelte. */
+.toasts { position: fixed; inset: auto; z-index: var(--layer-notifications); display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 24px)); height: auto; margin: 0; padding: 0; border: 0; background: none; color: inherit; overflow: visible; pointer-events: none; }
 .toasts[data-position^='top'] { top: 64px; flex-direction: column-reverse; }
 .toasts[data-position^='bottom'] { bottom: 16px; }
 .toasts[data-position$='left'], .toasts[data-position='left'] { left: 16px; }
 .toasts[data-position$='right'], .toasts[data-position='right'] { right: 16px; }
 .toasts[data-position='top'], .toasts[data-position='bottom'] { left: 50%; translate: -50% 0; }
 .toasts[data-position='left'], .toasts[data-position='right'] { top: 50%; translate: 0 -50%; }
-.toast { --enter: 0 10px; position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 10px 12px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--float); box-shadow: 0 18px 40px -12px oklch(0 0 0 / 0.7), 0 2px 6px oklch(0 0 0 / 0.25); pointer-events: auto; transition: opacity 260ms var(--ease-out), translate 300ms var(--ease-out); }
-.toasts[data-position^='top'] .toast { --enter: 0 -10px; }
-.toasts[data-position='left'] .toast { --enter: -16px 0; }
-.toasts[data-position='right'] .toast { --enter: 16px 0; }
-@starting-style { .toast { opacity: 0; translate: var(--enter); } }
+.toast { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 10px 12px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--float); box-shadow: 0 18px 40px -12px oklch(0 0 0 / 0.7), 0 2px 6px oklch(0 0 0 / 0.25); pointer-events: auto; }
 .toast-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--select); color: var(--mint-hi); }
 .toast-text { align-self: center; min-width: 0; }
 .toast-text strong { display: block; font-size: calc(13.5px * var(--text-scale)); font-weight: 620; overflow-wrap: anywhere; }
 .toast-text p { margin-top: 2px; color: var(--ink-2); font-size: calc(13px * var(--text-scale)); line-height: 1.45; overflow-wrap: anywhere; }
 .toast-close { display: grid; place-items: center; width: 24px; height: 24px; margin: -2px -2px 0 0; border-radius: 6px; color: var(--ink-3); transition: background-color 120ms ease, color 120ms ease; }
 .toast-close:hover { background: var(--raise); color: var(--ink); }
-.toast-actions { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.toast-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 6px; margin-top: 10px; }
 .toast-actions .primary, .toast-actions .secondary { height: 30px; padding: 0 11px; font-size: calc(12.5px * var(--text-scale)); }
 
 /* Notification position: a drawn window with a spot at each corner and edge. */
@@ -641,7 +677,7 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .account-row .avatar { width: 32px; height: 32px; font-size: calc(13.5px * var(--text-scale)); }
 .account-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .account-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.account-line strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale)); font-weight: 620; }
+.account-line strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale)); font-weight: 540; }
 .account-line.meta { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
 .account-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-line .sep { color: var(--line); }
@@ -702,9 +738,6 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .font-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale)); }
 .select-group { padding: 10px 10px 4px; color: var(--ink-3); font-size: calc(10.5px * var(--text-scale)); font-weight: 640; letter-spacing: 0.08em; text-transform: uppercase; pointer-events: none; }
 .select-group:first-child { padding-top: 6px; }
-.segmented-field legend h3 { margin: 0; }
-.segmented-field > p { margin: 4px 0 0; color: var(--ink-2); font-size: calc(13.5px * var(--text-scale)); line-height: 1.55; }
-.text-sizes { margin-top: 12px; }
 .text-sizes label { justify-content: center; width: 52px; height: 40px; padding: 0; }
 /* Each sample keeps its own fixed size, so the control reads the same at every text size. */
 .text-sizes .sample { font-weight: 560; line-height: 1; }
@@ -722,7 +755,7 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .service-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px; background: var(--control); color: var(--ink-2); }
 .service-icon.current { background: var(--select); color: var(--mint-hi); }
 .service-text { display: grid; gap: 3px; flex: 1; min-width: 0; }
-.service-text strong { font-size: calc(14px * var(--text-scale)); font-weight: 620; }
+.service-text strong { font-size: calc(14px * var(--text-scale)); font-weight: 540; }
 .service-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .service-about { max-width: 52ch; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); line-height: 1.45; }
 .service-meta { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
