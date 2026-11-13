@@ -54,6 +54,8 @@ base64 = "0.22"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # zip leaves the Deflate backend to us; this is the pure-Rust miniz_oxide one already in the tree.
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Auto-label rules; linear-time matching with size limits, already in the tree.
+regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
 
 argon2 = "0.5"

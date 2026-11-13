@@ -216,6 +216,7 @@ impl MailService {
             policy: policy.clone(),
             keys: keys.clone(),
         };
+        let ai = Arc::new(crate::ai::Ai::open(database.clone())?);
         let approvals = Arc::new(Mutex::new(crate::approvals::Approvals::open(
             database,
             api_keys::now(),
@@ -233,6 +234,7 @@ impl MailService {
             authority: policy.authority.clone(),
             origin: policy.origin.clone(),
             execution: Arc::new(tokio::sync::Semaphore::new(2)),
+            ai,
         };
         let stream_events = events.clone();
         let (closing, stopped) = tokio::sync::watch::channel(false);
@@ -347,6 +349,7 @@ impl MailService {
         let mut tasks = tokio::task::JoinSet::new();
         for (account, store) in stores {
             let events = self.events.clone();
+            let host = self.host.clone();
             let snapshots = self.snapshots.clone();
             let watching = self.watching.clone();
             let semaphore = self.host.execution.clone();
@@ -378,6 +381,7 @@ impl MailService {
                                 && let Some(event) = snapshots
                                     .observe(&account, messages.iter().map(|m| m.id.clone()))
                             {
+                                let _ = crate::ai::arrived(&host, &account, &messages, &event);
                                 let _ = events.send(("mail", event));
                             }
                         }

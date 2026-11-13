@@ -930,6 +930,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "keyring",
+ "regex",
  "reqwest 0.12.28",
  "rmcp",
  "rustix 1.1.6",
