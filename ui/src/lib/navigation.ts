@@ -9,6 +9,7 @@ export const settingsPages = [
   { id: 'privacy', name: 'Privacy', icon: 'image' },
   { id: 'servers', name: 'Connection', icon: 'server' },
   { id: 'extensions', name: 'Extensions', icon: 'extension' },
+  { id: 'ai', name: 'AI', icon: 'cpu' },
   { id: 'api-keys', name: 'API keys', icon: 'key' },
   { id: 'send-approvals', name: 'Send approvals', icon: 'shield' },
 ] as const satisfies readonly { id: string; name: string; icon: IconName }[];
