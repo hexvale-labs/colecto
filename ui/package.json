@@ -2,7 +2,7 @@
   "name": "colecto-ui",
   "license": "MIT OR Apache-2.0",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "packageManager": "bun@1.4.4",
   "scripts": {
