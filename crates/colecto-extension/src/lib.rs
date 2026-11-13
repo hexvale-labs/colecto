@@ -123,18 +123,34 @@ macro_rules! __export_entries {
     ($d:ident) => {};
     ($d:ident panel: $f:path $(, $($rest:tt)*)?) => {
         $d.panel($f);
+        $crate::__private::handler_record!(b'p', "", "");
         $crate::__export_entries!($d $($($rest)*)?);
     };
     ($d:ident overlay: $f:path $(, $($rest:tt)*)?) => {
         $d.overlay($f);
+        $crate::__private::handler_record!(b'o', "", "");
         $crate::__export_entries!($d $($($rest)*)?);
     };
     ($d:ident requests: [$($f:path),* $(,)?] $(, $($rest:tt)*)?) => {
-        $($d.request($f);)*
+        $(
+            $d.request($f);
+            $crate::__private::handler_record!(
+                b'r',
+                $crate::__private::request_names(&$f).0,
+                $crate::__private::request_names(&$f).1
+            );
+        )*
         $crate::__export_entries!($d $($($rest)*)?);
     };
     ($d:ident events: [$($f:path),* $(,)?] $(, $($rest:tt)*)?) => {
-        $($d.event($f);)*
+        $(
+            $d.event($f);
+            $crate::__private::handler_record!(
+                b'e',
+                $crate::__private::event_names(&$f).0,
+                $crate::__private::event_names(&$f).1
+            );
+        )*
         $crate::__export_entries!($d $($($rest)*)?);
     };
 }
@@ -143,5 +159,24 @@ macro_rules! __export_entries {
 pub mod __private {
     pub use crate::bus::check_names;
     pub use crate::dispatch::Dispatch;
-    pub use colecto_extension_sys::export_run;
+    use crate::{BusEvent, BusRequest, Context, Result};
+    pub use colecto_extension_sys::{export_run, handler_record};
+
+    /// `(bus, name)` of the request a handler function answers, inferred from its type.
+    pub const fn request_names<R, F>(_: &F) -> (&'static str, &'static str)
+    where
+        R: BusRequest,
+        F: FnOnce(R, &mut Context) -> Result<R::Response>,
+    {
+        (R::BUS, R::NAME)
+    }
+
+    /// `(bus, name)` of the event a handler function receives, inferred from its type.
+    pub const fn event_names<E, F>(_: &F) -> (&'static str, &'static str)
+    where
+        E: BusEvent,
+        F: FnOnce(E, &mut Context) -> Result<()>,
+    {
+        (E::BUS, E::NAME)
+    }
 }

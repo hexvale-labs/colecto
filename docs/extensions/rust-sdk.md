@@ -10,7 +10,8 @@ the manifest, packaging and limits are unchanged.
 | Crate | Path | Role |
 | --- | --- | --- |
 | `colecto-extension` | `crates/colecto-extension/` | The SDK you depend on. Forbids `unsafe` code. |
-| `colecto-extension-sys` | `crates/colecto-extension-sys/` | The three `colecto` imports, the `run` export and the native mock. The only SDK crate that contains `unsafe` code. |
+| `colecto-extension-sys` | `crates/colecto-extension-sys/` | The three `colecto` imports, the `run` export, handler records and the native mock. The only SDK crate that contains `unsafe` code. |
+| `cargo-colecto` | `crates/cargo-colecto/` | The `cargo colecto` build and packaging tool. |
 
 Extensions themselves need no `unsafe` code: Oneko builds with `#![forbid(unsafe_code)]`.
 The SDK uses `std` and `serde_json`. A release build of Oneko is about 140 KB of Wasm.
@@ -21,7 +22,8 @@ guest.
 
 The SDK is not on crates.io. Depend on it through Git, pinned to a release tag; Cargo
 finds the crate by name inside the repository's workspace. The SDK first ships in the
-release after 0.2.0; until then use `branch = "develop"` instead of `tag`.
+release after 0.2.0; until then use `branch = "develop"` instead of `tag`, here and
+when installing `cargo-colecto`.
 
 ```toml
 [package]
@@ -48,12 +50,58 @@ codegen-units = 1
 | --- | --- |
 | Pin a version | Use `tag` (or `rev`). `Cargo.lock` records the commit; `cargo update -p colecto-extension` moves it. |
 | Work against a local checkout | Add `[patch."https://github.com/hexvale-labs/colecto"]` with `colecto-extension = { path = "../colecto/crates/colecto-extension" }`. |
-| Build | `rustup target add wasm32-unknown-unknown`, then `cargo build --release --target wasm32-unknown-unknown`. No WASI. |
+| Build and package | `rustup target add wasm32-unknown-unknown`, then `cargo colecto build` (see [below](#build-and-package-with-cargo-colecto)). |
 | Test | `cargo test` on your own machine. The imports exist only on `wasm32`, so native builds use the mock Host. |
 
 The SDK depends only on `serde` and `serde_json`, so a Git dependency does not build
-the mail service. Package the `.wasm` file as described in
-[Package and build](guide.md#5-package-and-build).
+the mail service.
+
+## Build and package with `cargo colecto`
+
+`cargo-colecto` is a Cargo subcommand that builds the extension for
+`wasm32-unknown-unknown`, checks the module against its manifest and writes the
+`.colectoext`. Install it from the same tag as the SDK:
+
+```sh
+cargo install --git https://github.com/hexvale-labs/colecto --tag v0.3.0 cargo-colecto
+```
+
+Inside this repository, `cargo run -p cargo-colecto -- <command>` runs it without
+installing; `just build oneko` does that for Oneko.
+
+| Command | Does |
+| --- | --- |
+| `cargo colecto build` | Builds in release mode, checks, writes `<target-dir>/colecto/<id>.colectoext` |
+| `cargo colecto check` | Builds and checks without writing a package |
+
+| Option | Meaning |
+| --- | --- |
+| `--manifest-path <PATH>` | The extension's `Cargo.toml` (default: the package in the current directory) |
+| `--out <PATH>` | Package path for `build` |
+| `--locked` | Passed on to `cargo build` |
+
+The project layout it expects: `extension.toml` (the manifest) and an optional
+`assets/` folder of images, both next to `Cargo.toml`, and a library with
+`crate-type = ["cdylib"]`. The package is Deflate-compressed and read back with the
+Host's own package reader (`colecto-package`), so every package and manifest limit is
+checked before you install.
+
+`export!` records each registered function in a `colecto.handlers.v1` custom section
+of the Wasm module: the slot function, and the bus and name of each request and
+event. The section survives `lto` and `strip`, and costs a few bytes. The checks:
+
+| Check | Why |
+| --- | --- |
+| Imports are only `colecto.action`, `colecto.request`, `colecto.emit`; `run` and `memory` are exported | The Host refuses anything else, including WASI |
+| `panel:` or `overlay:` matches `slot` | The wrong one never runs |
+| Bus handlers need `extensions.bus` in `capabilities` | Without it the Host delivers nothing |
+| Every `events` entry is in `[bus] subscribe`, and every subscription has a function | A missing subscription means the event never arrives; an extra one wakes the extension for nothing. The error suggests the exact `[bus]` table. |
+| Each request is declared on this extension's own bus (`id`) | Requests only arrive on the extension's own bus |
+
+Missing slot functions and requests registered twice are warnings. A module built
+without `export!` gets a warning and only the import, export and package checks. The
+tool cannot see calls such as `cx.messages()`, so it does not check the other
+capabilities.
 
 ## Write the module
 

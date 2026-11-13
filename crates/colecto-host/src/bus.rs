@@ -5,13 +5,7 @@ use std::{cell::Cell, collections::HashMap, time::Duration};
 type Pending = (String, tokio::sync::oneshot::Sender<Value>);
 pub(crate) type Replies = Arc<Mutex<HashMap<String, Pending>>>;
 thread_local! { static DEPTH: Cell<u8> = const { Cell::new(0) }; }
-pub(crate) fn valid_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 64
-        && name
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-_/".contains(&b))
-}
+pub(crate) use crate::package::manifest::valid_bus_name as valid_name;
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Input {

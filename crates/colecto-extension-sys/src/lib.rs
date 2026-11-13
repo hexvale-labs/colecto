@@ -61,6 +61,46 @@ macro_rules! export_run {
     };
 }
 
+/// Records one registered handler in the module's `colecto.handlers.v1` custom section,
+/// so `cargo colecto` can compare the code with the manifest. Each record is
+/// [`record`]`(kind, bus, name)`; the linker concatenates them. Kinds: `b'p'` panel,
+/// `b'o'` overlay, `b'r'` bus request, `b'e'` bus event. Nothing is emitted off Wasm.
+#[macro_export]
+macro_rules! handler_record {
+    ($kind:literal, $bus:expr, $name:expr) => {
+        #[cfg(target_arch = "wasm32")]
+        const _: () = {
+            const BUS: &str = $bus;
+            const NAME: &str = $name;
+            #[unsafe(link_section = "colecto.handlers.v1")]
+            #[used]
+            static RECORD: [u8; 3 + BUS.len() + NAME.len()] = $crate::record($kind, BUS, NAME);
+        };
+    };
+}
+
+/// Encodes one handler record: kind byte, then `bus` and `name`, each prefixed by its
+/// length in one byte. `N` must be `3 + bus.len() + name.len()`.
+pub const fn record<const N: usize>(kind: u8, bus: &str, name: &str) -> [u8; N] {
+    let (bus, name) = (bus.as_bytes(), name.as_bytes());
+    assert!(N == 3 + bus.len() + name.len() && bus.len() < 256 && name.len() < 256);
+    let mut out = [0u8; N];
+    out[0] = kind;
+    out[1] = bus.len() as u8;
+    let mut i = 0;
+    while i < bus.len() {
+        out[2 + i] = bus[i];
+        i += 1;
+    }
+    out[2 + bus.len()] = name.len() as u8;
+    let mut i = 0;
+    while i < name.len() {
+        out[3 + bus.len() + i] = name[i];
+        i += 1;
+    }
+    out
+}
+
 #[cfg(target_arch = "wasm32")]
 mod imports {
     #[link(wasm_import_module = "colecto")]
