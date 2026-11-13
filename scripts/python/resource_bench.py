@@ -44,7 +44,8 @@ def compare(current, previous):
 
 def isolated_environment(environment, directory, port):
     result = {key: value for key, value in environment.items() if not key.startswith('COLECTO_')}
-    result.update(COLECTO_DATA_DIR=str(directory), COLECTO_PORT=str(port))
+    # Measurements never depend on reaching GitHub for the update check.
+    result.update(COLECTO_DATA_DIR=str(directory), COLECTO_PORT=str(port), COLECTO_UPDATE_CHECK='off')
     return result
 
 

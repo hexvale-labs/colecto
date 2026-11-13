@@ -1,12 +1,13 @@
 //! Owner preferences: the workspace layout, the selected account, whether MCP is on,
-//! the accent colour, notification choices and whether mail loads remote images.
+//! the accent colour, notification choices, whether mail loads remote images and how
+//! the message list looks.
 //! The UI owns the layout's shape; the Host only bounds it, because it never acts on it.
 use colecto_core::Database;
 use serde::{Deserialize, Serialize};
 
 const MAX_WORKSPACE_BYTES: usize = 64 * 1024;
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Preferences {
     /// The MCP endpoint answers only after the owner turns it on in Settings.
@@ -21,6 +22,39 @@ pub struct Preferences {
     notification_position_chosen: bool,
     /// Load remote images in HTML mail without asking. Off by default: they can track opens.
     pub remote_images: bool,
+    pub list_density: ListDensity,
+    /// Group the message list under "Today", "Yesterday", month names and so on.
+    pub date_groups: bool,
+    /// The newest release the owner was already told about, so each version notifies once.
+    pub notified_release: Option<String>,
+}
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            mcp: false,
+            account: None,
+            workspace: None,
+            accent: None,
+            font: None,
+            font_size: None,
+            notifications: Notifications::default(),
+            notification_position_chosen: false,
+            remote_images: false,
+            list_density: ListDensity::Full,
+            date_groups: true,
+            notified_release: None,
+        }
+    }
+}
+
+/// Message list rows: two lines with a preview, a shorter version, or one line.
+#[derive(Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum ListDensity {
+    #[default]
+    Full,
+    Medium,
+    Compact,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug)]
@@ -45,6 +79,8 @@ pub struct Notifications {
     pub approvals: bool,
     pub system: bool,
     pub position: Corner,
+    /// Tell the owner when a newer release is published. Off means the UI never asks GitHub.
+    pub updates: bool,
 }
 impl Default for Notifications {
     fn default() -> Self {
@@ -54,12 +90,13 @@ impl Default for Notifications {
             approvals: true,
             system: false,
             position: Corner::Top,
+            updates: true,
         }
     }
 }
 
 /// Fields that are present replace the stored ones.
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreferencesInput {
     pub mcp: Option<bool>,
@@ -71,6 +108,9 @@ pub struct PreferencesInput {
     pub font_size: Option<u8>,
     pub notifications: Option<Notifications>,
     pub remote_images: Option<bool>,
+    pub list_density: Option<ListDensity>,
+    pub date_groups: Option<bool>,
+    pub notified_release: Option<String>,
 }
 
 fn validate(preferences: &Preferences) -> Result<(), String> {
@@ -108,6 +148,17 @@ fn validate(preferences: &Preferences) -> Result<(), String> {
         .is_some_and(|size| !(13..=18).contains(&size))
     {
         return Err("Font size must be between 13 and 18".into());
+    }
+    if preferences
+        .notified_release
+        .as_ref()
+        .is_some_and(|version| {
+            version.is_empty()
+                || version.len() > 32
+                || !version.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+        })
+    {
+        return Err("Release version must look like 1.2.3".into());
     }
     Ok(())
 }
@@ -171,6 +222,15 @@ impl PreferenceStore {
         if let Some(remote_images) = input.remote_images {
             next.remote_images = remote_images;
         }
+        if let Some(density) = input.list_density {
+            next.list_density = density;
+        }
+        if let Some(date_groups) = input.date_groups {
+            next.date_groups = date_groups;
+        }
+        if let Some(version) = input.notified_release {
+            next.notified_release = Some(version);
+        }
         validate(&next)?;
         crate::store::save(&self.database, "preferences", &next)?;
         self.value = next;
@@ -214,6 +274,51 @@ mod tests {
         assert_eq!(restored.get().font_size, Some(18));
     }
     #[test]
+    fn list_and_update_preferences_default_validate_and_persist() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        // Preferences saved before these fields existed keep the defaults.
+        crate::store::save(
+            &database,
+            "preferences",
+            &serde_json::json!({"notifications":{"enabled":true,"mail":true,"approvals":true,"system":false,"position":"top"}}),
+        )
+        .unwrap();
+        let mut store = PreferenceStore::open(database.clone()).unwrap();
+        assert_eq!(store.get().list_density, ListDensity::Full);
+        assert!(store.get().date_groups);
+        assert!(store.get().notifications.updates);
+        assert_eq!(store.get().notified_release, None);
+        for value in [
+            serde_json::json!({"list_density":"tiny"}),
+            serde_json::json!({"date_groups":"yes"}),
+            serde_json::json!({"notified_release":""}),
+            serde_json::json!({"notified_release":"1.2.3<script>"}),
+        ] {
+            assert!(
+                serde_json::from_value::<PreferencesInput>(value)
+                    .map_err(|e| e.to_string())
+                    .and_then(|input| store.update(input))
+                    .is_err()
+            );
+        }
+        store
+            .update(
+                serde_json::from_value(serde_json::json!({
+                    "list_density":"compact","date_groups":false,"notified_release":"0.4.0",
+                    "notifications":{"updates":false}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let restored = PreferenceStore::open(database).unwrap();
+        assert_eq!(restored.get().list_density, ListDensity::Compact);
+        assert!(!restored.get().date_groups);
+        assert_eq!(restored.get().notified_release.as_deref(), Some("0.4.0"));
+        assert!(!restored.get().notifications.updates);
+        assert!(restored.get().notifications.enabled);
+    }
+    #[test]
     fn legacy_default_moves_to_top_but_new_position_choices_persist() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
@@ -252,11 +357,8 @@ mod tests {
             mcp: Some(true),
             account: Some("work".into()),
             workspace: Some(workspace),
-            accent: None,
-            font: None,
-            font_size: None,
-            notifications: None,
             remote_images: Some(true),
+            ..Default::default()
         };
         assert!(!store.get().remote_images);
         store
@@ -279,14 +381,8 @@ mod tests {
         let mut store = PreferenceStore::open(database.clone()).unwrap();
         assert_eq!(store.get().notifications, Notifications::default());
         let accent = |value: &str| PreferencesInput {
-            mcp: None,
-            account: None,
-            workspace: None,
             accent: Some(value.into()),
-            font: None,
-            font_size: None,
-            notifications: None,
-            remote_images: None,
+            ..Default::default()
         };
         for invalid in ["red", "#12345", "#1234567", "#12345g", "url(#a)"] {
             assert!(store.update(accent(invalid)).is_err(), "{invalid}");
