@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:
@@ -34,15 +34,17 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
-      # Only main writes the Rust cache; pull requests restore from it instead of
-      # each saving a near-identical ~800 MB copy that evicts the useful one.
+      # Only main and develop write the Rust cache; pull requests restore from their base
+      # branch or main instead of each saving a near-identical ~800 MB copy that evicts the
+      # useful one. develop saves only when its dependencies differ from main's (an exact
+      # hit is not saved again), so a dependency change there is cached before the release.
       # rust-cache keys on dependencies and the lockfile only, but [profile.*] in the root
       # Cargo.toml changes every artifact too, so its hash is part of each shared-key (a
       # plain `key` is ignored once shared-key is set).
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: verify-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
 
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
@@ -52,8 +54,9 @@ jobs:
         with:
           bun-version-file: ui/package.json
 
-      # Like the Rust cache, only main saves Bun and Playwright caches; a pull request's
-      # copy could only be reused by that pull request and would crowd out release caches.
+      # Like the Rust cache, only main and develop save Bun and Playwright caches, and only
+      # on a miss; a pull request's copy could only be reused by that pull request and
+      # would crowd out release caches.
       - name: Restore Bun packages
         id: bun-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -65,7 +68,7 @@ jobs:
       - run: just install ui
 
       - name: Save Bun packages
-        if: github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && steps.bun-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
@@ -106,7 +109,7 @@ jobs:
         run: bunx playwright install chromium webkit
 
       - name: Save Playwright browsers
-        if: github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && steps.playwright-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
@@ -155,7 +158,7 @@ jobs:
       - run: just test jmap
 
   prune-caches:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     needs: verify
     permissions:
       actions: write

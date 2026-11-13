@@ -1,4 +1,4 @@
-name: Prune Rust caches
+name: Prune caches
 
 on:
   workflow_call:
@@ -11,19 +11,28 @@ jobs:
     permissions:
       actions: write
     steps:
-      - name: Delete superseded Rust caches
+      # Keeps the newest cache of each family on each branch and deletes the rest. A family
+      # is the key without its toolchain, profile and lockfile hashes (Rust) or lockfile
+      # hash (Bun packages). setup-bun's own `bun-<hash>` caches are left alone: there is one
+      # per platform in use, so they are not superseded copies. Each branch is pruned
+      # separately, because tags and pull requests restore from different branches.
+      - name: Delete superseded caches
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           seen=" "
-          gh cache list --key v0-rust- --limit 200 --sort created_at --order desc --json id,key \
-            --jq '.[] | "\(.id) \(.key)"' |
-          while read -r id key; do
-            family=$(sed -E 's/-[0-9a-f]{8,}//g' <<< "$key") # without the profile, toolchain and lockfile hashes
+          gh cache list --limit 500 --sort created_at --order desc --json id,key,ref \
+            --jq '.[] | select(.key | startswith("v0-rust-") or startswith("bun-Linux-")) | "\(.id) \(.ref) \(.key)"' |
+          while read -r id ref key; do
+            case "$key" in
+              v0-rust-*) family=$(sed -E 's/-[0-9a-f]{8,}//g' <<< "$key") ;;
+              *) family=bun-packages ;;
+            esac
+            family="$ref:$family"
             if [[ "$seen" == *" $family "* ]]; then
-              echo "Deleting $key"; gh cache delete "$id"
+              echo "Deleting $key ($ref)"; gh cache delete "$id"
             else
               seen+="$family "
             fi
