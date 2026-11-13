@@ -7,7 +7,7 @@
     accounts: AccountInfo[]; security: SecurityInfo; onrefresh: () => Promise<void>;
     ondirty: (value: boolean) => void; onbusy: (value: boolean) => void;
   } = $props();
-  const empty = (): AccountSettings => ({ name: '', address: '', protocol: 'imap', imap_host: '', imap_port: 993, smtp_host: '', smtp_port: 587, username: '', session_url: '' });
+  const empty = (): AccountSettings => ({ name: '', address: '', protocol: 'imap', imap_host: '', imap_port: 993, smtp_host: '', smtp_port: 587, username: '', session_url: '', imap_starttls: false, tls_certificate: '' });
   let dialog = $state<HTMLDialogElement>();
   let settings = $state(empty());
   let baseline = $state(JSON.stringify(empty()));
@@ -48,7 +48,8 @@
   }
   function open(account?: AccountInfo) {
     if (dirty && !window.confirm('Discard unsaved account settings?')) return;
-    settings = account?.settings ? { ...account.settings } : empty();
+    // The Host omits unset optional fields, so fill them in to keep the dirty check honest.
+    settings = account?.settings ? { ...empty(), ...account.settings } : empty();
     baseline = JSON.stringify(settings); followed = settings.address; editing = account?.id; secret = ''; reveal = false; formError = ''; notice = '';
     dialog?.showModal();
   }
@@ -56,6 +57,30 @@
     if (working || (dirty && !window.confirm('Discard unsaved account settings?'))) return;
     settings = empty(); baseline = JSON.stringify(settings); editing = undefined; secret = ''; formError = '';
     dialog?.close();
+  }
+  /** Switching security moves a default port along with it; a custom port stays. */
+  function imapSecurity(starttls: boolean) {
+    settings.imap_starttls = starttls;
+    if (starttls && settings.imap_port === 993) settings.imap_port = 143;
+    if (!starttls && settings.imap_port === 143) settings.imap_port = 993;
+  }
+  // SMTP security follows the port: 465 starts with TLS, every other port requires STARTTLS.
+  function smtpSecurity(tls: boolean) {
+    if (tls) settings.smtp_port = 465;
+    else if (settings.smtp_port === 465) settings.smtp_port = 587;
+  }
+  async function chooseCertificate(event: Event & { currentTarget: HTMLInputElement }) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    formError = '';
+    const text = file.size <= 16384 ? await file.text() : '';
+    if (text.split('-----BEGIN CERTIFICATE-----').length !== 2) {
+      formError = 'Choose a PEM file with exactly one certificate (BEGIN CERTIFICATE), at most 16 KB.';
+      return;
+    }
+    settings.tls_certificate = text;
   }
   async function run(action: () => Promise<unknown>, onerror = (message: string) => { error = message; }) {
     working = true; onbusy(true); error = ''; notice = '';
@@ -168,11 +193,25 @@
         <div class="server-row">
           <label class="field">Incoming (IMAP) server<input required maxlength="253" autocapitalize="none" spellcheck="false" bind:value={settings.imap_host} placeholder="imap.example.com" /></label>
           <label class="field port">Port<input required type="number" min="1" max="65535" inputmode="numeric" bind:value={settings.imap_port} /></label>
+          <fieldset class="segmented-field"><legend>Security<span class="sr-only"> for incoming mail</span></legend><div class="segmented"><label><input type="radio" name="imap-security" checked={!settings.imap_starttls} onchange={() => imapSecurity(false)} />TLS</label><label><input type="radio" name="imap-security" checked={settings.imap_starttls} onchange={() => imapSecurity(true)} />STARTTLS</label></div></fieldset>
         </div>
         <div class="server-row">
           <label class="field">Outgoing (SMTP) server<input required maxlength="253" autocapitalize="none" spellcheck="false" bind:value={settings.smtp_host} placeholder="smtp.example.com" /></label>
-          <fieldset class="segmented-field"><legend>Security</legend><div class="segmented"><label title="Port 587"><input type="radio" name="smtp-port" value={587} bind:group={settings.smtp_port} />STARTTLS</label><label title="Port 465"><input type="radio" name="smtp-port" value={465} bind:group={settings.smtp_port} />TLS</label></div></fieldset>
+          <label class="field port">Port<input required type="number" min="1" max="65535" inputmode="numeric" bind:value={settings.smtp_port} /></label>
+          <fieldset class="segmented-field"><legend>Security<span class="sr-only"> for outgoing mail</span></legend><div class="segmented"><label title="Port 465"><input type="radio" name="smtp-security" checked={settings.smtp_port === 465} onchange={() => smtpSecurity(true)} />TLS</label><label title="Any port except 465"><input type="radio" name="smtp-security" checked={settings.smtp_port !== 465} onchange={() => smtpSecurity(false)} />STARTTLS</label></div></fieldset>
         </div>
+        <details class="certificate" open={!!settings.tls_certificate}>
+          <summary>Trusted certificate</summary>
+          <div class="certificate-body">
+            {#if settings.tls_certificate}
+              <span class="certificate-state"><Icon name="shield" size={15} />Custom certificate in use</span>
+              <button type="button" class="text-button" onclick={() => settings.tls_certificate = ''}>Use system certificates</button>
+            {:else}
+              <label class="secondary certificate-pick"><Icon name="upload" size={15} />Choose certificate…<input class="sr-only" type="file" accept=".pem,.crt,.cer,application/x-pem-file" onchange={chooseCertificate} /></label>
+            {/if}
+          </div>
+          <p class="hint">For Proton Mail Bridge or a self-signed server. Both servers must present this certificate, and it replaces your system’s certificate authorities for this account.</p>
+        </details>
       {:else}
         <label class="field">JMAP server or session URL<input required type="url" maxlength="2048" autocapitalize="none" spellcheck="false" bind:value={settings.session_url} placeholder="https://mail.example.com" /></label>
       {/if}

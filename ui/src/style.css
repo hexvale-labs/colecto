@@ -675,8 +675,14 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .sheet .optional { color: var(--ink-3); font-weight: 450; }
 .segmented.fill { display: flex; width: 100%; }
 .segmented.fill label { flex: 1; justify-content: center; }
-.server-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 16px; }
-.server-row .port { width: 96px; }
+.server-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 16px; }
+.server-row .port { width: 84px; }
+.sheet .certificate { margin-top: 0; }
+.certificate-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.certificate-state { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); font-size: calc(13.5px * var(--text-scale)); }
+.certificate-state .icon { color: var(--mint); }
+.certificate-pick { cursor: pointer; }
+.certificate-pick:has(input:focus-visible) { outline: 2px solid var(--mint); outline-offset: 2px; }
 .secret-input { position: relative; display: block; }
 .secret-input input { padding-right: 40px; }
 .secret-input .reveal { position: absolute; top: 50%; right: 4px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--ink-3); transform: translateY(-50%); }
@@ -684,7 +690,8 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 @media (max-width: 520px) {
   .sheet { width: 100vw; max-width: none; max-height: 100dvh; height: 100dvh; border: 0; border-radius: 0; }
   .sheet .form-grid { grid-template-columns: minmax(0, 1fr); }
-  .server-row { grid-template-columns: minmax(0, 1fr); }
+  .server-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .server-row > .field:first-child { grid-column: 1 / -1; }
   .server-row .port { width: auto; }
 }
 
@@ -722,9 +729,10 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .service-meta .sep { color: var(--line); }
 .service-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .service-pill { padding: 1px 7px; border-radius: 999px; background: var(--control); color: var(--ink-3); font-size: calc(11px * var(--text-scale)); font-weight: 600; }
+.service-version { color: var(--ink-3); font-size: calc(11.5px * var(--text-scale)); font-variant-numeric: tabular-nums; }
 .service-pill.on { background: color-mix(in oklch, var(--status-online) 16%, transparent); color: var(--status-online); }
 .service-controls { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
-.service-controls .switch { margin-right: 6px; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); }
+.service-controls .switch { margin-right: 6px; white-space: nowrap; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); }
 .service-controls .icon-button.remove:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger); }
 .address-form { display: flex; gap: 8px; margin-top: 14px; max-width: 520px; }
 .address-form .field { flex: 1; margin: 0; }

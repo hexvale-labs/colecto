@@ -4,7 +4,10 @@ use colecto_extension_api::{DraftInput, Message};
 use lettre::{
     SmtpTransport, Transport,
     message::{MultiPart, SinglePart, header::ContentType},
-    transport::smtp::authentication::Credentials,
+    transport::smtp::{
+        authentication::Credentials,
+        client::{Certificate, CertificateStore, Tls, TlsParameters},
+    },
 };
 use mailparse::MailHeaderMap;
 use std::{
@@ -21,6 +24,24 @@ pub struct MailAccount {
     pub username: String,
     pub password: String,
     pub address: String,
+    /// Upgrade a plain IMAP connection with STARTTLS instead of starting with TLS.
+    pub imap_starttls: bool,
+    /// A PEM certificate to trust instead of the system's authorities, for IMAP and SMTP.
+    pub tls_certificate: String,
+}
+
+/// Largest accepted pinned certificate, in bytes of PEM text.
+pub const MAX_CERTIFICATE_BYTES: usize = 16 * 1024;
+
+fn invalid_certificate() -> Error {
+    Error::Invalid(
+        "The trusted certificate must be one PEM certificate (BEGIN CERTIFICATE).".into(),
+    )
+}
+fn tls_failed<E>(_: E) -> Error {
+    Error::Transport(
+        "Mail server TLS negotiation failed. Check the server name and certificate.".into(),
+    )
 }
 
 fn remote(_: impl std::fmt::Display) -> Error {
@@ -71,11 +92,14 @@ impl MailAccount {
             || self.username.is_empty()
             || self.password.is_empty()
             || self.imap_port == 0
-            || !matches!(self.smtp_port, 465 | 587)
+            || self.smtp_port == 0
         {
             return Err(Error::Invalid(
-                "Configure IMAP and SMTP hosts, credentials, and SMTP port 465 or 587".into(),
+                "Configure IMAP and SMTP hosts, ports and credentials".into(),
             ));
+        }
+        if !self.tls_certificate.is_empty() {
+            self.native_certificate()?;
         }
         self.address
             .parse::<lettre::message::Mailbox>()
@@ -111,6 +135,30 @@ impl MailAccount {
         self.query_with_identity(folder, search)
             .map(|(messages, _)| messages)
     }
+    fn native_certificate(&self) -> Result<native_tls::Certificate, Error> {
+        if self.tls_certificate.len() > MAX_CERTIFICATE_BYTES
+            || self
+                .tls_certificate
+                .matches("-----BEGIN CERTIFICATE-----")
+                .count()
+                != 1
+        {
+            return Err(invalid_certificate());
+        }
+        native_tls::Certificate::from_pem(self.tls_certificate.as_bytes())
+            .map_err(|_| invalid_certificate())
+    }
+    /// A pinned certificate replaces the system authorities rather than adding to them,
+    /// so only that certificate (with a matching host name) is accepted.
+    fn tls_connector(&self) -> Result<native_tls::TlsConnector, Error> {
+        let mut builder = native_tls::TlsConnector::builder();
+        if !self.tls_certificate.is_empty() {
+            builder
+                .disable_built_in_roots(true)
+                .add_root_certificate(self.native_certificate()?);
+        }
+        builder.build().map_err(remote)
+    }
     fn login(&self) -> Result<imap::Session<native_tls::TlsStream<TcpStream>>, Error> {
         let timeout = Duration::from_secs(30);
         let addresses = (self.imap_host.as_str(), self.imap_port)
@@ -126,14 +174,30 @@ impl MailAccount {
         let socket = socket.ok_or_else(|| remote("connect"))?;
         socket.set_read_timeout(Some(timeout)).map_err(remote)?;
         socket.set_write_timeout(Some(timeout)).map_err(remote)?;
-        let tls = native_tls::TlsConnector::new().map_err(remote)?;
-        let stream = tls.connect(&self.imap_host, socket).map_err(|_| {
-            Error::Transport(
-                "Mail server TLS negotiation failed. Check the server name and certificate.".into(),
-            )
-        })?;
-        let mut client = imap::Client::new(stream);
-        client.read_greeting().map_err(imap_error)?;
+        let tls = self.tls_connector()?;
+        let client = if self.imap_starttls {
+            let mut plain = imap::Client::new(socket);
+            plain.read_greeting().map_err(imap_error)?;
+            // `secure` fails unless the server accepts STARTTLS, so a refused or stripped
+            // upgrade ends the connection before any credential is sent in plain text.
+            plain.secure(&self.imap_host, &tls).map_err(|error| {
+                match error {
+                imap::error::Error::No(_) | imap::error::Error::Bad(_) => Error::Transport(
+                    "Mail server did not accept STARTTLS. Check the IMAP port and security setting."
+                        .into(),
+                ),
+                imap::error::Error::Tls(_) | imap::error::Error::TlsHandshake(_) => {
+                    tls_failed(())
+                }
+                error => imap_error(error),
+            }
+            })?
+        } else {
+            let stream = tls.connect(&self.imap_host, socket).map_err(tls_failed)?;
+            let mut client = imap::Client::new(stream);
+            client.read_greeting().map_err(imap_error)?;
+            client
+        };
         client
             .login(&self.username, &self.password)
             .map_err(|(error, _)| match error {
@@ -220,13 +284,23 @@ impl MailAccount {
     pub(crate) fn send(&self, input: &DraftInput, attachments: &[Attachment]) -> Result<(), Error> {
         self.validate()?;
         let email = self.build(input, attachments)?;
-        let builder = if self.smtp_port == 465 {
-            SmtpTransport::relay(&self.smtp_host)
-        } else {
-            SmtpTransport::starttls_relay(&self.smtp_host)
+        let mut parameters = TlsParameters::builder(self.smtp_host.clone());
+        if !self.tls_certificate.is_empty() {
+            let certificate = Certificate::from_pem(self.tls_certificate.as_bytes())
+                .map_err(|_| invalid_certificate())?;
+            parameters = parameters
+                .certificate_store(CertificateStore::None)
+                .add_root_certificate(certificate);
         }
-        .map_err(remote)?;
-        builder
+        let parameters = parameters.build().map_err(remote)?;
+        // Port 465 starts with TLS; every other port must upgrade with STARTTLS.
+        let tls = if self.smtp_port == 465 {
+            Tls::Wrapper(parameters)
+        } else {
+            Tls::Required(parameters)
+        };
+        SmtpTransport::builder_dangerous(&self.smtp_host)
+            .tls(tls)
             .port(self.smtp_port)
             .timeout(Some(Duration::from_secs(60)))
             .credentials(Credentials::new(
@@ -835,6 +909,8 @@ mod tests {
             username: "user".into(),
             password: "secret".into(),
             address: "me@example.test".into(),
+            imap_starttls: false,
+            tls_certificate: String::new(),
         };
         let input = DraftInput {
             recipient: "Ann <ann@example.test>, bob@example.test".into(),
@@ -873,15 +949,17 @@ mod tests {
         );
     }
     #[test]
-    fn rejects_insecure_smtp_and_invalid_recipient_before_connecting() {
+    fn rejects_missing_smtp_port_and_invalid_recipient_before_connecting() {
         let mut account = MailAccount {
             imap_host: "localhost".into(),
             imap_port: 993,
             smtp_host: "localhost".into(),
-            smtp_port: 25,
+            smtp_port: 0,
             username: "user".into(),
             password: "secret".into(),
             address: "me@example.test".into(),
+            imap_starttls: false,
+            tls_certificate: String::new(),
         };
         assert!(matches!(account.validate(), Err(Error::Invalid(_))));
         account.smtp_port = 587;
@@ -898,6 +976,218 @@ mod tests {
             ),
             Err(Error::Invalid(_))
         ));
+    }
+
+    const PINNED_CERT: &str = include_str!("../tests/fixtures/pinned-cert.pem");
+    const PINNED_KEY: &str = include_str!("../tests/fixtures/pinned-key.pem");
+    const OTHER_CERT: &str = include_str!("../tests/fixtures/other-cert.pem");
+    const OTHER_KEY: &str = include_str!("../tests/fixtures/other-key.pem");
+
+    fn acceptor(cert: &str, key: &str) -> native_tls::TlsAcceptor {
+        let identity = native_tls::Identity::from_pkcs8(cert.as_bytes(), key.as_bytes()).unwrap();
+        native_tls::TlsAcceptor::new(identity).unwrap()
+    }
+    fn pinned_account(host: &str, imap_port: u16, smtp_port: u16, starttls: bool) -> MailAccount {
+        MailAccount {
+            imap_host: host.into(),
+            imap_port,
+            smtp_host: host.into(),
+            smtp_port,
+            username: "user".into(),
+            password: "secret".into(),
+            address: "me@example.test".into(),
+            imap_starttls: starttls,
+            tls_certificate: PINNED_CERT.into(),
+        }
+    }
+    fn read_line(reader: &mut impl std::io::BufRead) -> String {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        line
+    }
+    /// A plain IMAP server that answers STARTTLS with `reply`, then (on OK) switches to TLS
+    /// with `cert` and accepts LOGIN. Returns the lines it read after the STARTTLS answer.
+    fn starttls_imap(
+        reply: &'static str,
+        cert: &'static str,
+        key: &'static str,
+    ) -> (u16, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::{BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            write!(socket, "* OK ready\r\n").unwrap();
+            let mut reader = BufReader::new(socket.try_clone().unwrap());
+            let line = read_line(&mut reader);
+            let (tag, command) = line.split_once(' ').unwrap();
+            assert_eq!(command.trim_end(), "STARTTLS");
+            write!(socket, "{tag} {reply}\r\n").unwrap();
+            if !reply.starts_with("OK") {
+                return vec![read_line(&mut reader)];
+            }
+            let Ok(stream) = acceptor(cert, key).accept(socket) else {
+                return Vec::new();
+            };
+            let mut reader = BufReader::new(stream);
+            let line = read_line(&mut reader);
+            let tag = line.split_once(' ').unwrap().0.to_owned();
+            write!(reader.get_mut(), "{tag} OK logged in\r\n").unwrap();
+            vec![line]
+        });
+        (port, handle)
+    }
+
+    #[test]
+    fn imap_starttls_upgrades_with_a_pinned_certificate_before_login() {
+        let (port, server) = starttls_imap("OK begin TLS", PINNED_CERT, PINNED_KEY);
+        let account = pinned_account("127.0.0.1", port, 1025, true);
+        account.login().unwrap();
+        let lines = server.join().unwrap();
+        assert!(lines[0].contains("LOGIN"), "{lines:?}");
+    }
+    #[test]
+    fn imap_never_logs_in_when_starttls_is_refused_or_the_certificate_differs() {
+        let (port, server) = starttls_imap("NO not here", PINNED_CERT, PINNED_KEY);
+        let error = pinned_account("127.0.0.1", port, 1025, true)
+            .login()
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("STARTTLS"), "{error}");
+        // The client closes the connection instead of sending credentials in plain text.
+        assert_eq!(server.join().unwrap(), vec![String::new()]);
+
+        let (port, server) = starttls_imap("OK begin TLS", OTHER_CERT, OTHER_KEY);
+        let error = pinned_account("127.0.0.1", port, 1025, true)
+            .login()
+            .err()
+            .unwrap();
+        assert!(
+            error.to_string().contains("TLS negotiation failed"),
+            "{error}"
+        );
+        assert!(server.join().unwrap().is_empty());
+    }
+    #[test]
+    fn implicit_tls_checks_the_pinned_certificate_and_host_name() {
+        for (host, cert, key, accepted) in [
+            ("127.0.0.1", PINNED_CERT, PINNED_KEY, true),
+            ("127.0.0.1", OTHER_CERT, OTHER_KEY, false),
+            // The pinned certificate names 127.0.0.1, not localhost.
+            ("localhost", PINNED_CERT, PINNED_KEY, false),
+        ] {
+            use std::io::{BufReader, Write};
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = std::thread::spawn(move || {
+                let (socket, _) = listener.accept().unwrap();
+                let Ok(mut stream) = acceptor(cert, key).accept(socket) else {
+                    return false;
+                };
+                write!(stream, "* OK ready\r\n").unwrap();
+                let mut reader = BufReader::new(stream);
+                let line = read_line(&mut reader);
+                let tag = line.split_once(' ').unwrap().0.to_owned();
+                write!(reader.get_mut(), "{tag} OK logged in\r\n").unwrap();
+                true
+            });
+            let result = pinned_account(host, port, 465, false).login();
+            assert_eq!(result.is_ok(), accepted, "{host}");
+            assert_eq!(server.join().unwrap(), accepted, "{host}");
+        }
+    }
+    #[test]
+    fn rejects_malformed_or_multiple_pinned_certificates() {
+        let mut account = pinned_account("127.0.0.1", 993, 587, false);
+        assert!(account.validate().is_ok());
+        for pem in [
+            "not a certificate".to_owned(),
+            format!("{PINNED_CERT}{OTHER_CERT}"),
+        ] {
+            account.tls_certificate = pem;
+            assert!(matches!(account.validate(), Err(Error::Invalid(_))));
+        }
+    }
+    /// An SMTP server on a custom port. It offers STARTTLS when `starttls` is set and then
+    /// accepts one message; it returns every command it read.
+    fn smtp_server(starttls: bool) -> (u16, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::{BufRead, BufReader, Write};
+        fn exchange<S: std::io::Read + std::io::Write>(
+            reader: &mut BufReader<S>,
+            seen: &mut Vec<String>,
+            reply: &str,
+        ) -> String {
+            let line = read_line(reader);
+            seen.push(line.clone());
+            write!(reader.get_mut(), "{reply}\r\n").unwrap();
+            line
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            write!(socket, "220 test ESMTP\r\n").unwrap();
+            let mut seen = Vec::new();
+            let mut plain = BufReader::new(socket.try_clone().unwrap());
+            let offer = if starttls {
+                "250-test\r\n250 STARTTLS"
+            } else {
+                "250-test\r\n250 AUTH PLAIN"
+            };
+            exchange(&mut plain, &mut seen, offer);
+            if !starttls {
+                // Record whatever the client does next; it must not authenticate.
+                seen.push(read_line(&mut plain));
+                return seen;
+            }
+            exchange(&mut plain, &mut seen, "220 go ahead");
+            let mut tls = BufReader::new(acceptor(PINNED_CERT, PINNED_KEY).accept(socket).unwrap());
+            exchange(&mut tls, &mut seen, "250-test\r\n250 AUTH PLAIN");
+            exchange(&mut tls, &mut seen, "235 ok");
+            exchange(&mut tls, &mut seen, "250 ok");
+            exchange(&mut tls, &mut seen, "250 ok");
+            exchange(&mut tls, &mut seen, "354 go");
+            loop {
+                let line = read_line(&mut tls);
+                if line == ".\r\n" || line.is_empty() {
+                    break;
+                }
+            }
+            write!(tls.get_mut(), "250 queued\r\n").unwrap();
+            let mut quit = String::new();
+            let _ = tls.read_line(&mut quit);
+            let _ = write!(tls.get_mut(), "221 bye\r\n");
+            seen
+        });
+        (port, handle)
+    }
+    #[test]
+    fn smtp_uses_required_starttls_on_custom_ports_with_a_pinned_certificate() {
+        let draft = DraftInput {
+            recipient: "ann@example.test".into(),
+            subject: "Hi".into(),
+            body: "Hello".into(),
+            ..Default::default()
+        };
+        let (port, server) = smtp_server(true);
+        pinned_account("127.0.0.1", 993, port, false)
+            .send(&draft, &[])
+            .unwrap();
+        let seen = server.join().unwrap();
+        assert_eq!(seen[1].trim_end(), "STARTTLS");
+        assert!(seen[3].starts_with("AUTH PLAIN"), "{seen:?}");
+
+        let (port, server) = smtp_server(false);
+        assert!(
+            pinned_account("127.0.0.1", 993, port, false)
+                .send(&draft, &[])
+                .is_err()
+        );
+        let seen = server.join().unwrap();
+        assert!(
+            seen.iter().all(|line| !line.starts_with("AUTH")),
+            "{seen:?}"
+        );
     }
 }
 

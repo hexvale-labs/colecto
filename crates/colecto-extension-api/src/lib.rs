@@ -163,6 +163,14 @@ pub struct AccountSettings {
     pub username: String,
     #[serde(default)]
     pub session_url: String,
+    /// IMAP upgrades a plain connection with STARTTLS instead of starting with TLS.
+    // Optional fields are omitted when unset: the credential vault authenticates the
+    // serialized settings, so existing records must serialize exactly as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub imap_starttls: bool,
+    /// PEM certificate trusted instead of the system authorities, for IMAP and SMTP.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tls_certificate: String,
 }
 fn imap_port() -> u16 {
     993
@@ -448,5 +456,29 @@ mod setting_tests {
         }
         assert!(validate_settings(&vec![parse(range.clone()); 17]).is_err());
         assert!(validate_settings(&[parse(range.clone()), parse(range)]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod account_tests {
+    use super::*;
+    #[test]
+    fn saved_settings_without_new_fields_serialize_unchanged() {
+        // The credential vault authenticates this exact serialization, so a record
+        // written before optional fields existed must round-trip byte for byte.
+        let saved = r#"{"name":"Work","address":"a@example.test","protocol":"imap","imap_host":"imap.example.test","imap_port":993,"smtp_host":"smtp.example.test","smtp_port":587,"username":"a","session_url":""}"#;
+        let settings: AccountSettings = serde_json::from_str(saved).unwrap();
+        assert_eq!(serde_json::to_string(&settings).unwrap(), saved);
+        let bridge = AccountSettings {
+            imap_starttls: true,
+            tls_certificate: "PEM".into(),
+            ..settings
+        };
+        let json = serde_json::to_string(&bridge).unwrap();
+        assert!(json.ends_with(r#""imap_starttls":true,"tls_certificate":"PEM"}"#));
+        assert_eq!(
+            serde_json::from_str::<AccountSettings>(&json).unwrap(),
+            bridge
+        );
     }
 }
