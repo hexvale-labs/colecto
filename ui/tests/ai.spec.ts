@@ -110,8 +110,8 @@ test('Settings → AI keeps everything inactive until AI features are on', async
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'AI', exact: true }).click();
-  const master = page.getByRole('checkbox', { name: 'AI features' });
+  const master = page.getByRole('checkbox', { name: 'Use AI features' });
   await expect(master).not.toBeChecked();
   await expect(page.getByLabel('Base URL').first()).toBeDisabled();
-  await expect(page.getByRole('checkbox', { name: 'Automatic labels' })).toBeDisabled();
+  await expect(page.getByRole('checkbox', { name: 'Label new mail automatically' })).toBeDisabled();
 });

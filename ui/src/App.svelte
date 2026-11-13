@@ -27,8 +27,13 @@
   let managing = $state(false);
   let onboarding = $state(false);
   async function checkOnboarding() {
-    try { const [preferences, list] = await Promise.all([hostService.preferences(), hostService.accounts()]); onboarding = needsOnboarding(list, preferences); }
-    catch { onboarding = false; }
+    // Both requests start together; once onboarding is done, the shell need not wait for accounts.
+    const list = hostService.accounts();
+    list.catch(() => {});
+    try {
+      const preferences = await hostService.preferences();
+      onboarding = !preferences.onboarded && needsOnboarding(await list, preferences);
+    } catch { onboarding = false; }
   }
   let loading = $state(true);
   let busy = $state(false);
