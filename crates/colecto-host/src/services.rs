@@ -284,8 +284,35 @@ fn unit(name: &str, command: &[String]) -> Result<String, String> {
         )
     };
     Ok(format!(
-        "# Managed by Colecto\n[Unit]\nDescription=Colecto {name}\n{ordering}\n\n[Service]\nType=simple\nExecStart={exec}\n{environment}\nUMask=0077\nRestart=on-failure\nRestartSec=5\nNoNewPrivileges=true\n\n[Install]\nWantedBy={target}\n"
+        "# Managed by Colecto\n{VERSION_MARKER}{version}\n[Unit]\nDescription=Colecto {name}\n{ordering}\n\n[Service]\nType=simple\nExecStart={exec}\n{environment}\nUMask=0077\nRestart=on-failure\nRestartSec=5\nNoNewPrivileges=true\n\n[Install]\nWantedBy={target}\n",
+        version = crate::VERSION
     ))
+}
+const VERSION_MARKER: &str = "# Colecto-Version: ";
+fn release(value: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = value.split(['.', '-', '+']).map(|p| p.parse().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
+}
+/// The Colecto version an installed unit should be updated to, if any. Units from before
+/// versioning have no marker and count as outdated; a unit written by a newer Colecto is
+/// left alone so opening an older app never downgrades it.
+fn update_to(installed: &str, expected: &str) -> Option<&'static str> {
+    if installed == expected {
+        return None;
+    }
+    let version = installed
+        .lines()
+        .find_map(|l| l.strip_prefix(VERSION_MARKER))
+        .and_then(release);
+    match (version, release(crate::VERSION)) {
+        (Some(version), Some(current)) if version > current => None,
+        _ => Some(crate::VERSION),
+    }
+}
+fn write_unit(path: &Path, text: &str) -> Result<(), String> {
+    let temporary = path.with_extension("tmp");
+    std::fs::write(&temporary, text).map_err(|e| e.to_string())?;
+    std::fs::rename(temporary, path).map_err(|e| e.to_string())
 }
 fn managed(path: &Path) -> Result<(), String> {
     match std::fs::symlink_metadata(path) {
@@ -335,8 +362,19 @@ async fn service_request(control: &Control, request: Request) -> Result<Response
     if request.method() == Method::GET && request.uri().path() == "/api/v1/services" {
         let mut values = serde_json::Map::new();
         for name in ["daemon", "notifications"] {
-            let unit = format!("colecto-{name}.service");
-            values.insert(name.into(), serde_json::json!({"installed":directory.join(&unit).exists(),"enabled":supported && control.run(&["is-enabled", &unit]).await.unwrap_or(false),"active":supported && control.run(&["is-active", &unit]).await.unwrap_or(false),"supported":supported,"reason":if supported {None} else {Some("Local systemd user manager or service executable unavailable")},"socket":socket_path().map(|p| p.to_string_lossy().into_owned()),"token_file":std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/colecto/owner-token"))}));
+            let unit_name = format!("colecto-{name}.service");
+            let text = std::fs::read_to_string(directory.join(&unit_name)).ok();
+            let version = text.as_deref().and_then(|t| {
+                t.lines()
+                    .find_map(|l| l.strip_prefix(VERSION_MARKER))
+                    .map(str::to_owned)
+            });
+            let expected = control.command.as_ref().map(|c| unit(name, c));
+            let update = match (&text, expected) {
+                (Some(text), Some(Ok(expected))) if supported => update_to(text, &expected),
+                _ => None,
+            };
+            values.insert(name.into(), serde_json::json!({"installed":text.is_some(),"version":version,"update_to":update,"enabled":supported && control.run(&["is-enabled", &unit_name]).await.unwrap_or(false),"active":supported && control.run(&["is-active", &unit_name]).await.unwrap_or(false),"supported":supported,"reason":if supported {None} else {Some("Local systemd user manager or service executable unavailable")},"socket":socket_path().map(|p| p.to_string_lossy().into_owned()),"token_file":std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/colecto/owner-token"))}));
         }
         return Ok(Json(values).into_response());
     }
@@ -370,8 +408,7 @@ async fn service_request(control: &Control, request: Request) -> Result<Response
         "install" => {
             let autostart = input["autostart"].as_bool().ok_or("Missing autostart")?;
             std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
-            std::fs::write(&path, unit(&name, control.command.as_ref().unwrap())?)
-                .map_err(|e| e.to_string())?;
+            write_unit(&path, &unit(&name, control.command.as_ref().unwrap())?)?;
             if !control.run(&["daemon-reload"]).await? {
                 return Err("systemctl daemon-reload failed".into());
             }
@@ -389,6 +426,19 @@ async fn service_request(control: &Control, request: Request) -> Result<Response
             },
             &filename,
         ],
+        // Rewrites the unit for this Colecto and its executable. Only a running service is
+        // restarted, so it picks up the new binary; reenable moves links if WantedBy changed.
+        "update" => {
+            let enabled = control.run(&["is-enabled", &filename]).await?;
+            write_unit(&path, &unit(&name, control.command.as_ref().unwrap())?)?;
+            if !control.run(&["daemon-reload"]).await? {
+                return Err("systemctl daemon-reload failed".into());
+            }
+            if enabled && !control.run(&["reenable", &filename]).await? {
+                return Err("systemctl reenable failed".into());
+            }
+            vec!["try-restart", &filename]
+        }
         "start" => vec!["start", &filename],
         "stop" => vec!["stop", &filename],
         "uninstall" => vec!["disable", "--now", &filename],
@@ -419,6 +469,22 @@ mod tests {
         assert!(!notify.contains("\"daemon\""));
         assert!(notify.contains("unix:%t/colecto/mail.sock"));
         assert!(notify.contains("WantedBy=graphical-session.target"));
+        assert!(daemon.contains(&format!("\n# Colecto-Version: {}\n", crate::VERSION)));
+    }
+    #[test]
+    fn unit_updates() {
+        let current = unit("daemon", &["/usr/bin/colecto".into(), "daemon".into()]).unwrap();
+        assert_eq!(update_to(&current, &current), None);
+        // Units from before versioning, older versions and moved executables are offered.
+        let legacy = current.replace(&format!("# Colecto-Version: {}\n", crate::VERSION), "");
+        assert_eq!(update_to(&legacy, &current), Some(crate::VERSION));
+        let old = current.replace(crate::VERSION, "0.0.1");
+        assert_eq!(update_to(&old, &current), Some(crate::VERSION));
+        let moved = current.replace("/usr/bin", "/opt");
+        assert_eq!(update_to(&moved, &current), Some(crate::VERSION));
+        // An older app never downgrades a unit written by a newer one.
+        let newer = current.replace(crate::VERSION, "999.0.0");
+        assert_eq!(update_to(&newer, &current), None);
     }
     #[test]
     fn foreign_units_refused() {

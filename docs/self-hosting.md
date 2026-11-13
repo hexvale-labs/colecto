@@ -439,6 +439,27 @@ Generated units live in `$XDG_CONFIG_HOME/systemd/user` (default
 Commands run without a shell with a ten-second timeout; errors leave the current
 unit available for inspection and retry.
 
+### Unit versions and updates
+
+Each generated unit carries a `# Colecto-Version: X.Y.Z` line naming the Colecto that
+wrote it. `GET /api/v1/services` reports it as `version` (`null` for units written
+before versioning) and sets `update_to` to the app's version when the unit on disk
+differs from the one this app would write:
+
+| Installed unit | `update_to` |
+| --- | --- |
+| Same text as this app would write | `null` |
+| No version line, an older version, or a different executable path | this app's version |
+| Written by a newer Colecto | `null`, so an older app never downgrades it |
+
+Settings → Connection shows the version and an Update button when `update_to` is set.
+`POST /api/v1/services/{daemon|notifications}` with `{"action":"update"}` rewrites the
+unit (temporary file, then rename), runs `daemon-reload`, `reenable` when the unit was
+enabled (so a changed `WantedBy` target moves its link), then `try-restart`. A running
+service restarts on the new executable and briefly drops connections; a stopped one
+stays stopped. Updating a package replaces the binary but not a running process, which
+is why the version check compares the unit, not the executable.
+
 The executable is `$APPIMAGE` when set, otherwise the running executable. The app
 supports `colecto daemon` and `colecto notify`, so installation does not require a
 separate daemon binary. Keep that executable at its installed location. Units use
