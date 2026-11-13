@@ -20,8 +20,9 @@
   import AccountSettings from '../../AccountSettings.svelte';
   import { applyTypography, DEFAULT_FONT, DEFAULT_TEXT_SIZE } from '../../lib/typography';
   import { setBusAccount } from '../../lib/bus';
-  import { createServices, hostService } from '../../lib/api';
-  import type { Draft, MailItem, AccountInfo, SecurityInfo } from '../../lib/api';
+  import { createServices, hostService, prefetchContent, rememberMessages } from '../../lib/api';
+  import type { AccountSync, Draft, MailItem, Message, AccountInfo, PrefetchPreferences, SecurityInfo } from '../../lib/api';
+  import MailSettings from './MailSettings.svelte';
   import type { Workspace } from '../../App.svelte';
   import NotificationSettings from '../../NotificationSettings.svelte';
   import PrivacySettings from '../../PrivacySettings.svelte';
@@ -55,6 +56,8 @@
   let dateGroups = $state(true);
   let accent = $state<string | null>(null);
   let remoteImages = $state(false);
+  let prefetch = $state<PrefetchPreferences>({ enabled: true, count: 50 });
+  let syncStatus = $state<Record<string, AccountSync>>({});
   let font = $state(DEFAULT_FONT);
   let textSize = $state(DEFAULT_TEXT_SIZE);
   $effect(() => { void applyTypography(font, textSize); });
@@ -63,6 +66,7 @@
   let accountsEnabled = $state<Record<string, boolean>>({});
   const isOn = (id: string) => accountOn(accountsEnabled, id);
   function savePreferences(input: PreferencesInput) {
+    if (input.prefetch) prefetch = input.prefetch;
     if (input.accent !== undefined) accent = input.accent || null;
     if (input.font) font = input.font;
     if (input.font_size) textSize = input.font_size;
@@ -216,7 +220,9 @@
     switchAccount(next);
   }
   function switchAccount(next: string) {
-    clearView(); invalidateList(); items = []; fetchedAt = null; labels = {}; labelFilter = ''; labelError = '';
+    clearView(); invalidateList(); labels = {}; labelFilter = ''; labelError = '';
+    const saved = folderCache.get(listKey(next, 'Inbox'));
+    items = saved?.items ?? []; fetchedAt = saved?.fetchedAt ?? null;
     accountId = next; void hostService.savePreferences({ account: next }).catch(() => { /* Selection still applies for this session. */ });
     connected = accounts.find(a => a.id === next)?.connected ?? false;
     query = ''; appliedQuery = ''; folder = 'Inbox'; void loadList();
@@ -293,6 +299,19 @@
     ...(currentTabs.length > 1 ? [{ id: 'close-all-tabs', name: 'Close all message tabs', run: closeAllTabs }] : []),
   ] as Command[]).map(command => ({ ...command, disabled: command.disabled || busy || labeling || !initialized })));
   function invalidateList() { ++listGeneration; loading = false; fetching = false; searching = false; }
+  // Each folder's last list stays in memory, so switching back shows it at once while it refreshes.
+  const folderCache = new Map<string, { items: MailItem[]; fetchedAt: number | null }>();
+  const listKey = (account: string, name: Folder) => `${account}\u0000${name}`;
+  const toItems = (messages: Message[]) => messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date }));
+  function showList(account: string, name: Folder, next: MailItem[], at: number | null) {
+    items = next; fetchedAt = at;
+    folderCache.set(listKey(account, name), { items: next, fetchedAt: at });
+  }
+  /** Fill the in-memory content cache for the newest listed messages, so opening them is instant. */
+  function warm(account: string, list: MailItem[]) {
+    if (!prefetch.enabled || !prefetch.count || !Reader) return;
+    void prefetchContent(account, list.slice(0, Math.min(prefetch.count, 25)).map(item => item.id));
+  }
   /** Refresh from the provider, or with `searchOnly`, apply the search box without refreshing the folder. */
   async function loadList(searchOnly = false) {
     if (labeling) return;
@@ -302,25 +321,37 @@
     const requestedQuery = query.trim();
     const requestedAccount = accountId;
     const inboxService = services.inbox;
+    const current = () => generation === listGeneration && requestedAccount === accountId;
     error = ''; openError = '';
     if (searchOnly) searching = true; else { loading = items.length === 0; fetching = true; }
     try {
-      if (requestedFolder !== 'Drafts' && !requestedQuery) {
-        const snapshot = await inboxService.cached(requestedFolder === 'Sent' ? 'sent' : 'inbox');
-        if (generation !== listGeneration || requestedAccount !== accountId) return;
-        items = snapshot.messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date }));
-        fetchedAt = snapshot.fetched_at; loading = false;
-        // Clearing a search goes back to the saved folder; it does not fetch it again.
-        if (searchOnly) { appliedQuery = ''; return; }
-      }
+      const remoteFolder = requestedFolder === 'Sent' ? 'sent' : 'inbox';
       const normalizedQuery = requestedQuery.toLocaleLowerCase();
-      const [nextLabels, result] = await Promise.all([
-        searchOnly ? labels : inboxService.labels(),
-        requestedFolder !== 'Drafts'
-          ? inboxService.messages(requestedFolder === 'Sent' ? 'sent' : 'inbox', requestedQuery).then(messages => messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date })))
-          : inboxService.drafts().then(drafts => drafts.filter(draft => [draft.recipient, draft.subject, draft.body].some(text => text.toLocaleLowerCase().includes(normalizedQuery))).slice().reverse().map(d => ({ id: d.id, name: d.recipient || 'No recipient', subject: d.subject, preview: d.body, date: 'Draft' }))),
-      ]);
-      if (generation === listGeneration && requestedAccount === accountId) { items = result; labels = nextLabels; appliedQuery = requestedQuery; if (!requestedQuery) fetchedAt = Math.floor(Date.now() / 1000); }
+      // Start everything at once: the saved snapshot paints first, labels and the fresh
+      // list arrive in parallel instead of one after another.
+      const snapshot = requestedFolder !== 'Drafts' && !requestedQuery ? inboxService.cached(remoteFolder) : null;
+      let arrived = false;
+      // Clearing a search goes back to the saved folder; it does not fetch it again.
+      const fresh = (searchOnly && !requestedQuery ? null : requestedFolder !== 'Drafts'
+        ? inboxService.messages(remoteFolder, requestedQuery).then(messages => { rememberMessages(requestedAccount, messages); return toItems(messages); })
+        : inboxService.drafts().then(drafts => drafts.filter(draft => [draft.recipient, draft.subject, draft.body].some(text => text.toLocaleLowerCase().includes(normalizedQuery))).slice().reverse().map(d => ({ id: d.id, name: d.recipient || 'No recipient', subject: d.subject, preview: d.body, date: 'Draft' }))))
+        ?.then(list => { arrived = true; return list; });
+      const nextLabels = searchOnly ? Promise.resolve(labels) : inboxService.labels();
+      fresh?.catch(() => {}); nextLabels.catch(() => {});
+      if (snapshot) {
+        const saved = await snapshot;
+        if (!current()) return;
+        rememberMessages(requestedAccount, saved.messages);
+        // A fresh list that already arrived wins over the older snapshot.
+        if (!arrived) { showList(requestedAccount, requestedFolder, toItems(saved.messages), saved.fetched_at); loading = false; warm(requestedAccount, items); }
+        if (!fresh) { appliedQuery = ''; return; }
+      }
+      const [labelResult, result] = await Promise.all([nextLabels, fresh!]);
+      if (!current()) return;
+      labels = labelResult; appliedQuery = requestedQuery;
+      if (requestedQuery) items = result;
+      else showList(requestedAccount, requestedFolder, result, requestedFolder === 'Drafts' ? null : Math.floor(Date.now() / 1000));
+      if (requestedFolder !== 'Drafts') warm(requestedAccount, result);
     } catch (e) { if (generation === listGeneration) error = (e as Error).message; }
     finally { if (generation === listGeneration) { loading = false; fetching = false; searching = false; } }
   }
@@ -331,10 +362,19 @@
     try {
       const snapshot = await services.inbox.cached(requested === 'Sent' ? 'sent' : 'inbox');
       if (generation !== listGeneration || account !== accountId || requested !== folder) return;
-      items = snapshot.messages.map(m => ({ id: m.id, name: m.sender, subject: m.subject, preview: m.body, date: m.date }));
-      fetchedAt = snapshot.fetched_at;
+      rememberMessages(account, snapshot.messages);
+      showList(account, requested, toItems(snapshot.messages), snapshot.fetched_at);
+      warm(account, items);
     } catch { /* The next refresh shows it. */ }
   }
+  function onSync(event: Partial<AccountSync>) {
+    if (typeof event.account !== 'string' || typeof event.mode !== 'string') return;
+    const previous = syncStatus[event.account];
+    syncStatus[event.account] = event as AccountSync;
+    // Background downloads just finished: warm the reader cache from what the Host now holds.
+    if (event.account === accountId && previous && previous.activity !== 'idle' && event.activity === 'idle' && folder !== 'Drafts') warm(accountId, items);
+  }
+  const loadSync = () => hostService.sync().then(list => { syncStatus = Object.fromEntries(list.map(status => [status.account, status])); }).catch(() => { /* An older mail service has no sync status. */ });
   const nameOf = (account?: AccountInfo) => account?.settings?.name || account?.settings?.address || 'Demo account';
   /** Show an in-app notification, and a desktop one too while Colecto is in the background. */
   $effect(() => { notificationPosition.value = notificationPrefs.position; });
@@ -388,7 +428,10 @@
   function navigate(next: Folder) {
     if (!leaveSettings() || !canLeave()) return;
     clearView(); query = ''; labelFilter = '';
-    if (next !== folder) { items = []; fetchedAt = null; appliedQuery = ''; }
+    if (next !== folder) {
+      const saved = folderCache.get(listKey(accountId, next));
+      items = saved?.items ?? []; fetchedAt = saved?.fetchedAt ?? null; appliedQuery = '';
+    }
     folder = next; activate('mailbox'); void loadList();
   }
   function compose(draft: Draft | null = null) { if (!Composer || !leaveSettings() || !canLeave()) return; clearView(); view = { kind: 'draft', draft }; activate('reader'); }
@@ -431,6 +474,7 @@
       remoteImages = saved?.remote_images ?? false;
       accountsEnabled = saved?.accounts_enabled ?? {};
       listDensity = saved?.list_density ?? 'full'; dateGroups = saved?.date_groups ?? true;
+      if (saved?.prefetch) prefetch = saved.prefetch;
     });
     // Events act on accounts and pages, so they start once both are known.
     let stopEvents = () => {};
@@ -439,6 +483,8 @@
       if (name === 'mail') void onMail(event);
       else if (name === 'approval') onApproval(event);
       else if (name === 'navigate') onNavigate(event);
+      else if (name === 'sync') onSync(event);
+      else if (name === 'ready' || name === 'resync') void loadSync();
     }); };
     void Promise.all([refreshAccounts(), preferences]).then(([, saved]) => {
       accountsEnabled = saved?.accounts_enabled ?? {};
@@ -514,6 +560,7 @@
         <div class="settings-page">
           {#if settingsPage.startsWith('extension:')}{#if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
           {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} enabled={isOn} ontoggle={toggleAccount} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
+          {:else if settingsPage === 'mail'}<MailSettings {prefetch} onchange={(next) => savePreferences({ prefetch: next })} />
           {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} density={listDensity} {dateGroups} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences} onlist={savePreferences} />
           {:else if settingsPage === 'notifications'}<NotificationSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
           {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
@@ -568,7 +615,7 @@
         </form>
       </div>{/if}
       {#if labelError}<p class="error-box" role="alert">{labelError}</p>{/if}
-      <Mailbox grouped={dateGroups && (sort === 'newest' || sort === 'oldest')} density={listDensity} items={visibleItems} filtered={!!appliedQuery || !!query.trim() || !!labelFilter} {searching} {selected} {folder} {loading} {fetching} {fetchedAt} error={error || openError} disabled={busy || opening} onopen={open} onretry={() => void loadList()} />
+      <Mailbox grouped={dateGroups && (sort === 'newest' || sort === 'oldest')} density={listDensity} items={visibleItems} filtered={!!appliedQuery || !!query.trim() || !!labelFilter} {searching} {selected} {folder} {loading} {fetching} {fetchedAt} sync={syncStatus[accountId] ?? null} error={error || openError} disabled={busy || opening} onopen={open} onretry={() => void loadList()} />
     {:else}<p class="pane-note">The mailbox extension is turned off. Turn it on in Settings → Extensions.</p>{/if}
   </div>
 {/snippet}

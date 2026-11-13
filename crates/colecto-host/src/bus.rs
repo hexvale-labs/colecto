@@ -287,6 +287,7 @@ mod tests {
                 authority: "localhost".into(),
                 origin: "http://localhost".into(),
                 execution: Arc::new(tokio::sync::Semaphore::new(2)),
+                sync: Arc::default(),
             },
             dir,
         )

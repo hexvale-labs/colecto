@@ -204,7 +204,7 @@ test('shows cached mail during refresh and preserves reader and editor after pro
     return route.fulfill({ status: 502, contentType: 'text/html', body: '<h1>Proxy unavailable SECRET</h1>' });
   });
   await page.goto('/');
-  await expect(page.getByText('Fetching latest messages…')).toBeVisible();
+  await expect(page.getByText('Syncing…')).toBeVisible();
   await page.getByRole('button', { name: /Maya Chen/ }).click();
   await expect(page.getByRole('region', { name: 'Message reader' })).toBeVisible();
   release();
@@ -239,12 +239,12 @@ test('activating an existing message tab clears an invalidated refresh', async (
   await page.getByRole('button', { name: /First sender/ }).click();
   await page.getByRole('button', { name: /Second sender/ }).click();
   await refresh.click();
-  await expect(page.getByText('Fetching latest messages…')).toBeVisible();
+  await expect(page.getByText('Syncing…')).toBeVisible();
   await page.getByRole('navigation', { name: 'Open messages' }).getByRole('button', { name: 'First retained tab', exact: true }).click();
   const settled = page.waitForResponse(response => response.url().includes('/messages/refresh'));
   release();
   await settled;
-  await expect(page.getByText('Fetching latest messages…')).toBeHidden();
+  await expect(page.getByText('Syncing…')).toBeHidden();
   await expect(refresh).toBeEnabled();
   await expect(page.getByRole('heading', { name: 'First retained tab' })).toBeVisible();
 });

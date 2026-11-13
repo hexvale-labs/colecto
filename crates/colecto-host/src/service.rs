@@ -59,12 +59,7 @@ impl AccessPolicy {
             );
         }
         let origin = url.origin().ascii_serialization();
-        if token.len() < 64
-            || token.len() > 512
-            || !token
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
-        {
+        if !valid_token(&token) {
             return Err(
                 "Access token must contain 64–512 ASCII letters, digits, hyphens or underscores"
                     .into(),
@@ -79,6 +74,13 @@ impl AccessPolicy {
             token: Some(Arc::new(Zeroizing::new(token))),
         })
     }
+}
+/// Owner tokens are 64–512 ASCII letters, digits, hyphens or underscores.
+pub(crate) fn valid_token(token: &str) -> bool {
+    (64..=512).contains(&token.len())
+        && token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
 }
 #[derive(Clone)]
 struct Authentication {
@@ -235,6 +237,7 @@ impl MailService {
             origin: policy.origin.clone(),
             execution: Arc::new(tokio::sync::Semaphore::new(2)),
             ai,
+            sync: Arc::default(),
         };
         let stream_events = events.clone();
         let (closing, stopped) = tokio::sync::watch::channel(false);
@@ -321,20 +324,6 @@ impl MailService {
         self.events.subscribe()
     }
     /// Connected accounts the owner left on: the only ones background work may touch.
-    fn background_accounts(&self) -> Vec<(String, Arc<Mutex<colecto_core::MailStore>>)> {
-        let Ok(preferences) = self.host.preferences.lock().map(|p| p.get().clone()) else {
-            return Vec::new();
-        };
-        let Ok(accounts) = self.host.accounts.lock() else {
-            return Vec::new();
-        };
-        accounts
-            .list()
-            .into_iter()
-            .filter(|a| a.connected && preferences.account_enabled(&a.id))
-            .filter_map(|a| accounts.store(&a.id).ok().map(|s| (a.id, s)))
-            .collect()
-    }
     /// One bounded polling pass; failed or busy accounts don't block unrelated accounts.
     pub async fn refresh_once(&self) {
         let (_stop, receiver) = tokio::sync::watch::channel(false);
@@ -350,15 +339,13 @@ impl MailService {
         {
             tracing::warn!("Could not expire retained delivery requests");
         }
-        let stores = self
-            .background_accounts()
+        let accounts = crate::sync::eligible(&self.host)
             .into_iter()
-            .filter(|(id, _)| only.is_none_or(|only| only == id))
-            .collect::<Vec<_>>();
+            .filter(|id| only.is_none_or(|only| only == id));
         let mut tasks = tokio::task::JoinSet::new();
-        for (account, store) in stores {
-            let events = self.events.clone();
+        for account in accounts {
             let host = self.host.clone();
+            let events = self.events.clone();
             let snapshots = self.snapshots.clone();
             let watching = self.watching.clone();
             let semaphore = self.host.execution.clone();
@@ -371,10 +358,18 @@ impl MailService {
                     if *stop.borrow() {
                         return;
                     }
-                    let Ok(mut store) = store.try_lock() else {
-                        return;
+                    let refreshed = match crate::sync::refresh(
+                        &host,
+                        &account,
+                        "inbox",
+                        "",
+                        crate::sync::Origin::Background,
+                    ) {
+                        // Another refresh of this account is already running.
+                        Ok(None) => return,
+                        Ok(Some(messages)) => Ok(messages),
+                        Err(error) => Err(error),
                     };
-                    let refreshed = store.refresh();
                     if let Ok(mut watching) = watching.lock() {
                         // Push needs a working connection; failing accounts stay on polling alone.
                         if refreshed.is_ok() {
@@ -386,6 +381,7 @@ impl MailService {
                     match refreshed {
                         Ok(messages) => {
                             tracing::debug!(%account, count = messages.len(), "Refreshed mail");
+                            crate::sync::start_prefetch(&host, &account);
                             if let Ok(mut snapshots) = snapshots.lock()
                                 && let Some(event) = snapshots
                                     .observe(&account, messages.iter().map(|m| m.id.clone()))
@@ -412,6 +408,7 @@ impl MailService {
         interval: Duration,
         mut stop: tokio::sync::watch::Receiver<bool>,
     ) {
+        self.host.sync.set_interval(interval);
         loop {
             if *stop.borrow() {
                 break;
@@ -427,7 +424,16 @@ impl MailService {
     /// Watchers refresh their account as soon as the provider reports a change; polling
     /// continues underneath, so a failed or unsupported watcher only costs latency.
     fn watch_push(&self, stop: &tokio::sync::watch::Receiver<bool>) {
-        let candidates = self.background_accounts();
+        let candidates = {
+            let eligible = crate::sync::eligible(&self.host);
+            let Ok(accounts) = self.host.accounts.lock() else {
+                return;
+            };
+            eligible
+                .into_iter()
+                .filter_map(|id| accounts.store(&id).ok().map(|s| (id, s)))
+                .collect::<Vec<_>>()
+        };
         let healthy = self
             .watching
             .lock()
@@ -437,7 +443,7 @@ impl MailService {
             if !healthy.contains(&account) {
                 continue;
             }
-            let Some(watcher) = store.try_lock().ok().and_then(|s| s.push_watcher()) else {
+            let Some(watcher) = store.lock().ok().and_then(|s| s.push_watcher()) else {
                 continue;
             };
             {
@@ -455,6 +461,7 @@ impl MailService {
             let runtime = tokio::runtime::Handle::current();
             // A detached thread: an idle connection must never delay shutdown.
             std::thread::spawn(move || {
+                service.host.sync.set_push(&service.host, &account, true);
                 while !*stop.borrow() {
                     match watcher.wait(PUSH_WAIT) {
                         Ok(true) => runtime
@@ -491,6 +498,7 @@ impl MailService {
                 if let Ok(mut watching) = service.watching.lock() {
                     watching.running.remove(&account);
                 }
+                service.host.sync.set_push(&service.host, &account, false);
             });
         }
     }

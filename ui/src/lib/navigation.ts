@@ -4,6 +4,7 @@ import type { IconName } from '../Icon.svelte';
 
 export const settingsPages = [
   { id: 'accounts', name: 'Accounts', icon: 'account' },
+  { id: 'mail', name: 'Mail', icon: 'inbox' },
   { id: 'appearance', name: 'Appearance', icon: 'palette' },
   { id: 'notifications', name: 'Notifications', icon: 'bell' },
   { id: 'privacy', name: 'Privacy', icon: 'image' },

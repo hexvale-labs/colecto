@@ -7,6 +7,7 @@ use std::{
 };
 
 const MAX_RECORD_BYTES: usize = 32_000_000;
+const CONTENT_TABLE: &str = "CREATE TABLE IF NOT EXISTS message_content(account TEXT NOT NULL, provider TEXT NOT NULL, id TEXT NOT NULL, stored_at INTEGER NOT NULL, size INTEGER NOT NULL, raw BLOB NOT NULL, PRIMARY KEY(account,provider,id));";
 
 #[derive(Clone)]
 pub struct Database {
@@ -60,6 +61,11 @@ impl Database {
                     connection.query(sql, ()).await.map_err(storage)?;
                 }
             }
+            // Added after version 1 shipped; a cache table needs no migration of its own.
+            connection
+                .execute_batch(CONTENT_TABLE)
+                .await
+                .map_err(storage)?;
             Ok(connection)
         })?;
         Ok(Self {
@@ -164,6 +170,7 @@ impl Database {
             for sql in [
                 "DELETE FROM snapshots WHERE account=?1",
                 "DELETE FROM mailbox_identity WHERE account=?1",
+                "DELETE FROM message_content WHERE account=?1",
             ] {
                 transaction.execute(sql, [account]).await.map_err(storage)?;
             }
