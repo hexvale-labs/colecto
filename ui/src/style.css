@@ -536,6 +536,15 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .connect-page p { color: var(--ink-2); font-size: calc(13.5px * var(--text-scale)); }
 .connect-page .field { margin: 4px 0 4px; }
 .connect-page .primary { height: 38px; }
+/* Startup with the mail service down (ServiceUnavailable.svelte). */
+.service-down { display: grid; gap: 12px; justify-items: start; width: min(480px, calc(100% - 32px)); margin: max(48px, 14vh) auto 48px; }
+.service-down img { height: 44px; width: auto; margin-bottom: 4px; }
+.service-down h1 { font-size: calc(22px * var(--text-scale)); font-stretch: 106%; }
+.service-down p { color: var(--ink-2); font-size: calc(14px * var(--text-scale)); line-height: 1.55; }
+.service-down code { font-size: 0.92em; white-space: nowrap; }
+.service-down .service-down-detail { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); overflow-wrap: anywhere; }
+.service-down .error-box { justify-self: stretch; }
+.service-down-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 6px; }
 /* The command palette opens many times a day, so it appears without animation. */
 .command-runner { width: min(600px, calc(100vw - 24px)); margin: 12vh auto auto; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--float); box-shadow: 0 30px 80px -20px oklch(0 0 0 / 0.75); overflow: hidden; }
 .command-input { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line-soft); color: var(--ink-3); }

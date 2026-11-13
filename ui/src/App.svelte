@@ -11,6 +11,7 @@
   import FilePick from './FilePick.svelte';
   import InstallWarning from './InstallWarning.svelte';
   import Onboarding, { needsOnboarding } from './Onboarding.svelte';
+  import ServiceUnavailable from './ServiceUnavailable.svelte';
   import mark from './assets/logo-square.svg';
   import { extensionHost, hostService, setAccessToken } from './lib/api';
   import type { AccountInfo, Capability, ExtensionState } from './lib/api';
@@ -38,12 +39,13 @@
   let loading = $state(true);
   let busy = $state(false);
   let error = $state('');
+  // The error stays until a reload succeeds, so a retry does not flash another screen.
   async function reload() {
-    error = '';
     try {
       accounts = await hostService.accounts();
       if (!accounts.some(a => a.id === account)) account = accounts[0]?.id ?? 'demo';
       extensions = await extensionHost.list(account);
+      error = '';
     } catch (e) { error = (e as Error).message; }
     finally { loading = false; }
   }
@@ -163,11 +165,14 @@
     <MailShell extensionStates={extensions} {extensionSettings} onsettings={() => void reload()} />
     {#snippet failed(failure, reset)}<div class="error-box" role="alert">Mail workspace failed. Your saved mail remains in Core services.<button class="secondary" onclick={reset}>Retry workspace</button><button class="secondary" onclick={manage}>Extensions</button></div>{/snippet}
   </svelte:boundary>
+{:else if error && !extensions.length && !authRequired}
+  <!-- Nothing loaded: the service is down, not the workspace disabled. -->
+  <ServiceUnavailable message={error} onretry={reload} />
 {:else}
   <p class="error-box boot">Mail workspace disabled. Open Extensions to restore it.</p>
 {/if}
-{#if error}<p class="error-box" role="alert">{error}<button class="secondary" disabled={busy} onclick={() => void reload()}>Retry</button></p>{/if}
-{#if !authRequired && !managing && !extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}<button class="secondary" onclick={manage}>Extensions</button>{/if}
+{#if error && extensions.length}<p class="error-box" role="alert">{error}<button class="secondary" disabled={busy} onclick={() => void reload()}>Retry</button></p>{/if}
+{#if !authRequired && !managing && extensions.length && !extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}<button class="secondary" onclick={manage}>Extensions</button>{/if}
 {#if warning}{@const file = warning}<InstallWarning capabilities={requested} name={file.name} oncancel={() => warning = null} onconfirm={() => void install(file)} />{/if}
 
 <OverlayLayer {extensions} {account} />

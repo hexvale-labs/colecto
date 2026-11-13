@@ -473,6 +473,26 @@ service restarts on the new executable and briefly drops connections; a stopped 
 stays stopped. Updating a package replaces the binary but not a running process, which
 is why the version check compares the unit, not the executable.
 
+Install, Start and Update (of a running service) then check that the service stays up:
+systemd reports a start as successful even when the executable exits at once and
+`Restart=on-failure` loops forever. The Host polls `systemctl --user is-active`, and for
+the daemon also waits up to 10 s for its socket to accept a connection. A service that
+stops in that window fails the request with "The service did not start. Run `journalctl
+--user -u colecto-….service` to see why."
+
+Units set `NoNewPrivileges=true`, except when the executable is an AppImage (detected by
+the `AI` magic bytes in its ELF header, since AppImage managers rename the file). An
+AppImage mounts itself through the setuid `fusermount` helper, which `NoNewPrivileges`
+disables: the runtime prints `open dir error: No such file or directory` and exits with
+status 127 on every start. A unit written with that line for an AppImage differs from
+what the app now writes, so Settings → Connection offers to update it.
+
+If the app starts while its background service is down, it shows "Can’t reach your
+mail" (`ui/src/ServiceUnavailable.svelte`) instead of the workspace. The screen retries
+every 4 s and opens the workspace once the service answers. It also offers whichever
+local control fits: Update the mail service (when `update_to` is set), Start it (when
+installed but not running), or switching the app back to its own built-in service.
+
 The executable is `$APPIMAGE` when set, otherwise the running executable. The app
 supports `colecto daemon` and `colecto notify`, so installation does not require a
 separate daemon binary. Keep that executable at its installed location. Units use
