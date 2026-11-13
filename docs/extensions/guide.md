@@ -74,11 +74,12 @@ A `.colectoext` file is a ZIP containing `manifest.toml`, `module.wasm`, and opt
 Deflate compression. Assets need safe lowercase flat names, verified PNG/JPEG/WebP/GIF magic bytes, at most
 8 MiB each and at most 256 files. Total compressed package size is 16 MiB.
 
-`just build extension` packages the WAT example. `just build oneko` installs the
-Rust Wasm target if needed, builds the Rust guest and writes
-`docs/extensions/examples/oneko.colectoext`. The example is not bundled.
-The Host's `package::write` helper builds asset-free packages; the Oneko packaging
-script shows how to include sprites. Never include source files or directory entries.
+For Rust extensions, `cargo colecto build` builds, checks and packages in one step;
+see [the SDK page](rust-sdk.md#build-and-package-with-cargo-colecto). `just build
+oneko` uses it to write `docs/extensions/examples/oneko.colectoext`; the example is not
+bundled. `just build extension` packages the WAT example with
+`colecto_host::package::write` (re-exported from `colecto-package`). For other toolchains, any ZIP tool works. Never include
+source files or directory entries.
 
 ## 6. Install and debug
 
@@ -111,7 +112,7 @@ other saved positions remain. New position choices are recorded explicitly.
 
 ## Large packages and compiled modules
 
-Limits are defined once in `crates/colecto-host/src/package.rs`: compressed archive
+Limits are defined once in `crates/colecto-package/src/lib.rs`: compressed archive
 16 MiB; total uncompressed content 48 MiB; module 16 MiB; manifest 8 KiB; up to
 256 flat raster assets of 8 MiB each; at most 32 installed third-party packages.
 The Host checks every declared entry size and total before inflation, caps actual

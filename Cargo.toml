@@ -2,7 +2,7 @@
 exclude = ["docs/extensions/examples/oneko"]
 members = ["crates/*"]
 # The Tauri app needs WebView system libraries; build it with `just build native`.
-default-members = ["crates/colecto-core", "crates/colecto-extension", "crates/colecto-extension-api", "crates/colecto-extension-sys", "crates/colecto-host"]
+default-members = ["crates/cargo-colecto", "crates/colecto-core", "crates/colecto-extension", "crates/colecto-extension-api", "crates/colecto-extension-sys", "crates/colecto-host", "crates/colecto-package"]
 resolver = "3"
 
 [workspace.package]
@@ -42,6 +42,7 @@ tower = { version = "0.5", features = ["util"] }
 colecto-core = { path = "crates/colecto-core" }
 colecto-extension-api = { path = "crates/colecto-extension-api" }
 colecto-extension-sys = { path = "crates/colecto-extension-sys" }
+colecto-package = { path = "crates/colecto-package" }
 colecto-host = { path = "crates/colecto-host" }
 
 imap = "2.4.1"

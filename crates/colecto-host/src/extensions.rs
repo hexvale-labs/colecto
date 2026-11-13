@@ -1,75 +1,13 @@
 //! Only immutable bundled packages may execute in the trusted application origin.
-use crate::package::{MAX_INSTALLED, MAX_MANIFEST};
+use crate::package::MAX_INSTALLED;
+use crate::package::manifest::{parse as parse_manifest, validate as validate_manifest};
 use colecto_core::Database;
-use colecto_extension_api::{API_VERSION, Capability, ExtensionManifest, ExtensionState};
+use colecto_extension_api::{Capability, ExtensionManifest, ExtensionState};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-
-fn parse_manifest(source: &str) -> Result<ExtensionManifest, String> {
-    let manifest: ExtensionManifest = toml::from_str(source).map_err(|e| e.to_string())?;
-    colecto_extension_api::validate_settings(&manifest.settings)?;
-    if manifest.api_version != API_VERSION {
-        return Err("Unsupported extension API version".into());
-    }
-    if manifest.id.is_empty()
-        || !manifest
-            .id
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-    {
-        return Err("Invalid extension identifier".into());
-    }
-    if [&manifest.name, &manifest.description, &manifest.author]
-        .iter()
-        .any(|s| s.trim().is_empty())
-    {
-        return Err("Extension metadata cannot be empty".into());
-    }
-    if ![
-        "shell", "mailbox", "reader", "composer", "accounts", "panel", "overlay",
-    ]
-    .contains(&manifest.slot.as_str())
-    {
-        return Err("Unknown extension slot".into());
-    }
-    if manifest.capabilities.contains(&Capability::AppNavigate) {
-        return Err("app.navigate is reserved for API keys".into());
-    }
-    if manifest.capabilities.contains(&Capability::WindowOverlay) {
-        if !manifest.z_index.is_some_and(|z| (1..=10000).contains(&z)) {
-            return Err("window.overlay requires z_index between 1 and 10000".into());
-        }
-    } else if manifest.z_index.is_some() {
-        return Err("z_index requires window.overlay".into());
-    }
-    for (index, capability) in manifest.capabilities.iter().enumerate() {
-        if manifest.capabilities[..index].contains(capability) {
-            return Err("Duplicate capability".into());
-        }
-    }
-    if let Some(bus) = &manifest.bus {
-        if !manifest.capabilities.contains(&Capability::ExtensionsBus) {
-            return Err("bus subscriptions require extensions.bus".into());
-        }
-        if bus.subscribe.len() > 32
-            || bus.subscribe.iter().any(|entry| {
-                entry.split_once('/').is_none_or(|(bus, name)| {
-                    bus.is_empty()
-                        || !bus
-                            .bytes()
-                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-                        || !crate::bus::valid_name(name)
-                })
-            })
-        {
-            return Err("Invalid bus subscriptions (maximum 32)".into());
-        }
-    }
-    Ok(manifest)
-}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -444,18 +382,6 @@ impl Extensions {
         self.manifests.iter().any(|m| m.id == id)
     }
 }
-fn validate_manifest(manifest: &ExtensionManifest) -> Result<(), String> {
-    parse_manifest(&toml::to_string(manifest).map_err(|e| e.to_string())?)?;
-    // Guests can only emit declarative panels or sprites.
-    if !["panel", "overlay"].contains(&manifest.slot.as_str()) {
-        return Err("Wasm extensions require slot = panel or overlay".into());
-    }
-    if toml::to_string(manifest).map_err(|e| e.to_string())?.len() > MAX_MANIFEST {
-        return Err("Manifest too large".into());
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

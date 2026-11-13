@@ -47,6 +47,8 @@ Start with the page that matches what you want to do:
 | `crates/colecto-extension-api/` | Version 1 wire types shared by the Host and the UI |
 | `crates/colecto-extension/` | Rust SDK for third-party extensions (typed calls, bus messages, mock Host) |
 | `crates/colecto-extension-sys/` | The SDK's raw Wasm imports and `run` export; the only SDK crate with `unsafe` code |
+| `crates/colecto-package/` | `.colectoext` reading and writing, package limits and manifest rules, shared by the Host and `cargo colecto` |
+| `crates/cargo-colecto/` | `cargo colecto`: builds, checks and packages Rust extensions |
 | `crates/colecto-host/` | The mail service: HTTP API, auth, extension policy and Wasm sandbox, MCP; binaries `colecto-host`, `colecto-daemon`, `colecto-mcp` |
 | `crates/colecto-app/` | Tauri app; runs the mail service in-process and embeds the UI |
 | `ui/src/` | Svelte app shell, settings screens and shared components |

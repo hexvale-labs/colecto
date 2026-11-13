@@ -125,5 +125,6 @@ controls remain local and are refused by remote Hosts and socket daemons.
 - Dependencies point one way: the Host depends on the core and the extension API; the
   extension API depends on neither. The guest SDK (`colecto-extension`) depends only on
   `colecto-extension-sys` and serde, never on the Host or core, so a Git dependency on
-  it stays small.
+  it stays small. Package and manifest rules live in `colecto-package`, which the Host
+  and `cargo-colecto` both use, so the tool and installation never disagree.
 - Never describe a planned platform, sandbox property or feature as working.
