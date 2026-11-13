@@ -5,7 +5,7 @@ test('connection controls handle service states and long socket paths on a phone
   const socket = '/run/user/1000/colecto/personal-mail-background-service/mail.sock';
   await page.route('**/api/v1/upstream', route => route.fulfill({ json: { upstream: { address: `unix:${socket}`, token_file: '/home/aleksandra/.local/state/colecto/owner-token' } } }));
   await page.route('**/api/v1/services', route => route.fulfill({ json: {
-    daemon: { installed: true, active: false, enabled: true, supported: true, socket },
+    daemon: { installed: true, active: false, enabled: true, supported: true, socket, version: '0.2.0', update_to: '0.3.0' },
     notifications: { installed: false, active: false, enabled: false, supported: true, socket },
   } }));
   await page.goto('/');
@@ -18,8 +18,14 @@ test('connection controls handle service states and long socket paths on a phone
   await expect(page.getByRole('switch', { name: 'Start Mail service on login' })).toBeChecked();
   // Not yet installed: the choice is kept for the install, defaulting to on.
   await expect(page.getByRole('switch', { name: 'Start Desktop notifications on login' })).toBeChecked();
+  await expect(page.getByText('v0.2.0', { exact: true })).toBeVisible();
   expect(await page.locator('.settings-page').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
   await page.route('**/api/v1/services/daemon', route => route.fulfill({ status: 400, json: { error: 'This unit was not written by Colecto' } }));
   await page.getByRole('button', { name: 'Start Mail service', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('not written by Colecto');
+  let sent: unknown;
+  await page.route('**/api/v1/services/daemon', route => { sent = route.request().postDataJSON(); return route.fulfill({ json: true }); });
+  await page.getByRole('button', { name: 'Update Mail service to version 0.3.0' }).click();
+  await expect(page.getByRole('status')).toContainText('Mail service updated to version 0.3.0.');
+  expect(sent).toEqual({ action: 'update' });
 });

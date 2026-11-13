@@ -100,7 +100,7 @@
               <li class="service-row">
                 <span class="service-icon" aria-hidden="true"><Icon name={about[name].icon} size={18} /></span>
                 <div class="service-text">
-                  <span class="service-title"><strong>{about[name].title}</strong><span class="service-pill {state.tone}">{state.text}</span></span>
+                  <span class="service-title"><strong>{about[name].title}</strong><span class="service-pill {state.tone}">{state.text}</span>{#if service.installed && service.version}<span class="service-version">v{service.version}</span>{/if}</span>
                   <span class="service-about">{about[name].text}</span>
                 </div>
                 <div class="service-controls">
@@ -108,6 +108,10 @@
                   {#if !service.installed}
                     <button class="primary" disabled={busy !== null} onclick={() => act(name, { action: 'install', autostart: autostart[name] }, `${about[name].title} installed.`)}>{busy === name ? 'Installing…' : 'Install'}</button>
                   {:else}
+                    {#if service.update_to}
+                      {@const target = service.update_to}
+                      <button class="secondary" disabled={busy !== null} aria-label={`Update ${about[name].title} to version ${target}`} title={`Rewrite the service for Colecto ${target}${service.active ? ' and restart it' : ''}`} onclick={() => act(name, { action: 'update' }, `${about[name].title} updated to version ${target}${service.active ? ' and restarted' : ''}.`)}>{busy === name ? 'Updating…' : 'Update'}</button>
+                    {/if}
                     <button class="icon-button" disabled={busy !== null} aria-label={`${service.active ? 'Stop' : 'Start'} ${about[name].title}`} title={service.active ? 'Stop' : 'Start'} onclick={() => act(name, { action: service.active ? 'stop' : 'start' })}><Icon name={service.active ? 'stop' : 'play'} size={16} /></button>
                     <button class="icon-button remove" disabled={busy !== null} aria-label={`Uninstall ${about[name].title}`} title="Uninstall" onclick={() => { if (window.confirm(`Uninstall ${about[name].title}? It stops now and no longer starts on login. Its saved mail is kept.`)) void act(name, { action: 'uninstall' }, `${about[name].title} uninstalled.`); }}><Icon name="trash" size={16} /></button>
                   {/if}

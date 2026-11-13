@@ -722,9 +722,10 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .service-meta .sep { color: var(--line); }
 .service-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .service-pill { padding: 1px 7px; border-radius: 999px; background: var(--control); color: var(--ink-3); font-size: calc(11px * var(--text-scale)); font-weight: 600; }
+.service-version { color: var(--ink-3); font-size: calc(11.5px * var(--text-scale)); font-variant-numeric: tabular-nums; }
 .service-pill.on { background: color-mix(in oklch, var(--status-online) 16%, transparent); color: var(--status-online); }
 .service-controls { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
-.service-controls .switch { margin-right: 6px; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); }
+.service-controls .switch { margin-right: 6px; white-space: nowrap; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); }
 .service-controls .icon-button.remove:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger); }
 .address-form { display: flex; gap: 8px; margin-top: 14px; max-width: 520px; }
 .address-form .field { flex: 1; margin: 0; }
