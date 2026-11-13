@@ -6,6 +6,8 @@ export interface Toast {
   duration: number;
   /** Replaces an earlier toast with the same key, such as one approval request. */
   key?: string;
+  /** An `Icon` name; defaults to mail, or a shield for toasts that wait to be acted on. */
+  icon?: import('../../Icon.svelte').IconName;
 }
 const MAX = 4;
 let next = 0;
