@@ -1079,7 +1079,10 @@ mod tests {
     fn refresh_downloads_only_new_messages_and_prefetch_batches_without_marking_seen() {
         let body = |uid: u32| {
             let raw = format!("From: a@example.test\r\nSubject: S{uid}\r\n\r\nText {uid}");
-            format!("* {uid} FETCH (UID {uid} BODY[] {{{}}}\r\n{raw})\r\n", raw.len())
+            format!(
+                "* {uid} FETCH (UID {uid} BODY[] {{{}}}\r\n{raw})\r\n",
+                raw.len()
+            )
         };
         let server = mock_imap(vec![
             ("LOGIN", String::new()),
@@ -1102,7 +1105,11 @@ mod tests {
         old.id = "imap-7-1".into();
         let known = std::collections::HashMap::from([(old.id.clone(), old)]);
         let mut steps = Vec::new();
-        let listing = query_session_with_identity(&mut session, "inbox", "", &known, &mut |done, total| steps.push((done, total))).unwrap();
+        let listing =
+            query_session_with_identity(&mut session, "inbox", "", &known, &mut |done, total| {
+                steps.push((done, total))
+            })
+            .unwrap();
         assert_eq!(steps, [(0, 2), (2, 2)]);
         let ids: Vec<_> = listing.messages.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["imap-7-3", "imap-7-2", "imap-7-1"]);
@@ -1110,7 +1117,13 @@ mod tests {
         assert!(listing.messages[2].seen);
         assert_eq!(listing.raws.len(), 2);
         let mut found = Vec::new();
-        fetch_many_session(&mut session, &["imap-7-2".into(), "imap-7-1".into()], 100, &mut |id, raw| found.push((id, raw))).unwrap();
+        fetch_many_session(
+            &mut session,
+            &["imap-7-2".into(), "imap-7-1".into()],
+            100,
+            &mut |id, raw| found.push((id, raw)),
+        )
+        .unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].0, "imap-7-2");
         server.join().unwrap();
@@ -1118,7 +1131,10 @@ mod tests {
     #[test]
     fn batches_respect_message_and_byte_bounds() {
         let entries: Vec<_> = (0..30).map(|uid| (uid, 10)).collect();
-        assert_eq!(batches(&entries).iter().map(Vec::len).collect::<Vec<_>>(), [25, 5]);
+        assert_eq!(
+            batches(&entries).iter().map(Vec::len).collect::<Vec<_>>(),
+            [25, 5]
+        );
         let large = [(1, 3_000_000), (2, 3_000_000), (3, 5_000_000)];
         assert_eq!(batches(&large), [vec![1], vec![2], vec![3]]);
     }

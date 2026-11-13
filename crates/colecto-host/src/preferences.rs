@@ -1,5 +1,6 @@
 //! Owner preferences: the workspace layout, the selected account, whether MCP is on,
-//! the accent colour, notification choices and whether mail loads remote images.
+//! the accent colour, notification choices, whether mail loads remote images and how
+//! much mail the Host downloads ahead of time.
 //! The UI owns the layout's shape; the Host only bounds it, because it never acts on it.
 use colecto_core::Database;
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,26 @@ pub struct Preferences {
     notification_position_chosen: bool,
     /// Load remote images in HTML mail without asking. Off by default: they can track opens.
     pub remote_images: bool,
+    pub prefetch: Prefetch,
 }
+
+/// After each Inbox refresh, download the newest `count` messages that are not cached yet.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct Prefetch {
+    pub enabled: bool,
+    pub count: u16,
+}
+impl Default for Prefetch {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            count: 50,
+        }
+    }
+}
+/// A refresh lists at most this many messages, so prefetch can reach no further.
+pub const MAX_PREFETCH_COUNT: u16 = colecto_core::MAX_LIST_MESSAGES as u16;
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
@@ -71,6 +91,7 @@ pub struct PreferencesInput {
     pub font_size: Option<u8>,
     pub notifications: Option<Notifications>,
     pub remote_images: Option<bool>,
+    pub prefetch: Option<Prefetch>,
 }
 
 fn validate(preferences: &Preferences) -> Result<(), String> {
@@ -108,6 +129,11 @@ fn validate(preferences: &Preferences) -> Result<(), String> {
         .is_some_and(|size| !(13..=18).contains(&size))
     {
         return Err("Font size must be between 13 and 18".into());
+    }
+    if preferences.prefetch.count > MAX_PREFETCH_COUNT {
+        return Err(format!(
+            "Prefetch count must be between 0 and {MAX_PREFETCH_COUNT}"
+        ));
     }
     Ok(())
 }
@@ -170,6 +196,9 @@ impl PreferenceStore {
         }
         if let Some(remote_images) = input.remote_images {
             next.remote_images = remote_images;
+        }
+        if let Some(prefetch) = input.prefetch {
+            next.prefetch = prefetch;
         }
         validate(&next)?;
         crate::store::save(&self.database, "preferences", &next)?;
@@ -257,6 +286,7 @@ mod tests {
             font_size: None,
             notifications: None,
             remote_images: Some(true),
+            prefetch: None,
         };
         assert!(!store.get().remote_images);
         store
@@ -273,6 +303,39 @@ mod tests {
     }
 
     #[test]
+    fn prefetch_defaults_on_and_is_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        let mut store = PreferenceStore::open(database.clone()).unwrap();
+        assert_eq!(store.get().prefetch, Prefetch::default());
+        assert!(store.get().prefetch.enabled);
+        let input = |value| serde_json::from_value::<PreferencesInput>(value).unwrap();
+        assert!(
+            store
+                .update(input(serde_json::json!({"prefetch": {"enabled": true, "count": MAX_PREFETCH_COUNT + 1}})))
+                .is_err()
+        );
+        assert!(
+            serde_json::from_value::<PreferencesInput>(
+                serde_json::json!({"prefetch": {"count": 70000}})
+            )
+            .is_err()
+        );
+        store
+            .update(input(
+                serde_json::json!({"prefetch": {"enabled": false, "count": 10}}),
+            ))
+            .unwrap();
+        let store = PreferenceStore::open(database).unwrap();
+        assert_eq!(
+            store.get().prefetch,
+            Prefetch {
+                enabled: false,
+                count: 10
+            }
+        );
+    }
+    #[test]
     fn accent_and_notifications_are_validated_and_kept() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
@@ -287,6 +350,7 @@ mod tests {
             font_size: None,
             notifications: None,
             remote_images: None,
+            prefetch: None,
         };
         for invalid in ["red", "#12345", "#1234567", "#12345g", "url(#a)"] {
             assert!(store.update(accent(invalid)).is_err(), "{invalid}");

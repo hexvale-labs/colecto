@@ -1377,3 +1377,42 @@ async fn version_is_public_but_keeps_the_host_boundary() {
     let forged = router.oneshot(get("evil.example")).await.unwrap();
     assert_eq!(forged.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn sync_status_lists_accounts_for_the_host_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = authenticated(app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    ))
+    .await;
+    let response = router
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/sync",
+            "host",
+            "http://127.0.0.1:4173",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let status: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 10_000).await.unwrap()).unwrap();
+    assert_eq!(status[0]["account"], "demo");
+    assert_eq!(status[0]["mode"], "local");
+    assert_eq!(status[0]["activity"], "idle");
+    let response = router
+        .oneshot(request(
+            "GET",
+            "/api/v1/sync",
+            "inbox",
+            "http://127.0.0.1:4173",
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}

@@ -3,8 +3,8 @@ mod accounts;
 mod cache;
 mod content;
 mod database;
-pub use content::{MAX_CONTENT_BYTES, MAX_CONTENT_MESSAGES};
 pub use cache::{MailCacheStore, MailSnapshot, SnapshotHandle};
+pub use content::{MAX_CONTENT_BYTES, MAX_CONTENT_MESSAGES};
 pub use database::Database;
 mod credentials;
 pub use accounts::Accounts;
@@ -90,7 +90,9 @@ impl MailReader {
         &self.key
     }
     pub fn is_cached(&self, id: &str) -> bool {
-        self.content.get(&self.key, id).is_ok_and(|raw| raw.is_some())
+        self.content
+            .get(&self.key, id)
+            .is_ok_and(|raw| raw.is_some())
     }
     fn raw(&self, id: &str) -> Result<Vec<u8>, Error> {
         match self.content.get(&self.key, id) {
@@ -1125,7 +1127,8 @@ mod cache_tests {
         let mut store = MailStore::open(dir.path()).unwrap();
         store.connect_account(provider).unwrap();
         assert!(store.content("imap-7-42").is_err());
-        let raw = b"From: a@example.test\r\nSubject: Hi\r\nContent-Type: text/html\r\n\r\n<p>Hello</p>";
+        let raw =
+            b"From: a@example.test\r\nSubject: Hi\r\nContent-Type: text/html\r\n\r\n<p>Hello</p>";
         let reader = store.reader().unwrap();
         reader.content.put(reader.key(), "imap-7-42", raw).unwrap();
         assert!(reader.is_cached("imap-7-42"));
@@ -1133,7 +1136,12 @@ mod cache_tests {
             store.content("imap-7-42").unwrap().html.as_deref(),
             Some("<p>Hello</p>")
         );
-        assert_eq!(reader.prefetch(&["imap-7-42".into()], &mut |_, _| {}).unwrap(), 0);
+        assert_eq!(
+            reader
+                .prefetch(&["imap-7-42".into()], &mut |_, _| {})
+                .unwrap(),
+            0
+        );
         // A disconnected (or locked) account reads nothing from the cache.
         store.disconnect();
         assert!(store.content("imap-7-42").is_err());
@@ -1152,7 +1160,10 @@ mod cache_tests {
             identity: None,
             raws: Vec::new(),
         };
-        assert!(matches!(store.finish_query(job, listing), Err(Error::Invalid(_))));
+        assert!(matches!(
+            store.finish_query(job, listing),
+            Err(Error::Invalid(_))
+        ));
         assert!(store.messages().is_empty());
     }
     #[test]

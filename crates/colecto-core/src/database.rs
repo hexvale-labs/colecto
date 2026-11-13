@@ -62,7 +62,10 @@ impl Database {
                 }
             }
             // Added after version 1 shipped; a cache table needs no migration of its own.
-            connection.execute_batch(CONTENT_TABLE).await.map_err(storage)?;
+            connection
+                .execute_batch(CONTENT_TABLE)
+                .await
+                .map_err(storage)?;
             Ok(connection)
         })?;
         Ok(Self {

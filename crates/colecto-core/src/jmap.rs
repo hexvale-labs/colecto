@@ -333,7 +333,10 @@ impl JmapAccount {
         max_size: usize,
         found: &mut dyn FnMut(String, Vec<u8>),
     ) -> Result<(), Error> {
-        let wanted: Vec<&str> = ids.iter().filter_map(|id| id.strip_prefix("jmap-")).collect();
+        let wanted: Vec<&str> = ids
+            .iter()
+            .filter_map(|id| id.strip_prefix("jmap-"))
+            .collect();
         if wanted.is_empty() {
             return Ok(());
         }

@@ -233,6 +233,7 @@ impl MailService {
             authority: policy.authority.clone(),
             origin: policy.origin.clone(),
             execution: Arc::new(tokio::sync::Semaphore::new(2)),
+            sync: Arc::default(),
         };
         let stream_events = events.clone();
         let (closing, stopped) = tokio::sync::watch::channel(false);
@@ -333,19 +334,12 @@ impl MailService {
         {
             tracing::warn!("Could not expire retained delivery requests");
         }
-        let stores = {
-            let Ok(accounts) = self.host.accounts.lock() else {
-                return;
-            };
-            accounts
-                .list()
-                .into_iter()
-                .filter(|a| a.connected && only.is_none_or(|id| id == a.id))
-                .filter_map(|a| accounts.store(&a.id).ok().map(|s| (a.id, s)))
-                .collect::<Vec<_>>()
-        };
+        let accounts = crate::sync::eligible(&self.host)
+            .into_iter()
+            .filter(|id| only.is_none_or(|only| only == id));
         let mut tasks = tokio::task::JoinSet::new();
-        for (account, store) in stores {
+        for account in accounts {
+            let host = self.host.clone();
             let events = self.events.clone();
             let snapshots = self.snapshots.clone();
             let watching = self.watching.clone();
@@ -359,10 +353,18 @@ impl MailService {
                     if *stop.borrow() {
                         return;
                     }
-                    let Ok(mut store) = store.try_lock() else {
-                        return;
+                    let refreshed = match crate::sync::refresh(
+                        &host,
+                        &account,
+                        "inbox",
+                        "",
+                        crate::sync::Origin::Background,
+                    ) {
+                        // Another refresh of this account is already running.
+                        Ok(None) => return,
+                        Ok(Some(messages)) => Ok(messages),
+                        Err(error) => Err(error),
                     };
-                    let refreshed = store.refresh();
                     if let Ok(mut watching) = watching.lock() {
                         // Push needs a working connection; failing accounts stay on polling alone.
                         if refreshed.is_ok() {
@@ -374,6 +376,7 @@ impl MailService {
                     match refreshed {
                         Ok(messages) => {
                             tracing::debug!(%account, count = messages.len(), "Refreshed mail");
+                            crate::sync::start_prefetch(&host, &account);
                             if let Ok(mut snapshots) = snapshots.lock()
                                 && let Some(event) = snapshots
                                     .observe(&account, messages.iter().map(|m| m.id.clone()))
@@ -399,6 +402,7 @@ impl MailService {
         interval: Duration,
         mut stop: tokio::sync::watch::Receiver<bool>,
     ) {
+        self.host.sync.set_interval(interval);
         loop {
             if *stop.borrow() {
                 break;
@@ -415,14 +419,13 @@ impl MailService {
     /// continues underneath, so a failed or unsupported watcher only costs latency.
     fn watch_push(&self, stop: &tokio::sync::watch::Receiver<bool>) {
         let candidates = {
+            let eligible = crate::sync::eligible(&self.host);
             let Ok(accounts) = self.host.accounts.lock() else {
                 return;
             };
-            accounts
-                .list()
+            eligible
                 .into_iter()
-                .filter(|a| a.connected)
-                .filter_map(|a| accounts.store(&a.id).ok().map(|s| (a.id, s)))
+                .filter_map(|id| accounts.store(&id).ok().map(|s| (id, s)))
                 .collect::<Vec<_>>()
         };
         let healthy = self
@@ -434,7 +437,7 @@ impl MailService {
             if !healthy.contains(&account) {
                 continue;
             }
-            let Some(watcher) = store.try_lock().ok().and_then(|s| s.push_watcher()) else {
+            let Some(watcher) = store.lock().ok().and_then(|s| s.push_watcher()) else {
                 continue;
             };
             {
@@ -452,6 +455,7 @@ impl MailService {
             let runtime = tokio::runtime::Handle::current();
             // A detached thread: an idle connection must never delay shutdown.
             std::thread::spawn(move || {
+                service.host.sync.set_push(&service.host, &account, true);
                 while !*stop.borrow() {
                     match watcher.wait(PUSH_WAIT) {
                         Ok(true) => runtime
@@ -483,6 +487,7 @@ impl MailService {
                 if let Ok(mut watching) = service.watching.lock() {
                     watching.running.remove(&account);
                 }
+                service.host.sync.set_push(&service.host, &account, false);
             });
         }
     }
