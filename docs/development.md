@@ -216,8 +216,9 @@ next release brings it to `main`.
 - Only dependencies are cached (Swatinem/rust-cache drops workspace crates), so every
   run still compiles Colecto itself. Failed release jobs do not save: this loses
   partial progress, but prevents an immutable final key from retaining an incomplete cache.
-- The repository has 10 GB of cache. CI and Release's shared `prune-caches` workflow deletes Rust caches
-  superseded by a newer toolchain or lockfile. GitHub also evicts anything unused for
+- The repository has 10 GB of cache. CI and Release's shared `prune-caches` workflow keeps
+  the newest Rust and Bun package cache of each kind per branch and deletes the ones superseded
+  by a newer toolchain or lockfile. GitHub also evicts anything unused for
   7 days, which is why `release.yml` runs twice a week.
 - `just test jmap` runs workspace-wide (`cargo test --test jmap_server`), not with
   `-p colecto-core`: selecting one package changes dependency features and would
