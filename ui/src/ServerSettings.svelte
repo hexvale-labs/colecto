@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import Icon from './Icon.svelte';
   import { hostService, setAccessToken } from './lib/api';
-  import type { BackgroundService, Upstream } from './lib/api';
+  import type { BackgroundService, Upstream, UpstreamInput } from './lib/api';
   type Name = 'daemon' | 'notifications';
   const about: Record<Name, { title: string; text: string; icon: 'server' | 'bell' }> = {
     daemon: { title: 'Mail service', text: 'Keeps syncing mail when the app is closed. The app connects to it through a private local socket.', icon: 'server' },
@@ -16,6 +16,10 @@
   let busy = $state<Name | 'switch' | null>(null);
   let autostart = $state<Record<Name, boolean>>({ daemon: true, notifications: true });
   let address = $state('');
+  let token = $state('');
+  // The desktop app reaches a remote daemon through its own Host, which keeps mail ready locally.
+  const remote = $derived(local && /^https?:/i.test(address.trim()));
+  const viaSocket = $derived(!!upstream?.address.startsWith('unix:'));
   let addressField = $state<HTMLInputElement>();
   let error = $state('');
   let notice = $state('');
@@ -48,7 +52,7 @@
     } catch (e) { error = (e as Error).message; }
     finally { busy = null; }
   }
-  async function useUpstream(value: Upstream | null) {
+  async function useUpstream(value: UpstreamInput | null) {
     busy = 'switch'; error = '';
     try { await hostService.setUpstream(value); window.location.reload(); }
     catch (e) { error = (e as Error).message; busy = null; }
@@ -67,7 +71,11 @@
     const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
     if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) { error = 'Use HTTPS. Plain HTTP works only on this computer (localhost).'; return; }
     if (url.username || url.password || url.search || url.hash) { error = 'Leave credentials and tokens out of the address.'; return; }
-    window.location.assign(url.origin);
+    if (!local) { window.location.assign(url.origin); return; }
+    // Re-saving the server already in use keeps its stored token.
+    const secret = token.trim();
+    if (!secret && upstream?.address !== url.origin) { error = 'Enter the server’s access token.'; return; }
+    void useUpstream(secret ? { address: url.origin, token: secret } : { address: url.origin });
   }
 </script>
 
@@ -79,9 +87,9 @@
     <section class="settings-card" aria-labelledby="current-title">
       <h2 id="current-title" class="sr-only">Current service</h2>
       <div class="service-row">
-        <span class="service-icon current" aria-hidden="true"><Icon name={upstream ? 'server' : local ? 'monitor' : 'globe'} size={18} /></span>
+        <span class="service-icon current" aria-hidden="true"><Icon name={upstream ? (viaSocket ? 'server' : 'globe') : local ? 'monitor' : 'globe'} size={18} /></span>
         <div class="service-text">
-          <strong>{upstream ? 'Background mail service' : local ? 'This app' : 'Remote server'}</strong>
+          <strong>{upstream ? (viaSocket ? 'Background mail service' : 'Remote server') : local ? 'This app' : 'Remote server'}</strong>
           <span class="service-meta"><span class="status-dot on" aria-hidden="true"></span>Connected<span class="sep" aria-hidden="true">·</span><span class="selectable service-detail">{upstream ? upstream.address : window.location.origin}</span></span>
         </div>
         {#if upstream}<button class="secondary" disabled={busy !== null} onclick={() => useUpstream(null)}>Use this app instead</button>{/if}
@@ -128,10 +136,11 @@
 
     <section class="settings-card" aria-labelledby="other-title">
       <h2 id="other-title">Use another server</h2>
-      <p>Open a daemon’s HTTPS address; your credentials stay on that server. {local ? 'A local mail service is reached through its socket, as unix:/path/to/mail.sock.' : ''}</p>
+      <p>{local ? 'Connect to a daemon by its HTTPS address and access token. Mail you open is kept on this computer too, so it stays quick on a slow connection. A local mail service is reached through its socket, as unix:/path/to/mail.sock.' : 'Open a daemon’s HTTPS address; your credentials stay on that server.'}</p>
       <form class="address-form" onsubmit={open}>
         <label class="field"><span class="sr-only">Server address</span><input bind:this={addressField} bind:value={address} required autocomplete="url" autocapitalize="none" spellcheck="false" placeholder={local ? 'https://mail.example.com or unix:/…' : 'https://mail.example.com'} /></label>
-        <button class="secondary" disabled={busy !== null}>Open</button>
+        {#if remote}<label class="field"><span class="sr-only">Access token</span><input type="password" bind:value={token} autocomplete="off" spellcheck="false" placeholder={upstream?.address === address.trim().replace(/\/$/, '') ? 'Access token (unchanged)' : 'Access token'} /></label>{/if}
+        <button class="secondary" disabled={busy !== null}>{remote ? 'Connect' : 'Open'}</button>
       </form>
       <div class="button-row"><button type="button" class="text-button" onclick={() => { setAccessToken(''); window.location.reload(); }}>Forget this session’s access token</button></div>
     </section>

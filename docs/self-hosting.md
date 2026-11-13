@@ -492,9 +492,23 @@ bodies and SSE over the Unix socket with `Host: localhost` and the daemon's priv
 owner bearer. Scoped keys cannot use this owner proxy. The bearer is read from its
 private token file and never returned to the browser. The choice persists in
 `upstream.json` in the app's data directory. `GET/PUT /api/v1/upstream` stays local and
-answers `{"upstream": {address, token_file} | null}`; PUT accepts `null` to restore the built-in service, or `{address, token_file}` with
+answers `{"upstream": {address, token_file} | null}`; PUT accepts `null` to restore the built-in service, `{address, token_file}` with
 an absolute `unix:` socket path and an absolute token path passing private-file
-checks. Service controls also stay local so a stopped daemon can be restarted.
+checks, or `{address, token}` for a remote origin (see below). Service controls also stay local so a stopped daemon can be restarted.
 Both local control APIs require the owner bearer (never an API key). Remote Hosts and
 socket daemons refuse them; web clients cannot
 install units on a remote daemon. The Connection page hides unavailable controls.
+
+### Connecting the desktop app to a remote daemon
+
+In the desktop app, Settings → Connection also accepts a daemon's `https://` origin
+(plain `http://` only for localhost) with its access token. The local Host checks the
+token with `POST /api/v1/session`, stores it in the private file `upstream-token` in the
+app's data directory (never in `upstream.json`, never returned), and then proxies owner
+requests to that origin the same way it proxies a socket: same routes, same SSE, with
+`Origin` set to the daemon's origin. Request bodies are capped at 40 MB and the daemon
+must answer within 30 seconds; responses stream through. The UI stays on the local
+origin, so its reader cache, cached-content warm-up and folder lists keep working on a
+slow link, while the daemon prefetches into its own content cache. A plain browser
+cannot hold the token for a proxy, so there the address still opens the daemon's own
+web UI.

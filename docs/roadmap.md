@@ -35,6 +35,10 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | `cargo colecto` tool: build, check `[bus] subscribe` against registered handlers, write `.colectoext` | Done |
 | Onboarding for the first account; demo account off by default; accounts can be switched off | Done |
 | Optional AI: summaries, drafted replies with tones, regex and decision-model auto-labels | Done; not yet tried against real providers |
+| Content cache, prefetch of recent mail, instant folder switches, sync status with progress | Done |
+| Desktop app connects to a remote daemon over HTTPS through its local Host | Done; not yet tried against a real remote server |
+| Calmer settings, notifications above Settings, drag-and-drop extension install | Done |
+| Message list density and date headings; new-release notification | Done |
 | Font choice and text size, account rows and add/edit account dialog, account removal | Done |
 | Loading screen and selection polish | Done |
 | Custom ports in every server field | Done |

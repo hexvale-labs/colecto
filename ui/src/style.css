@@ -777,8 +777,8 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .service-controls { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
 .service-controls .switch { margin-right: 6px; white-space: nowrap; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); }
 .service-controls .icon-button.remove:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger); }
-.address-form { display: flex; gap: 8px; margin-top: 14px; max-width: 520px; }
-.address-form .field { flex: 1; margin: 0; }
+.address-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; max-width: 520px; }
+.address-form .field { flex: 1 1 200px; margin: 0; }
 .text-button.inline { min-height: 0; display: inline; }
 @container settings (max-width: 560px) {
   .service-row { flex-wrap: wrap; }
