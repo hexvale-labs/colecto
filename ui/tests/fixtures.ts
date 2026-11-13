@@ -6,7 +6,8 @@ export const test = base.extend({
     // The Host keeps the layout and selected account, so every test starts from the defaults.
     await page.request.post(`${testOrigin}/api/v1/preferences`, {
       headers: { authorization: `Bearer ${ownerToken}`, origin: testOrigin, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' },
-      data: { workspace: {}, account: 'demo' },
+      // A fresh Host starts with the demo account off and onboarding pending; most specs use sample mail.
+      data: { workspace: {}, account: 'demo', accounts_enabled: { demo: true }, onboarded: true },
     });
     await page.addInitScript(({ token, origin }) => {
       if (window.location.origin === origin) {

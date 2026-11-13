@@ -10,13 +10,14 @@
   import { capabilityLabel } from './lib/capabilities';
   import FilePick from './FilePick.svelte';
   import InstallWarning from './InstallWarning.svelte';
+  import Onboarding, { needsOnboarding } from './Onboarding.svelte';
   import mark from './assets/logo-square.svg';
   import { extensionHost, hostService, setAccessToken } from './lib/api';
   import type { AccountInfo, Capability, ExtensionState } from './lib/api';
   let authRequired = $state(false);
   let token = $state('');
   function connectDialog(node: HTMLDialogElement) { node.showModal(); return { destroy() { node.close(); } }; }
-  async function connect(event: SubmitEvent) { event.preventDefault(); busy = true; error = ''; setAccessToken(token); try { await hostService.accounts(); authRequired = false; token = ''; await reload(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
+  async function connect(event: SubmitEvent) { event.preventDefault(); busy = true; error = ''; setAccessToken(token); try { await hostService.accounts(); authRequired = false; token = ''; await Promise.all([reload(), checkOnboarding()]); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   let packageFile = $state<FileList | undefined>();
   let warning = $state<File | null>(null);
   let installNotice = $state('');
@@ -24,6 +25,11 @@
   let accounts = $state<AccountInfo[]>([]);
   let account = $state('demo');
   let managing = $state(false);
+  let onboarding = $state(false);
+  async function checkOnboarding() {
+    try { const [preferences, list] = await Promise.all([hostService.preferences(), hostService.accounts()]); onboarding = needsOnboarding(list, preferences); }
+    catch { onboarding = false; }
+  }
   let loading = $state(true);
   let busy = $state(false);
   let error = $state('');
@@ -74,8 +80,8 @@
   }
   onMount(() => {
     const requireToken = () => authRequired = true; window.addEventListener('colecto-auth-required', requireToken);
-    void extensionHost.list('demo').then(value => extensions = value)
-      .catch(e => error = (e as Error).message).finally(() => loading = false);
+    void Promise.all([extensionHost.list('demo').then(value => extensions = value).catch(e => error = (e as Error).message), checkOnboarding()])
+      .finally(() => loading = false);
     return () => window.removeEventListener('colecto-auth-required', requireToken);
   });
 </script>
@@ -123,6 +129,8 @@
   <section class="settings-page standalone"><button class="secondary" onclick={() => managing = false}>Back to mail</button>{@render extensionSettings()}</section>
 {:else if loading}
   <p class="boot" role="status">Loading extensions…</p>
+{:else if onboarding}
+  <Onboarding ondone={() => onboarding = false} />
 {:else if extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}
   <svelte:boundary onerror={(failure) => console.error('Mail workspace failed', failure)}>
     <MailShell extensionStates={extensions} {extensionSettings} onsettings={() => void reload()} />

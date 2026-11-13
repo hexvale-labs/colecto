@@ -3,6 +3,7 @@
 //! The UI owns the layout's shape; the Host only bounds it, because it never acts on it.
 use colecto_core::Database;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 const MAX_WORKSPACE_BYTES: usize = 64 * 1024;
 
@@ -21,6 +22,25 @@ pub struct Preferences {
     notification_position_chosen: bool,
     /// Load remote images in HTML mail without asking. Off by default: they can track opens.
     pub remote_images: bool,
+    /// Per-account on/off choices. Accounts missing here use [`default_enabled`]: the demo
+    /// account is off, every other account on. Off accounts are hidden from the workspace and
+    /// never refreshed, watched or prefetched in the background.
+    pub accounts_enabled: BTreeMap<String, bool>,
+    /// Set once the owner finished or skipped first-run onboarding.
+    pub onboarded: bool,
+}
+const MAX_ACCOUNT_CHOICES: usize = 256;
+/// Whether an account the owner never switched on or off is enabled.
+pub fn default_enabled(id: &str) -> bool {
+    id != colecto_extension_api::DEMO_ACCOUNT
+}
+impl Preferences {
+    pub fn account_enabled(&self, id: &str) -> bool {
+        self.accounts_enabled
+            .get(id)
+            .copied()
+            .unwrap_or_else(|| default_enabled(id))
+    }
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug)]
@@ -58,8 +78,8 @@ impl Default for Notifications {
     }
 }
 
-/// Fields that are present replace the stored ones.
-#[derive(Deserialize)]
+/// Fields that are present replace the stored ones; `accounts_enabled` entries are merged.
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreferencesInput {
     pub mcp: Option<bool>,
@@ -71,6 +91,8 @@ pub struct PreferencesInput {
     pub font_size: Option<u8>,
     pub notifications: Option<Notifications>,
     pub remote_images: Option<bool>,
+    pub accounts_enabled: Option<BTreeMap<String, bool>>,
+    pub onboarded: Option<bool>,
 }
 
 fn validate(preferences: &Preferences) -> Result<(), String> {
@@ -80,6 +102,14 @@ fn validate(preferences: &Preferences) -> Result<(), String> {
         .is_some_and(|a| a.is_empty() || a.len() > 128)
     {
         return Err("Invalid account preference".into());
+    }
+    if preferences.accounts_enabled.len() > MAX_ACCOUNT_CHOICES
+        || preferences
+            .accounts_enabled
+            .keys()
+            .any(|id| id.is_empty() || id.len() > 128)
+    {
+        return Err("Invalid account on/off choices".into());
     }
     if let Some(workspace) = &preferences.workspace
         && (!workspace.is_object()
@@ -134,10 +164,16 @@ impl PreferenceStore {
     pub fn get(&self) -> &Preferences {
         &self.value
     }
+    /// Forget a removed account's selection and on/off choice.
     pub fn clear_account(&mut self, id: &str) -> Result<(), String> {
-        if self.value.account.as_deref() == Some(id) {
-            let mut next = self.value.clone();
+        let mut next = self.value.clone();
+        if next.account.as_deref() == Some(id) {
             next.account = None;
+        }
+        next.accounts_enabled.remove(id);
+        if next.account != self.value.account
+            || next.accounts_enabled.len() != self.value.accounts_enabled.len()
+        {
             crate::store::save(&self.database, "preferences", &next)?;
             self.value = next;
         }
@@ -170,6 +206,12 @@ impl PreferenceStore {
         }
         if let Some(remote_images) = input.remote_images {
             next.remote_images = remote_images;
+        }
+        if let Some(choices) = input.accounts_enabled {
+            next.accounts_enabled.extend(choices);
+        }
+        if let Some(onboarded) = input.onboarded {
+            next.onboarded = onboarded;
         }
         validate(&next)?;
         crate::store::save(&self.database, "preferences", &next)?;
@@ -257,6 +299,7 @@ mod tests {
             font_size: None,
             notifications: None,
             remote_images: Some(true),
+            ..Default::default()
         };
         assert!(!store.get().remote_images);
         store
@@ -287,6 +330,7 @@ mod tests {
             font_size: None,
             notifications: None,
             remote_images: None,
+            ..Default::default()
         };
         for invalid in ["red", "#12345", "#1234567", "#12345g", "url(#a)"] {
             assert!(store.update(accent(invalid)).is_err(), "{invalid}");
@@ -311,5 +355,27 @@ mod tests {
         assert_eq!(store.get().notifications, notifications);
         store.update(accent("")).unwrap();
         assert_eq!(store.get().accent, None);
+    }
+
+    #[test]
+    fn demo_starts_off_other_accounts_on_and_choices_merge() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        let mut store = PreferenceStore::open(database.clone()).unwrap();
+        assert!(!store.get().onboarded);
+        assert!(!store.get().account_enabled("demo"));
+        assert!(store.get().account_enabled("a1"));
+        let choose = |id: &str, on: bool| PreferencesInput {
+            accounts_enabled: Some([(id.to_owned(), on)].into()),
+            ..Default::default()
+        };
+        store.update(choose("demo", true)).unwrap();
+        store.update(choose("a1", false)).unwrap();
+        assert!(store.update(choose("", false)).is_err());
+        let mut store = PreferenceStore::open(database).unwrap();
+        assert!(store.get().account_enabled("demo"));
+        assert!(!store.get().account_enabled("a1"));
+        store.clear_account("a1").unwrap();
+        assert!(store.get().account_enabled("a1"));
     }
 }

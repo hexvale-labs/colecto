@@ -33,7 +33,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Named extension bus: guest requests/events and bundled integrations | Done |
 | Rust extension SDK (`colecto-extension`): typed calls, bus messages, mock Host; Oneko ported | Done |
 | `cargo colecto` tool: build, check `[bus] subscribe` against registered handlers, write `.colectoext` | Done |
-| Onboarding for the first account; demo account off by default | Next |
+| Onboarding for the first account; demo account off by default; accounts can be switched off | Done |
 | Font choice and text size, account rows and add/edit account dialog, account removal | Done |
 | Loading screen and selection polish | Done |
 | Custom ports in every server field | Done |

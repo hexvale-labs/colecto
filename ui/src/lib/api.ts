@@ -84,8 +84,11 @@ export type ComposerService = ReturnType<typeof createServices>['composer'];
 /** Owner preferences, stored by the Host in Turso. `workspace` is the dock layout. */
 export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right' | 'bottom' | 'bottom-left' | 'left';
 export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner }
-export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; notifications: NotificationPreferences; remote_images: boolean }
+export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; notifications: NotificationPreferences; remote_images: boolean; accounts_enabled: Record<string, boolean>; onboarded: boolean }
+/** Accounts the owner never switched use this: the demo account starts off, every other account on. */
+export const accountOn = (choices: Record<string, boolean>, id: string) => choices[id] ?? id !== 'demo';
 /** An empty accent restores the default. */
+/** `accounts_enabled` entries are merged into the stored choices. */
 export type PreferencesInput = Partial<Omit<Preferences, 'accent'>> & { accent?: string };
 export const hostService = {
   preferences: () => request<Preferences>('host', 'demo', '/preferences'),

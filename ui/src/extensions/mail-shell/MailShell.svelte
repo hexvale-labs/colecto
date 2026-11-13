@@ -27,7 +27,7 @@
   import PrivacySettings from '../../PrivacySettings.svelte';
   import AppearanceSettings from '../../AppearanceSettings.svelte';
   import { notify, dismissKey, notificationPosition, type Toast } from '../notifications/store.svelte';
-  import { subscribeEvents, type NotificationPreferences } from '../../lib/api';
+  import { accountOn, subscribeEvents, type NotificationPreferences, type PreferencesInput } from '../../lib/api';
   import { destinations, isDestination, resolve, settingsPages, type Destination, type Folder, type SettingsPage } from '../../lib/navigation';
   let { extensionStates, extensionSettings, onsettings }: { extensionSettings: import('svelte').Snippet<[Workspace?]>; onsettings: () => void; extensionStates: import('../../lib/api').ExtensionState[] } = $props();
   let Mailbox = $derived(extensionStates.find(e => e.manifest.id === 'inbox')?.enabled ? mailExtensions.inbox : null);
@@ -56,10 +56,12 @@
   $effect(() => { void applyTypography(font, textSize); });
   $effect(() => setBusAccount(accountId));
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); });
-  function savePreferences(input: { accent?: string; notifications?: NotificationPreferences; remote_images?: boolean; font?: string; font_size?: number }) {
+  let accountsEnabled = $state<Record<string, boolean>>({});
+  const isOn = (id: string) => accountOn(accountsEnabled, id);
+  function savePreferences(input: PreferencesInput) {
     if (input.accent !== undefined) accent = input.accent || null;
-    if (input.font !== undefined) font = input.font;
-    if (input.font_size !== undefined) textSize = input.font_size;
+    if (input.font) font = input.font;
+    if (input.font_size) textSize = input.font_size;
     if (input.notifications) notificationPrefs = input.notifications;
     if (input.remote_images !== undefined) remoteImages = input.remote_images;
     void hostService.savePreferences(input).catch(e => notify({ title: 'Could not save your preference', body: (e as Error).message }));
@@ -201,14 +203,24 @@
     accounts = nextAccounts; security = nextSecurity;
     connected = nextAccounts.find(a => a.id === accountId)?.connected ?? false;
   }
-  let accountOptions = $derived(accounts.length ? accounts.map(account => ({ value: account.id, label: account.settings?.name || account.settings?.address || 'Demo account', hint: !account.settings ? 'Sample mail' : account.settings.name ? account.settings.address : account.settings.protocol === 'jmap' ? 'JMAP' : account.settings.imap_host })) : [{ value: 'demo', label: 'Demo account', hint: 'Sample mail' }]);
+  let accountOptions = $derived(accounts.some(account => isOn(account.id)) ? accounts.filter(account => isOn(account.id)).map(account => ({ value: account.id, label: account.settings?.name || account.settings?.address || 'Demo account', hint: !account.settings ? 'Sample mail' : account.settings.name ? account.settings.address : account.settings.protocol === 'jmap' ? 'JMAP' : account.settings.imap_host })) : [{ value: 'demo', label: 'Demo account', hint: 'Sample mail' }]);
   const folders = [{ name: 'Inbox', icon: 'inbox' }, { name: 'Drafts', icon: 'drafts' }, { name: 'Sent', icon: 'sent' }] as const;
   function selectAccount(next: string) {
     if (!accounts.some(account => account.id === next) || !leaveSettings() || !canLeave()) return;
+    switchAccount(next);
+  }
+  function switchAccount(next: string) {
     clearView(); invalidateList(); items = []; fetchedAt = null; labels = {}; labelFilter = ''; labelError = '';
     accountId = next; void hostService.savePreferences({ account: next }).catch(() => { /* Selection still applies for this session. */ });
     connected = accounts.find(a => a.id === next)?.connected ?? false;
     query = ''; appliedQuery = ''; folder = 'Inbox'; void loadList();
+  }
+  /** Turning an account off hides it and stops its background sync; Settings stays open. */
+  function toggleAccount(id: string, on: boolean) {
+    accountsEnabled = { ...accountsEnabled, [id]: on };
+    savePreferences({ accounts_enabled: { [id]: on } });
+    if (!on && id === accountId) { const next = accounts.find(account => isOn(account.id)); if (next && canLeave()) switchAccount(next.id); }
+    else if (on && !isOn(accountId) && canLeave()) switchAccount(id);
   }
   let folder = $state<Folder>('Inbox');
   let items = $state<MailItem[]>([]);
@@ -266,7 +278,7 @@
       { id: `show-${pane.id}`, name: `Layout: ${shownPane(pane.id) ? 'Hide' : 'Show'} ${pane.title}`, run: () => commitLayout(setVisible(layout, pane.id, !shownPane(pane.id))), disabled: settingsOpen },
     ]),
     { id: 'layout-reset', name: 'Layout: Reset to default', run: () => commitLayout(defaultLayout()), disabled: settingsOpen || compact },
-    ...accounts.map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
+    ...accounts.filter(account => isOn(account.id)).map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
     ...currentTabs.map(tab => ({ id: `tab-${tab.id}`, name: `Open message: ${tab.subject}`, run: () => activateTab(tab) })),
     ...extensionStates.filter(extension => !extension.bundled && extension.enabled && !extension.manifest.capabilities.includes('window.overlay')).map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => openPanel(extension.manifest.id) })),
     ...Object.keys(labels).map(name => ({ id: `label-${name}`, name: `Filter label: ${name}`, run: () => { navigate('Inbox'); if (!dirty && folder === 'Inbox' && !settingsOpen) labelFilter = name; } })),
@@ -411,6 +423,7 @@
       font = saved?.font || DEFAULT_FONT; textSize = saved?.font_size || DEFAULT_TEXT_SIZE;
       if (saved?.notifications) notificationPrefs = saved.notifications;
       remoteImages = saved?.remote_images ?? false;
+      accountsEnabled = saved?.accounts_enabled ?? {};
     });
     // Events act on accounts and pages, so they start once both are known.
     let stopEvents = () => {};
@@ -421,7 +434,9 @@
       else if (name === 'navigate') onNavigate(event);
     }); };
     void Promise.all([refreshAccounts(), preferences]).then(([, saved]) => {
-      if (accounts.some(a => a.id === saved?.account)) accountId = saved!.account!;
+      accountsEnabled = saved?.accounts_enabled ?? {};
+      if (accounts.some(a => a.id === saved?.account && isOn(a.id))) accountId = saved!.account!;
+      else accountId = accounts.find(a => isOn(a.id))?.id ?? accountId;
       connected = accounts.find(a => a.id === accountId)?.connected ?? false;
     }).catch(e => accountError = (e as Error).message).finally(() => { initialized = true; void loadList(); listen(); });
     return () => { narrow.removeEventListener('change', sync); stopEvents(); clearTimeout(searchTimer); };
@@ -491,7 +506,7 @@
         <header class="settings-head"><p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name ?? currentExtension?.manifest.name ?? 'Extension'}</strong></p><button class="icon-button" aria-label="Close settings" title="Close  Esc" disabled={busy} onclick={closeSettings}><Icon name="close" size={16} /></button></header>
         <div class="settings-page">
           {#if settingsPage.startsWith('extension:')}{#if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
-          {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
+          {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} enabled={isOn} ontoggle={toggleAccount} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
           {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences} />
           {:else if settingsPage === 'notifications'}<NotificationSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
           {:else if settingsPage === 'privacy'}<PrivacySettings {remoteImages} onchange={(next) => savePreferences({ remote_images: next })} />
@@ -527,7 +542,9 @@
       <input id="mail-search" type="search" enterkeyhint="search" autocapitalize="none" maxlength="1024" bind:value={query} oninput={scheduleSearch} placeholder={`Search ${folder.toLowerCase()}`} />
     </form>{@render composeButton(false)}</div>{/if}
     {#if !compact}{@render folderNav()}{/if}
-    {#if Mailbox}
+    {#if Mailbox && initialized && !isOn(accountId)}
+      <p class="pane-note">All your accounts are turned off. <button class="text-button inline" onclick={() => openSettings('accounts')}>Turn one on in Settings → Accounts</button></p>
+    {:else if Mailbox}
       {#if sort !== 'newest'}<div class="sort-note"><Icon name="sort" size={14} />Sorted {sorts[sort].toLocaleLowerCase()}<button class="chip-remove plain" aria-label="Clear sorting" onclick={() => sort = 'newest'}><Icon name="close" size={12} /></button></div>{/if}
       {#if folder !== 'Drafts'}<div class="label-bar" role="group" aria-label="Filter by label">
         {#if Object.keys(labels).length}<button class="chip" aria-pressed={!labelFilter} onclick={() => labelFilter = ''}>All</button>{/if}

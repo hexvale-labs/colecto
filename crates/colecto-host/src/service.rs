@@ -318,6 +318,21 @@ impl MailService {
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<(&'static str, String)> {
         self.events.subscribe()
     }
+    /// Connected accounts the owner left on: the only ones background work may touch.
+    fn background_accounts(&self) -> Vec<(String, Arc<Mutex<colecto_core::MailStore>>)> {
+        let Ok(preferences) = self.host.preferences.lock().map(|p| p.get().clone()) else {
+            return Vec::new();
+        };
+        let Ok(accounts) = self.host.accounts.lock() else {
+            return Vec::new();
+        };
+        accounts
+            .list()
+            .into_iter()
+            .filter(|a| a.connected && preferences.account_enabled(&a.id))
+            .filter_map(|a| accounts.store(&a.id).ok().map(|s| (a.id, s)))
+            .collect()
+    }
     /// One bounded polling pass; failed or busy accounts don't block unrelated accounts.
     pub async fn refresh_once(&self) {
         let (_stop, receiver) = tokio::sync::watch::channel(false);
@@ -333,17 +348,11 @@ impl MailService {
         {
             tracing::warn!("Could not expire retained delivery requests");
         }
-        let stores = {
-            let Ok(accounts) = self.host.accounts.lock() else {
-                return;
-            };
-            accounts
-                .list()
-                .into_iter()
-                .filter(|a| a.connected && only.is_none_or(|id| id == a.id))
-                .filter_map(|a| accounts.store(&a.id).ok().map(|s| (a.id, s)))
-                .collect::<Vec<_>>()
-        };
+        let stores = self
+            .background_accounts()
+            .into_iter()
+            .filter(|(id, _)| only.is_none_or(|only| only == id))
+            .collect::<Vec<_>>();
         let mut tasks = tokio::task::JoinSet::new();
         for (account, store) in stores {
             let events = self.events.clone();
@@ -414,17 +423,7 @@ impl MailService {
     /// Watchers refresh their account as soon as the provider reports a change; polling
     /// continues underneath, so a failed or unsupported watcher only costs latency.
     fn watch_push(&self, stop: &tokio::sync::watch::Receiver<bool>) {
-        let candidates = {
-            let Ok(accounts) = self.host.accounts.lock() else {
-                return;
-            };
-            accounts
-                .list()
-                .into_iter()
-                .filter(|a| a.connected)
-                .filter_map(|a| accounts.store(&a.id).ok().map(|s| (a.id, s)))
-                .collect::<Vec<_>>()
-        };
+        let candidates = self.background_accounts();
         let healthy = self
             .watching
             .lock()
@@ -476,7 +475,12 @@ impl MailService {
                         .ok()
                         .and_then(|accounts| accounts.store(&account).ok())
                         .and_then(|store| store.lock().ok().and_then(|s| s.push_watcher()));
-                    if current.is_none_or(|current| current.key() != watcher.key()) {
+                    let enabled = service
+                        .host
+                        .preferences
+                        .lock()
+                        .is_ok_and(|p| p.get().account_enabled(&account));
+                    if !enabled || current.is_none_or(|current| current.key() != watcher.key()) {
                         break;
                     }
                 }

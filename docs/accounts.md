@@ -165,6 +165,33 @@ JMAP server, the Cyrus test server in Docker, then receives it, searches for it,
 downloads the attachment and finds it in Sent. Push is covered by unit tests, because
 that server does not emit push events.
 
+## First run and turning accounts on or off
+
+On first launch the app opens a short onboarding screen instead of the workspace:
+welcome, then the same account form as Settings → Accounts, then a confirmation that
+opens the new account's Inbox. **Explore with sample mail first** skips setup and
+turns the demo account on. Onboarding shows while the owner preference `onboarded`
+is false and no real account exists; the built-in demo account never counts as an
+added account. Finishing or skipping sets `onboarded` to true. It lives in the shell
+(`ui/src/Onboarding.svelte`), not an extension, because it is bootstrapping and
+handles credentials.
+
+Every account row in Settings → Accounts has an on/off switch, stored in the owner
+preference `accounts_enabled` (`{ "<account id>": bool }`, merged on update, at most
+256 entries). Accounts without an entry use the default: **the demo account is off,
+every other account is on.**
+
+| | On | Off |
+| --- | --- | --- |
+| Account switcher and "Switch account" commands | Listed | Hidden |
+| Background polling, IMAP IDLE / JMAP push, prefetch | Runs | Skipped; a running push watcher stops at its next check |
+| Saved settings, credentials, cached mail, drafts | Kept | Kept |
+| HTTP API, MCP and API keys | Available | Still available; the switch is a workspace choice, not an access control |
+
+Turning off the open account switches to another account that is on. With every
+account off, the mail pane says so and links to Settings → Accounts. Removing an
+account also forgets its on/off choice.
+
 ## Remove an account
 
 The owner-only `DELETE /api/v1/accounts/{id}` removes the saved account and its
@@ -284,7 +311,8 @@ hosts under Server, and username and password under Sign in. Username starts fro
 the email address; JMAP API-token sign-in can leave it empty. Show password reveals
 the credential only in the dialog. Cancel and Escape ask before discarding edits.
 
-Each saved account has Reconnect, Edit and Remove icon buttons. Reconnect and Edit
+Each saved account has Reconnect, Edit and Remove icon buttons, and every account,
+including the demo account, has an on/off switch (see above). Reconnect and Edit
 open the same prefilled dialog; leave the credential blank to keep it. Remove asks
 before disconnecting and forgetting the saved credential. The account record,
 local mail and drafts remain. Protocol tags expose server hosts on hover. Connected
