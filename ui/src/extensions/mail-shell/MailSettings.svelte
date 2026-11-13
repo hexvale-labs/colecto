@@ -22,7 +22,7 @@
   <header class="section-head"><h2 id="mail-settings-title">Mail</h2>
   <p>How Colecto keeps your mail ready to read.</p></header>
   <div class="settings-group">
-    <h3 class="group-label">Download ahead</h3>
+    <h3 class="group-label">Ready to read</h3>
     <div class="setting setting-row">
       <div class="setting-text"><h3>Download recent mail ahead of time</h3><p>After each refresh, the newest messages are saved so they open instantly, even offline. This never marks them as read.</p></div>
       <label class="switch"><input type="checkbox" checked={prefetch.enabled} onchange={(event) => onchange({ ...prefetch, enabled: event.currentTarget.checked })} /><span class="sr-only">Download recent mail ahead of time</span></label>

@@ -125,6 +125,7 @@
 {/if}
 
 <style>
+  .ai-options .form-grid { max-width: 440px; }
   .ai-options { min-width: 0; margin: 40px 0 0; padding: 0; border: 0; transition: opacity 160ms ease; }
   .inactive { opacity: 0.55; }
   .ai-options.inactive .inactive { opacity: 1; }
