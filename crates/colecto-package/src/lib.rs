@@ -1,5 +1,10 @@
 //! Bounded `.colectoext` ZIP packages with a manifest, Wasm module and optional PNG assets.
+//!
+//! Shared by the Host (installation) and `cargo colecto` (packaging), so both apply the
+//! same limits and manifest rules.
 use std::io::{Cursor, Read, Write};
+
+pub mod manifest;
 
 pub const MANIFEST: &str = "manifest.toml";
 pub const MODULE: &str = "module.wasm";
@@ -134,9 +139,20 @@ pub fn write(manifest: &str, module: &[u8]) -> Vec<u8> {
     write_with_assets(manifest, module, &Assets::new())
 }
 pub fn write_with_assets(manifest: &str, module: &[u8], assets: &Assets) -> Vec<u8> {
+    write_with(manifest, module, assets, zip::CompressionMethod::Stored)
+}
+/// Like [`write_with_assets`], but Deflate-compressed, for packages people download.
+pub fn write_deflated(manifest: &str, module: &[u8], assets: &Assets) -> Vec<u8> {
+    write_with(manifest, module, assets, zip::CompressionMethod::Deflated)
+}
+fn write_with(
+    manifest: &str,
+    module: &[u8],
+    assets: &Assets,
+    method: zip::CompressionMethod,
+) -> Vec<u8> {
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    let options =
-        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let options = zip::write::SimpleFileOptions::default().compression_method(method);
     for (name, data) in [(MANIFEST, manifest.as_bytes()), (MODULE, module)] {
         writer.start_file(name, options).expect("in-memory zip");
         writer.write_all(data).expect("in-memory zip");

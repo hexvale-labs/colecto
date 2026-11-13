@@ -31,7 +31,11 @@ The integer must be between 1 and 10000 and is forbidden without that capability
 
 ## 3. Write the module
 
-Use the readable WAT in `examples/connection-panel/module.wat` as a panel starting
+For Rust, use the [Rust SDK](rust-sdk.md): you write plain functions, register them
+with `colecto_extension::export!`, and the SDK handles the imports, JSON and dispatch.
+`examples/oneko` is a complete overlay built with it.
+
+For other languages, use the readable WAT in `examples/connection-panel/module.wat` as a panel starting
 point. Export `memory` and `run`. Only three imports are available, all in the
 `colecto` namespace: `action(ptr, capacity)`, `emit(ptr, len)` and
 `request(ptr, len, output, capacity)`. Return values are byte lengths (action and
@@ -42,9 +46,7 @@ The selected action is passed back on the next invocation. Service requests use
 an `operation` capability and operation-specific arguments. Identity and account
 come from the Host and cannot be supplied by the guest.
 
-For Rust, copy the standalone `examples/oneko` crate. It uses `#![no_std]`, imports
-the ABI directly, and exports `run`. Build for `wasm32-unknown-unknown`, without
-WASI. Keep the module below 16 MiB. Every invocation starts fresh; overlays store
+Build for `wasm32-unknown-unknown`, without WASI. Keep the module below 16 MiB. Every invocation starts fresh; overlays store
 state in the emitted string and receive it back in the next frame action.
 See [the contract](README.md#overlay-extensions) for exact frame JSON and limits.
 
@@ -72,11 +74,12 @@ A `.colectoext` file is a ZIP containing `manifest.toml`, `module.wasm`, and opt
 Deflate compression. Assets need safe lowercase flat names, verified PNG/JPEG/WebP/GIF magic bytes, at most
 8 MiB each and at most 256 files. Total compressed package size is 16 MiB.
 
-`just build extension` packages the WAT example. `just build oneko` installs the
-Rust Wasm target if needed, builds the Rust guest and writes
-`docs/extensions/examples/oneko.colectoext`. The example is not bundled.
-The Host's `package::write` helper builds asset-free packages; the Oneko packaging
-script shows how to include sprites. Never include source files or directory entries.
+For Rust extensions, `cargo colecto build` builds, checks and packages in one step;
+see [the SDK page](rust-sdk.md#build-and-package-with-cargo-colecto). `just build
+oneko` uses it to write `docs/extensions/examples/oneko.colectoext`; the example is not
+bundled. `just build extension` packages the WAT example with
+`colecto_host::package::write` (re-exported from `colecto-package`). For other toolchains, any ZIP tool works. Never include
+source files or directory entries.
 
 ## 6. Install and debug
 
@@ -109,7 +112,7 @@ other saved positions remain. New position choices are recorded explicitly.
 
 ## Large packages and compiled modules
 
-Limits are defined once in `crates/colecto-host/src/package.rs`: compressed archive
+Limits are defined once in `crates/colecto-package/src/lib.rs`: compressed archive
 16 MiB; total uncompressed content 48 MiB; module 16 MiB; manifest 8 KiB; up to
 256 flat raster assets of 8 MiB each; at most 32 installed third-party packages.
 The Host checks every declared entry size and total before inflation, caps actual
@@ -140,9 +143,9 @@ step = 1
 unit = "px"
 ```
 
-The owner edits this in Settings. See Oneko's `src/lib.rs` for a no_std guest
-that reads speed, opacity and stopping distance once per frame using one bridge
-call. The [contract](README.md#extension-settings) lists validation and routes.
+The owner edits this in Settings. With the Rust SDK, read the values into your own
+struct with `cx.settings::<Settings>()`; Oneko's `src/lib.rs` reads speed, opacity and
+stopping distance that way once per frame. The [contract](README.md#extension-settings) lists validation and routes.
 
 ## Talk to another extension
 
@@ -157,4 +160,6 @@ Read `data` from the service response; null also means no answer. To answer a re
 on your own bus, inspect the `bus.request` action and emit
 `{"bus":{"response":{"example":true}}}`. Each delivery starts a fresh instance,
 so keep needed context in the payload. Use versioned names such as `v1/example`.
-See the [bus contract](README.md#extension-bus) for limits and bundled surfaces.
+See the [bus contract](README.md#extension-bus) for limits and bundled surfaces. In
+Rust, the [SDK's bus types](rust-sdk.md#bus-messages) build these requests and answers
+for you.

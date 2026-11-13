@@ -16,6 +16,7 @@ help:
 # Format Rust source.
 fmt:
     cargo fmt --all
+    cargo fmt --manifest-path docs/extensions/examples/oneko/Cargo.toml
 
 # Run the routine verification suite.
 verify: check::fmt check::rust check::lint test::rust check::ui test::ui build::ui
@@ -35,6 +36,8 @@ bump-version version:
     sed -i -E '/^\[workspace\.package\]/,/^\[/ s/^version = "[^"]+"/version = "{{version}}"/' Cargo.toml
     sed -i -E '0,/"version": "[^"]+"/ s//"version": "{{version}}"/' ui/package.json
     cargo update --workspace --offline --quiet
+    # Oneko is outside the workspace but locks the SDK crates by version.
+    cargo update --manifest-path docs/extensions/examples/oneko/Cargo.toml -p colecto-extension -p colecto-extension-sys --offline --quiet
     grep -q '^version = "{{version}}"' Cargo.toml && grep -q '"version": "{{version}}"' ui/package.json
     echo "Version set to {{version}}"
 

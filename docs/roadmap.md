@@ -30,6 +30,8 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Extensions: Wasm panels and overlays, install-time consent, z-index layers | Done |
 | Declarative extension settings, owner controls and per-guest reads | Done |
 | Named extension bus: guest requests/events and bundled integrations | Done |
+| Rust extension SDK (`colecto-extension`): typed calls, bus messages, mock Host; Oneko ported | Done |
+| `cargo colecto` tool: build, check `[bus] subscribe` against registered handlers, write `.colectoext` | Done |
 | Onboarding for the first account; demo account off by default | Next |
 | Font choice and text size, account rows and add/edit account dialog, account removal | Done |
 | Loading screen and selection polish | Done |

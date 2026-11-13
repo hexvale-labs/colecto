@@ -45,7 +45,8 @@ while enabled and none while disabled; the owner consents once, when installing.
 Bundled extensions are trusted Svelte code compiled into the app; third-party
 extensions run in a fuel- and memory-limited `wasmi` runtime without WASI and can
 only emit declarative views or overlay sprites. See the
-[extension contract](extensions/README.md).
+[extension contract](extensions/README.md). Rust guests can use the
+[Rust SDK](extensions/rust-sdk.md) instead of the raw imports.
 
 Only bootstrapping, permission prompts, credential controls and recovery stay outside
 the extension composition.
@@ -118,7 +119,12 @@ controls remain local and are refused by remote Hosts and socket daemons.
   ownership. Add an abstraction only when real callers need it.
 - New crates go under `crates/`; they inherit `version`, `edition`, `publish`,
   `license` and lints from the workspace. Shared dependency versions live once in the
-  root `[workspace.dependencies]`.
+  root `[workspace.dependencies]`. The one exception is `colecto-extension-sys`, which
+  does not inherit the workspace's `unsafe_code = "forbid"` because it holds the guest
+  SDK's few unsafe FFI lines.
 - Dependencies point one way: the Host depends on the core and the extension API; the
-  extension API depends on neither.
+  extension API depends on neither. The guest SDK (`colecto-extension`) depends only on
+  `colecto-extension-sys` and serde, never on the Host or core, so a Git dependency on
+  it stays small. Package and manifest rules live in `colecto-package`, which the Host
+  and `cargo-colecto` both use, so the tool and installation never disagree.
 - Never describe a planned platform, sandbox property or feature as working.

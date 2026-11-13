@@ -26,7 +26,9 @@ Third-party extensions ship as one `.colectoext` file: a zip archive holding
 `manifest.toml` (the manifest above, at most 8 KiB) and `module.wasm` (at most 16 MiB),
 with Stored or Deflate entries and at most 16 MiB in all. Up to 256 optional raster image assets are allowed under `assets/`. Anything else, including unsafe
 paths, or entries that decompress past their limit, is rejected before the
-manifest is parsed. `colecto_host::package::write` builds one.
+manifest is parsed. `colecto_package::write` builds one (also reachable as `colecto_host::package::write`); `cargo colecto build` builds,
+checks and packages a Rust extension. The package and manifest rules live in
+`crates/colecto-package/`, shared by the Host and the tool.
 
 Run `just build extension` to compile the example's readable WAT source and package it
 as `target/extensions/connection-panel.colectoext`. Start `just run`, open **Settings →
@@ -80,7 +82,8 @@ invocations. Modules may import only these functions from module `colecto`:
 Only text and buttons are rendered, through Svelte's escaping. Strings never
 become HTML, script, CSS, URLs or Tauri commands. Actions are untrusted labels;
 the Host owns actual buttons and invocation. See the WAT example for a complete
-module, or compile your language to this minimal ABI without WASI.
+module, or compile your language to this minimal ABI without WASI. Rust extensions can
+use the [Rust SDK](rust-sdk.md), which implements this ABI.
 
 ## Resource and trust boundaries
 
@@ -234,7 +237,7 @@ See [Make your own extension](guide.md) for a walkthrough and API policy.
 
 ## Large packages and compiled modules
 
-Limits are defined once in `crates/colecto-host/src/package.rs`: compressed archive
+Limits are defined once in `crates/colecto-package/src/lib.rs`: compressed archive
 16 MiB; total uncompressed content 48 MiB; module 16 MiB; manifest 8 KiB; up to
 256 flat raster assets of 8 MiB each; at most 32 installed third-party packages.
 The Host checks every declared entry size and total before inflation, caps actual

@@ -11,7 +11,7 @@ mod extensions;
 pub mod logging;
 pub mod notifications;
 mod overlay;
-pub mod package;
+pub use colecto_package as package;
 pub mod runtime;
 mod service;
 pub use service::{AccessPolicy, MailService};

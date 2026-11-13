@@ -16,6 +16,7 @@ Start with the page that matches what you want to do:
 | Understand how the pieces fit together | [Architecture](architecture.md) |
 | See what is done and what is next | [Roadmap](roadmap.md) |
 | Write an extension | [Make your own extension](extensions/guide.md), then the [extension contract](extensions/README.md) |
+| Write an extension in Rust | [Rust extension SDK](extensions/rust-sdk.md) |
 | Change how data is stored | [Storage](storage.md) |
 | Work on the interface | [Design](DESIGN.md) and [product principles](PRODUCT.md) |
 | Measure resource use | [Performance](performance/README.md) |
@@ -43,14 +44,18 @@ Start with the page that matches what you want to do:
 | Path | Contents |
 | --- | --- |
 | `crates/colecto-core/` | Mail transports (IMAP, SMTP, JMAP), MIME decoding, accounts, credential vault, drafts, labels, snapshot cache, Turso storage |
-| `crates/colecto-extension-api/` | Version 1 wire types shared by the Host, the UI and extensions |
+| `crates/colecto-extension-api/` | Version 1 wire types shared by the Host and the UI |
+| `crates/colecto-extension/` | Rust SDK for third-party extensions (typed calls, bus messages, mock Host) |
+| `crates/colecto-extension-sys/` | The SDK's raw Wasm imports and `run` export; the only SDK crate with `unsafe` code |
+| `crates/colecto-package/` | `.colectoext` reading and writing, package limits and manifest rules, shared by the Host and `cargo colecto` |
+| `crates/cargo-colecto/` | `cargo colecto`: builds, checks and packages Rust extensions |
 | `crates/colecto-host/` | The mail service: HTTP API, auth, extension policy and Wasm sandbox, MCP; binaries `colecto-host`, `colecto-daemon`, `colecto-mcp` |
 | `crates/colecto-app/` | Tauri app; runs the mail service in-process and embeds the UI |
 | `ui/src/` | Svelte app shell, settings screens and shared components |
 | `ui/src/extensions/<id>/` | Bundled extensions: Svelte code next to its `extension.toml` |
 | `ui/src/lib/` | API client, layout, navigation, layer (z-index) registry and helpers |
 | `ui/tests/` | Playwright specs (`*.spec.ts`) and Bun tests (`*.test.mjs`) |
-| `docs/extensions/examples/` | Example third-party extensions (WAT panel, Oneko overlay) |
+| `docs/extensions/examples/` | Example third-party extensions (WAT panel, Oneko overlay built with the Rust SDK) |
 | `docs/performance/` | Measurement method, committed baseline, local results (ignored by git) |
 | `scripts/just/` | `just` modules: `build`, `check`, `test`, `run`, `install` |
 | `scripts/python/`, `scripts/javascript/` | Resource benchmark and AUR publishing helpers |

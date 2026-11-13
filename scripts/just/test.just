@@ -5,9 +5,10 @@ j := just_executable() + " --justfile " + quote(justfile_directory() / "justfile
 [default]
 all: rust ui
 
-# Run workspace tests and doctests.
+# Run workspace tests and doctests, plus the Oneko example's tests against the SDK.
 rust:
     cargo test --locked
+    cargo test --locked --manifest-path docs/extensions/examples/oneko/Cargo.toml
 
 # Run UI unit tests without starting a browser or mail service.
 ui:

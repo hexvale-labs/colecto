@@ -1047,6 +1047,29 @@ async fn assets_require_owner_host_identity_and_enabled_package() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+    // The SDK-built guest must run in the real sandbox: within fuel, reading its
+    // settings, and producing overlay output the Host accepts.
+    let frame = serde_json::json!({"action": serde_json::json!({"event":"frame","time_ms":0,"pointer":{"x":400,"y":16,"inside":true},"viewport":{"width":800,"height":600},"state":""}).to_string()});
+    let response = router
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/extensions/oneko/run",
+            "host",
+            origin,
+            &frame.to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let output: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+    let item = &output["overlay"]["items"][0];
+    assert_eq!(
+        (item["image"].as_str(), item["x"].as_f64()),
+        (Some("oneko.png"), Some(10.0))
+    );
+    assert!(output["state"].as_str().unwrap().contains("\"tick\":1.0"));
     let path = "/api/v1/extensions/oneko/assets/oneko.png";
     let response = router
         .clone()
