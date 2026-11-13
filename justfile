@@ -16,6 +16,7 @@ help:
 # Format Rust source.
 fmt:
     cargo fmt --all
+    cargo fmt --manifest-path docs/extensions/examples/oneko/Cargo.toml
 
 # Run the routine verification suite.
 verify: check::fmt check::rust check::lint test::rust check::ui test::ui build::ui

@@ -885,12 +885,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "colecto-extension"
+version = "0.2.0"
+dependencies = [
+ "colecto-extension-api",
+ "colecto-extension-sys",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "colecto-extension-api"
 version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "colecto-extension-sys"
+version = "0.2.0"
 
 [[package]]
 name = "colecto-host"
