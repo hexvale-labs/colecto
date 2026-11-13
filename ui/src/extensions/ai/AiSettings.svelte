@@ -55,14 +55,16 @@
   {#if !extensionOn}<p class="content-note">The AI extension is turned off in Settings → Extensions, so the reader shows no AI actions.</p>{/if}
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   {#if settings && view}
-    <div class="settings-card setting-row">
-      <div><h3>AI features</h3><p>Turn on summaries, drafted replies and automatic labels.</p></div>
-      <label class="switch"><input type="checkbox" checked={on} onchange={(event) => { const value = event.currentTarget.checked; void save(draft => { draft.enabled = value; }); }} /><span class="sr-only">AI features</span></label>
+    <div class="settings-group">
+      <div class="setting setting-row">
+        <div class="setting-text"><h3>Use AI features</h3><p>Turns on summaries, drafted replies and automatic labels. Off by default.</p></div>
+        <label class="switch"><input type="checkbox" checked={on} onchange={(event) => { const value = event.currentTarget.checked; void save(draft => { draft.enabled = value; }); }} /><span class="sr-only">Use AI features</span></label>
+      </div>
     </div>
-    <fieldset class="settings-stack ai-options" class:inactive={!on} disabled={!on}>
+    <fieldset class="ai-options" class:inactive={!on} disabled={!on}>
       <legend class="sr-only">AI services</legend>
-      <div class="settings-card">
-        <h3>Text model</h3>
+      <div class="settings-group">
+        <h3 class="group-label">Text model</h3>
         <p>Writes summaries and replies. Works with any service that offers an OpenAI-compatible chat completions API, including ones on your own computer.</p>
         <div class="form-grid">
           <label class="field wide-field">Base URL<input type="url" placeholder="https://api.openai.com/v1" value={settings.text.base_url} onchange={(event) => { const value = event.currentTarget.value.trim(); void save(draft => { draft.text.base_url = value; }); }} /></label>
@@ -77,8 +79,8 @@
         </fieldset>
         <div class="button-row"><button type="button" class="secondary" disabled={tested.text.busy} onclick={() => void test('text')}>{tested.text.busy ? 'Testing…' : 'Test connection'}</button>{#if tested.text.note}<span class={tested.text.ok ? 'test-ok' : 'test-failed'} role="status">{tested.text.note}</span>{/if}</div>
       </div>
-      <div class="settings-card">
-        <h3>Decision model</h3>
+      <div class="settings-group">
+        <h3 class="group-label">Decision model</h3>
         <p>Answers yes-or-no questions for automatic labels, such as “does this belong under Receipts?”. Uses the OpenRouter Decisions API.</p>
         <div class="form-grid">
           <label class="field">Base URL<input type="url" value={settings.decision.base_url} onchange={(event) => { const value = event.currentTarget.value.trim(); void save(draft => { draft.decision.base_url = value; }); }} /></label>
@@ -94,10 +96,11 @@
         </div>
         <div class="button-row"><button type="button" class="secondary" disabled={tested.decision.busy} onclick={() => void test('decision')}>{tested.decision.busy ? 'Testing…' : 'Test connection'}</button>{#if tested.decision.note}<span class={tested.decision.ok ? 'test-ok' : 'test-failed'} role="status">{tested.decision.note}</span>{/if}</div>
       </div>
-      <div class="settings-card">
-        <div class="setting-row">
-          <div><h3>Automatic labels</h3><p>Sorts newly arrived mail into your labels. Rules match text and need no AI service; a label can also ask the decision model. A message is only checked once, so a label you remove stays removed.</p></div>
-          <label class="switch"><input type="checkbox" checked={settings.autolabel} onchange={(event) => { const value = event.currentTarget.checked; void save(draft => { draft.autolabel = value; }); }} /><span class="sr-only">Automatic labels</span></label>
+      <div class="settings-group">
+        <h3 class="group-label">Automatic labels</h3>
+        <div class="setting setting-row">
+          <div class="setting-text"><h3>Label new mail automatically</h3><p>Sorts newly arrived mail into your labels. Rules match text and need no AI service; a label can also ask the decision model. A message is only checked once, so a label you remove stays removed.</p></div>
+          <label class="switch"><input type="checkbox" checked={settings.autolabel} onchange={(event) => { const value = event.currentTarget.checked; void save(draft => { draft.autolabel = value; }); }} /><span class="sr-only">Label new mail automatically</span></label>
         </div>
         <div class="label-list" class:inactive={!settings.autolabel}>
           <h4>Labels in {accountName}</h4>
@@ -122,10 +125,10 @@
 {/if}
 
 <style>
-  .ai-options { transition: opacity 160ms ease; }
+  .ai-options { min-width: 0; margin: 40px 0 0; padding: 0; border: 0; transition: opacity 160ms ease; }
   .inactive { opacity: 0.55; }
   .ai-options.inactive .inactive { opacity: 1; }
-  .effort { margin-top: 18px; }
+  .effort .segmented { flex-wrap: wrap; }
   .effort .hint { margin-top: 6px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
   .confidence { max-width: 440px; }
   /* A range input, not a text box: drop the field's input chrome. */
@@ -135,7 +138,7 @@
   .range-ends { display: flex; justify-content: space-between; color: var(--ink-3); font-size: calc(12px * var(--text-scale)); font-weight: 450; }
   .test-ok { color: var(--ink-2); font-size: calc(13px * var(--text-scale)); }
   .test-failed { color: var(--danger); font-size: calc(13px * var(--text-scale)); user-select: text; }
-  .label-list { margin-top: 18px; transition: opacity 160ms ease; }
+  .label-list { transition: opacity 160ms ease; }
   .label-list h4 { margin-bottom: 4px; color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); font-weight: 560; }
   .label-row { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line-soft); }
   .label-row:last-child { border-bottom: 0; }
