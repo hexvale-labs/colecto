@@ -21,9 +21,9 @@ guest.
 ## Use it from your own project
 
 The SDK is not on crates.io. Depend on it through Git, pinned to a release tag; Cargo
-finds the crate by name inside the repository's workspace. The SDK first ships in the
-release after 0.2.0; until then use `branch = "develop"` instead of `tag`, here and
-when installing `cargo-colecto`.
+finds the crate by name inside the repository's workspace. The SDK and
+`cargo-colecto` ship from v0.3.0 on; use `branch = "develop"` instead of `tag` for
+unreleased changes.
 
 ```toml
 [package]
