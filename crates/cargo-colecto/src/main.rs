@@ -1,11 +1,12 @@
-//! `cargo colecto`: builds a Rust extension for `wasm32-unknown-unknown`, checks the
-//! module against `extension.toml` and writes the `.colectoext` package.
+//! `cargo colecto`: builds a Rust extension's service part for `wasm32-unknown-unknown`,
+//! checks it against `extension.toml` and writes the `.colectoext` package with the
+//! client part from `client/`.
 //! See `docs/extensions/rust-sdk.md`.
 
 mod check;
 mod wasm;
 
-use colecto_package::{Assets, manifest};
+use colecto_package::{Assets, Files, manifest};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -16,7 +17,8 @@ Build, check and package a Rust Colecto extension.
 Usage: cargo colecto <COMMAND> [OPTIONS]
 
 Commands:
-  build   Build for wasm32-unknown-unknown, check against extension.toml, write the .colectoext
+  build   Build the service part for wasm32-unknown-unknown, check it against extension.toml,
+          write the .colectoext
   check   Build and check, without writing a package
 
 Options:
@@ -25,8 +27,9 @@ Options:
   --locked                Pass --locked to cargo build
   -h, --help              Show this help
 
-The extension's manifest is extension.toml and its images are in assets/, both next to
-Cargo.toml.";
+The extension's manifest is extension.toml, its client part is in client/ and its images
+are in assets/, all next to Cargo.toml. The built crate becomes the module that
+extension.toml names as `service`.";
 
 struct Options {
     package: bool,
@@ -151,10 +154,16 @@ fn run(options: &Options) -> Result<(), String> {
             report.errors.len()
         ));
     }
-    let assets = read_assets(&root.join("assets"))?;
-    let package = colecto_package::write_deflated(&source, &module, &assets);
-    // The same reader the Host uses at installation, so every package limit applies.
-    colecto_package::read_with_assets(&package).map_err(|e| format!("package rejected: {e}"))?;
+    let package = colecto_package::Package {
+        manifest: source.clone(),
+        client: read_client(root)?,
+        service: parsed.service.clone().map(|name| (name, module.clone())),
+        assets: read_assets(&root.join("assets"))?,
+    };
+    let package = colecto_package::write_deflated(&package);
+    // The same reader and checks the Host uses at installation, so every limit applies.
+    let read = colecto_package::read(&package).map_err(|e| format!("package rejected: {e}"))?;
+    colecto_package::check(&parsed, &read).map_err(|e| format!("package rejected: {e}"))?;
     if !options.package {
         eprintln!(
             "Checked {} ({} KiB module)",
@@ -240,6 +249,36 @@ fn find_library(cargo: &std::ffi::OsStr, cargo_toml: &Path) -> Result<(PathBuf, 
         .and_then(|t| t["name"].as_str())
         .ok_or("the package needs a library with crate-type = [\"cdylib\"]")?;
     Ok((PathBuf::from(target_dir), library.replace('-', "_")))
+}
+
+/// Every file under `client/`, keyed by its path in the package (`client/main.js`).
+fn read_client(root: &Path) -> Result<Files, String> {
+    fn walk(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), String> {
+        let entries =
+            std::fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = format!("{prefix}{}", entry.file_name().to_string_lossy());
+            if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+                walk(&entry.path(), &format!("{name}/"), files)?;
+            } else if colecto_package::safe_client_path(&name) {
+                let data = std::fs::read(entry.path()).map_err(|e| format!("{name}: {e}"))?;
+                files.insert(name, data);
+            } else {
+                return Err(format!(
+                    "{name}: client files use letters, digits, `_`, `.` and `-`, and end in .js, .wasm, .json, .bin, .html or .css"
+                ));
+            }
+        }
+        Ok(())
+    }
+    let mut files = Files::new();
+    walk(
+        &root.join("client"),
+        colecto_package::CLIENT_DIR,
+        &mut files,
+    )?;
+    Ok(files)
 }
 
 fn read_assets(dir: &Path) -> Result<Assets, String> {

@@ -1,8 +1,9 @@
-//! Trusted HTTP adapter for bundled UI and isolated Wasm extensions.
+//! Trusted HTTP adapter for the UI shell, extension client parts and Wasm service parts.
 mod ai;
 pub mod api_keys;
 pub mod approvals;
 mod bus;
+mod credentials;
 mod discovery;
 pub mod mcp;
 pub mod preferences;
@@ -14,7 +15,6 @@ use api_keys::{ApiKeys, Principal};
 mod extensions;
 pub mod logging;
 pub mod notifications;
-mod overlay;
 pub use colecto_package as package;
 pub mod runtime;
 mod service;
@@ -32,8 +32,7 @@ use axum::{
 use colecto_core::{Accounts, Error, MailStore, SecretStore};
 use colecto_extension_api::{
     AccountInfo, AccountInput, ApiError, Capability, Draft, DraftInput, ExtensionInstallInput,
-    ExtensionPolicyInput, ExtensionRunInput, ExtensionState, Message, MessageContent, SecurityInfo,
-    SecurityInput,
+    ExtensionPolicyInput, ExtensionState, Message, MessageContent, SecurityInfo, SecurityInput,
 };
 use std::{
     path::PathBuf,
@@ -84,6 +83,7 @@ struct Host {
     execution: Arc<tokio::sync::Semaphore>,
     ai: Arc<ai::Ai>,
     sync: Arc<sync::SyncState>,
+    credentials: Arc<Mutex<credentials::Credentials>>,
 }
 
 struct Failure(StatusCode, String);
@@ -195,7 +195,13 @@ fn build_app(host: Host, assets: Assets) -> Router {
         .route("/bus/{bus}/request", axum::routing::post(bus::request_http))
         .route("/bus/events", axum::routing::post(bus::emit_http))
         .route("/bus/replies/{id}", axum::routing::post(bus::reply_http))
-        .route("/extensions/{id}/run", axum::routing::post(run_extension))
+        .route(
+            "/extensions/{id}/credential",
+            axum::routing::post(mint_credential).delete(revoke_credential),
+        )
+        .route("/extensions/{id}/client", get(client_files))
+        .route("/extensions/{id}/client/{*path}", get(client_file))
+        .route("/extensions/events", axum::routing::post(extension_events))
         .route("/accounts", get(list_accounts).post(upsert_account))
         .route("/accounts/discover", axum::routing::post(discover_account))
         .route("/accounts/{id}", axum::routing::delete(remove_account))
@@ -248,7 +254,9 @@ fn build_app(host: Host, assets: Assets) -> Router {
         )
         .route("/ai/reply", axum::routing::post(ai::draft_reply))
         .fallback(|| async { Failure(StatusCode::NOT_FOUND, "API route not found".into()) });
-    let router = Router::new().nest("/api/v1", api);
+    let router = Router::new()
+        .nest("/api/v1", api)
+        .route("/extension-runtime.html", get(extension_runtime));
     let router = match assets {
         Assets::Directory(directory) => router.fallback_service(ServeDir::new(directory)),
         Assets::Embedded(lookup) => router.fallback(move |uri: axum::http::Uri| async move {
@@ -269,6 +277,38 @@ fn build_app(host: Host, assets: Assets) -> Router {
             ),
         )
         .with_state(host)
+}
+
+/// The page each extension's client part starts in, inside an opaque-origin sandboxed frame.
+const RUNTIME_PAGE: &str = include_str!("../../../ui/src/runtime/frame.html");
+/// Its policy allows exactly its own inline script (by hash), the Worker it starts from a
+/// blob, and Wasm; no network, images, styles or forms. Blob Workers inherit it.
+fn runtime_policy() -> &'static str {
+    use sha2::Digest;
+    static POLICY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    POLICY.get_or_init(|| {
+        let script = RUNTIME_PAGE
+            .split_once("<script>")
+            .and_then(|(_, rest)| rest.split_once("</script>"))
+            .map(|(script, _)| script)
+            .expect("runtime page has one inline script");
+        let hash = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            sha2::Sha256::digest(script.as_bytes()),
+        );
+        format!(
+            "default-src 'none'; script-src 'sha256-{hash}' blob: 'wasm-unsafe-eval'; worker-src blob:; connect-src 'none'; img-src 'none'; style-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+        )
+    })
+}
+async fn extension_runtime() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CONTENT_SECURITY_POLICY, runtime_policy()),
+        ],
+        RUNTIME_PAGE,
+    )
 }
 
 /// Public, like a health check: callers can check compatibility before they hold a token.
@@ -351,6 +391,21 @@ fn grant(
             operation,
             api_keys::now(),
         ) {
+            Ok(account.to_owned())
+        } else {
+            Err(forbidden())
+        };
+    }
+    if let Principal::Extension(token) = principal {
+        // A client part: its credential names the extension; headers name only the account.
+        let (id, generation) = caller_extension(host, token)?;
+        extension_account(host, headers)?;
+        return if host
+            .extensions
+            .lock()
+            .map_err(|_| forbidden())?
+            .allows_generation(&id, account, operation, generation)
+        {
             Ok(account.to_owned())
         } else {
             Err(forbidden())
@@ -470,7 +525,7 @@ async fn review_extension(
     tokio::task::spawn_blocking(move || {
         let bad = |e| Failure(StatusCode::BAD_REQUEST, e);
         // A discontinued API version is reported, not refused, so the UI can explain why.
-        let (source, _, _) = package::read_with_assets(&bytes).map_err(bad)?;
+        let source = package::read(&bytes).map_err(bad)?.manifest;
         let manifest = package::manifest::parse_any_version(&source).map_err(bad)?;
         if let colecto_extension_api::ApiSupport::Discontinued(release) =
             colecto_extension_api::api_support(manifest.api_version)
@@ -527,6 +582,244 @@ async fn extension_asset(
         bytes,
     ))
 }
+/// The owner (the shell), or the client part of extension `id` itself.
+fn own_or_owner(
+    host: &Host,
+    principal: &Principal,
+    headers: &HeaderMap,
+    id: &str,
+) -> Result<(), Failure> {
+    match principal {
+        Principal::Extension(token) if caller_extension(host, token)?.0 == id => Ok(()),
+        Principal::Extension(_) | Principal::ApiKey(_) => Err(forbidden()),
+        Principal::Owner => host_grant(headers),
+    }
+}
+/// The extension a client credential belongs to, while it still runs at the generation the
+/// credential was minted for.
+fn caller_extension(host: &Host, token: &str) -> Result<(String, u64), Failure> {
+    let (id, generation) = host
+        .credentials
+        .lock()
+        .map_err(|_| forbidden())?
+        .resolve(token)
+        .ok_or_else(|| {
+            Failure(
+                StatusCode::UNAUTHORIZED,
+                "Extension credential revoked".into(),
+            )
+        })?;
+    if host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .generation(&id)
+        != Some(generation)
+    {
+        return Err(Failure(
+            StatusCode::UNAUTHORIZED,
+            "Extension credential revoked".into(),
+        ));
+    }
+    Ok((id, generation))
+}
+/// Owner only: a credential for one enabled extension's client part. The shell keeps it and
+/// never hands it to the extension's Worker.
+async fn mint_credential(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    let generation = {
+        let extensions = host.extensions.lock().map_err(|_| forbidden())?;
+        extensions
+            .generation(&id)
+            .filter(|_| extensions.has_client(&id))
+            .ok_or_else(forbidden)?
+    };
+    let mut credentials = host.credentials.lock().map_err(|_| forbidden())?;
+    // Tokens of disabled, removed or reinstalled extensions are dead weight; drop them here.
+    if let Ok(extensions) = host.extensions.lock() {
+        credentials.retain(|id| extensions.generation(id));
+    }
+    let token = credentials
+        .mint(&id, generation)
+        .map_err(|e| Failure(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(serde_json::json!({ "token": token })))
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TokenInput {
+    token: String,
+}
+/// Owner only: forget one credential, for example when a window closes.
+async fn revoke_credential(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<TokenInput>,
+) -> Result<Json<bool>, Failure> {
+    host_grant(&headers)?;
+    host.credentials
+        .lock()
+        .map_err(|_| forbidden())?
+        .revoke(&id, &input.token);
+    Ok(Json(true))
+}
+/// Owner only: the paths under an enabled third-party extension's `client/`.
+async fn client_files(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<String>>, Failure> {
+    host_grant(&headers)?;
+    let files = host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .client_files(&id)
+        .ok_or_else(forbidden)?;
+    Ok(Json(files.keys().cloned().collect()))
+}
+/// Owner only: one file under an enabled third-party extension's `client/`, for the shell to
+/// post into the extension's runtime frame. Bundled client parts ship with the UI instead.
+async fn client_file(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path((id, path)): Path<(String, String)>,
+) -> Result<impl IntoResponse, Failure> {
+    host_grant(&headers)?;
+    let files = host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .client_files(&id)
+        .ok_or_else(forbidden)?;
+    let bytes = files
+        .get(&format!("{}{path}", package::CLIENT_DIR))
+        .ok_or_else(|| Failure(StatusCode::NOT_FOUND, "No such client file".into()))?
+        .clone();
+    Ok((
+        [
+            ("content-type", "application/octet-stream"),
+            ("x-content-type-options", "nosniff"),
+            ("content-security-policy", "sandbox; default-src 'none'"),
+        ],
+        bytes,
+    ))
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EventsInput {
+    tokens: Vec<String>,
+}
+/// Owner only: one event stream for every running client part. Each event names its
+/// recipients (`{"to": [ids], "data": ...}`), chosen by the same manifest rules as the rest
+/// of the API; an extension whose credential is revoked drops out at the next event.
+async fn extension_events(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Json(input): Json<EventsInput>,
+) -> Result<impl IntoResponse, Failure> {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    host_grant(&headers)?;
+    if input.tokens.len() > 64 {
+        return Err(Failure(
+            StatusCode::BAD_REQUEST,
+            "Too many credentials".into(),
+        ));
+    }
+    let receiver = host.events.subscribe();
+    let tokens = input.tokens;
+    let stream = futures_util::stream::unfold(
+        (host, receiver, tokens, true),
+        |(host, mut receiver, tokens, first)| async move {
+            if first {
+                let event = Event::default().event("ready").data("{}");
+                return Some((
+                    Ok::<_, std::convert::Infallible>(event),
+                    (host, receiver, tokens, false),
+                ));
+            }
+            loop {
+                let (name, data) = match receiver.recv().await {
+                    Ok((_, data)) if data.is_empty() => return None,
+                    Ok(event) => event,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        ("resync", "{}".to_string())
+                    }
+                    Err(_) => return None,
+                };
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(&data) else {
+                    continue;
+                };
+                let to = recipients(&host, &tokens, name, &value);
+                if to.is_empty() {
+                    continue;
+                }
+                let event = Event::default()
+                    .event(name)
+                    .data(serde_json::json!({ "to": to, "data": value }).to_string());
+                return Some((Ok(event), (host, receiver, tokens, false)));
+            }
+        },
+    );
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+/// Which of the extensions holding `tokens` may see a Host event
+/// (docs/extensions/ui-model.md, "Event stream").
+fn recipients(host: &Host, tokens: &[String], name: &str, data: &serde_json::Value) -> Vec<String> {
+    let Ok(credentials) = host.credentials.lock() else {
+        return Vec::new();
+    };
+    let Ok(extensions) = host.extensions.lock() else {
+        return Vec::new();
+    };
+    let states = extensions.list("");
+    let mut to: Vec<String> = Vec::new();
+    for token in tokens {
+        let Some((id, generation)) = credentials.resolve(token) else {
+            continue;
+        };
+        if extensions.generation(&id) != Some(generation) || to.contains(&id) {
+            continue;
+        }
+        let Some(state) = states.iter().find(|s| s.manifest.id == id) else {
+            continue;
+        };
+        let manifest = &state.manifest;
+        let has = |capability| manifest.capabilities.contains(&capability);
+        let allowed = match name {
+            "mail" => has(Capability::MessagesList),
+            "sync" | "ready" | "resync" => has(Capability::AccountRead),
+            "approval" => has(Capability::ApprovalsNotify),
+            "navigate" => data["target"]
+                .as_str()
+                .is_some_and(|target| manifest.navigation.iter().any(|n| n == target)),
+            "extension.settings" => data["id"] == id.as_str(),
+            "bus.request" => data["bus"] == id.as_str(),
+            "bus.event" => {
+                let topic = format!(
+                    "{}/{}",
+                    data["bus"].as_str().unwrap_or_default(),
+                    data["name"].as_str().unwrap_or_default()
+                );
+                data["bus"] == id.as_str()
+                    || (has(Capability::ExtensionsBus)
+                        && manifest
+                            .bus
+                            .as_ref()
+                            .is_some_and(|b| b.subscribe.contains(&topic)))
+            }
+            _ => false,
+        };
+        if allowed {
+            to.push(id);
+        }
+    }
+    to
+}
 async fn remove_extension(
     State(host): State<Host>,
     headers: HeaderMap,
@@ -539,60 +832,6 @@ async fn remove_extension(
         .remove(&id)
         .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
     Ok(Json(true))
-}
-async fn run_extension(
-    State(host): State<Host>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-    input: Result<Json<ExtensionRunInput>, JsonRejection>,
-) -> Result<Json<serde_json::Value>, Failure> {
-    host_grant(&headers)?;
-    let account = extension_account(&host, &headers)?;
-    let Json(input) =
-        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid extension action".into()))?;
-    let (epoch, module) = host
-        .extensions
-        .lock()
-        .map_err(|_| forbidden())?
-        .module(&id)
-        .ok_or_else(forbidden)?;
-    let assets = {
-        let extensions = host.extensions.lock().map_err(|_| forbidden())?;
-        if extensions.overlay(&id) {
-            Some(extensions.assets(&id).ok_or_else(forbidden)?)
-        } else {
-            None
-        }
-    };
-    let permit = host.execution.clone().try_acquire_owned().map_err(|_| {
-        Failure(
-            StatusCode::TOO_MANY_REQUESTS,
-            "Extensions busy; try again".into(),
-        )
-    })?;
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        sandbox::run_output(
-            &module,
-            &input.action,
-            Box::new(move |request| extension_service(&host, &id, &account, epoch, request)),
-            assets,
-        )
-        .map(Json)
-        .map_err(|_| {
-            Failure(
-                StatusCode::BAD_REQUEST,
-                "Extension failed or exceeded its limits".into(),
-            )
-        })
-    })
-    .await
-    .map_err(|_| {
-        Failure(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Extension runtime unavailable".into(),
-        )
-    })?
 }
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -632,7 +871,7 @@ fn extension_service(
         .extensions
         .lock()
         .map_err(|_| "Extension policy unavailable")?;
-    if !extensions.allows_guest(extension, account, request.operation, epoch) {
+    if !extensions.allows_generation(extension, account, request.operation, epoch) {
         return Err("Capability not granted".into());
     }
     if request.operation == Capability::MessagesSend
@@ -640,7 +879,7 @@ fn extension_service(
             .draft
             .as_ref()
             .is_some_and(|draft| draft.forward_of.is_some())
-        && !extensions.allows_guest(extension, account, Capability::MessagesRead, epoch)
+        && !extensions.allows_generation(extension, account, Capability::MessagesRead, epoch)
     {
         return Err("Capability not granted".into());
     }
@@ -709,7 +948,9 @@ fn extension_service(
                 .map_err(|_| "Mail delivery failed")?;
             serde_json::to_value(true)
         }
-        MessagesOrganize | AppNavigate | WindowOverlay | ExtensionsBus => {
+        MessagesOrganize | AppNavigate | ExtensionsBus | UiFrame | UiFrameRemote | UiCommands
+        | UiAppActions | UiToasts | UiContribute | ApprovalsNotify | ReleasesRead | AiText
+        | AiDecide | AiConfigure => {
             return Err("Capability not granted".into());
         }
     };
@@ -1569,10 +1810,11 @@ async fn approve_send(
 
 async fn get_extension_settings(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, Failure> {
-    host_grant(&headers)?;
+    own_or_owner(&host, &principal, &headers, &id)?;
     host.extensions
         .lock()
         .map_err(|_| forbidden())?
@@ -1582,11 +1824,12 @@ async fn get_extension_settings(
 }
 async fn put_extension_settings(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
     input: Result<Json<serde_json::Map<String, serde_json::Value>>, JsonRejection>,
 ) -> Result<Json<serde_json::Value>, Failure> {
-    host_grant(&headers)?;
+    own_or_owner(&host, &principal, &headers, &id)?;
     let Json(values) =
         input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid settings".into()))?;
     let result = host
@@ -1616,16 +1859,15 @@ mod extension_service_tests {
         let database = accounts.database();
         let mut extensions = extensions::Extensions::open(database.clone()).unwrap();
         extensions
-            .install(
-                &include_str!("../../../docs/extensions/examples/connection-panel/extension.toml")
-                    .replace(
-                        "capabilities = [\"account.read\"]",
-                        "capabilities = [\"account.read\", \"messages.send\"]",
-                    ),
-                wat::parse_str("(module (func (export \"run\")))").unwrap(),
-            )
+            .install(&extensions::tests::package(
+                &extensions::tests::EXAMPLE.replace(
+                    "capabilities = [\"account.read\"]",
+                    "capabilities = [\"account.read\", \"messages.send\"]",
+                ),
+                Some(wat::parse_str("(module (func (export \"run\")))").unwrap()),
+            ))
             .unwrap();
-        extensions.update("connection-panel", true).unwrap();
+        extensions.update("hello-pane", true).unwrap();
         let host = Host {
             events: tokio::sync::broadcast::channel(1).0,
             bus_replies: Default::default(),
@@ -1644,46 +1886,47 @@ mod extension_service_tests {
             origin: "http://127.0.0.1:4173".into(),
             execution: Arc::new(tokio::sync::Semaphore::new(2)),
             sync: Arc::default(),
+            credentials: Arc::default(),
         };
         let epoch = host
             .extensions
             .lock()
             .unwrap()
-            .module("connection-panel")
+            .service("hello-pane")
             .unwrap()
             .0;
-        assert!(host.extensions.lock().unwrap().allows_guest(
-            "connection-panel",
+        assert!(host.extensions.lock().unwrap().allows_generation(
+            "hello-pane",
             "demo",
             Capability::MessagesSend,
             epoch
         ));
-        assert!(!host.extensions.lock().unwrap().allows_guest(
-            "connection-panel",
+        assert!(!host.extensions.lock().unwrap().allows_generation(
+            "hello-pane",
             "demo",
             Capability::MessagesRead,
             epoch
         ));
         let forward = serde_json::json!({"operation":"messages.send", "draft":{"recipient":"a@example.test", "subject":"Forward", "body":"Hi", "forward_of":"welcome"}});
         assert_eq!(
-            extension_service(&host, "connection-panel", "demo", epoch, forward).unwrap_err(),
+            extension_service(&host, "hello-pane", "demo", epoch, forward).unwrap_err(),
             "Capability not granted"
         );
         assert_eq!(
             extension_service(
                 &host,
-                "connection-panel",
+                "hello-pane",
                 "demo",
                 epoch,
                 serde_json::json!({"operation":"settings.read"})
             )
             .unwrap(),
-            serde_json::json!({})
+            serde_json::json!({"greeting": "Hello"})
         );
         assert!(
             extension_service(
                 &host,
-                "connection-panel",
+                "hello-pane",
                 "demo",
                 epoch + 1,
                 serde_json::json!({"operation":"settings.read"})
@@ -1692,7 +1935,7 @@ mod extension_service_tests {
         );
         let valid = serde_json::json!({"operation":"account.read"});
         assert_eq!(
-            extension_service(&host, "connection-panel", "demo", epoch, valid.clone()).unwrap(),
+            extension_service(&host, "hello-pane", "demo", epoch, valid.clone()).unwrap(),
             false
         );
         for invalid in [
@@ -1702,17 +1945,15 @@ mod extension_service_tests {
             serde_json::json!({"operation":"messages.read", "id":"1"}),
             serde_json::json!({"operation":"messages.label", "label":{"name":"Work", "remove":false}}),
         ] {
-            assert!(extension_service(&host, "connection-panel", "demo", epoch, invalid).is_err());
+            assert!(extension_service(&host, "hello-pane", "demo", epoch, invalid).is_err());
         }
-        assert!(
-            extension_service(&host, "connection-panel", "other", epoch, valid.clone()).is_err()
-        );
+        assert!(extension_service(&host, "hello-pane", "other", epoch, valid.clone()).is_err());
         host.extensions
             .lock()
             .unwrap()
-            .update("connection-panel", false)
+            .update("hello-pane", false)
             .unwrap();
-        assert!(extension_service(&host, "connection-panel", "demo", epoch, valid).is_err());
+        assert!(extension_service(&host, "hello-pane", "demo", epoch, valid).is_err());
         let account = {
             let mut accounts = host.accounts.lock().unwrap();
             accounts.protect("a strong test password").unwrap();

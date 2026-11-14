@@ -1,7 +1,6 @@
 id = "composer"
 name = "Composer"
 api_version = 1
-slot = "composer"
 capabilities = ["extensions.bus", "drafts.read", "drafts.write", "messages.send", "messages.read"]
 description = "Write, reply, forward, and send mail with attachments; save drafts."
 author = "Colecto"

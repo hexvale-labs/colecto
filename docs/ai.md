@@ -138,7 +138,7 @@ that refresh; rules still apply.
 ## HTTP routes
 
 All under `/api/v1`, owner bearer only. Scoped API keys are refused by the
-authentication layer, and Wasm extensions never receive the HTTP path.
+authentication layer, and extension credentials cannot reach these routes.
 
 | Route | Caller (`x-colecto-extension`) | Purpose |
 | --- | --- | --- |

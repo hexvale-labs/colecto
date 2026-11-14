@@ -923,6 +923,7 @@ name = "colecto-host"
 version = "0.5.4"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "colecto-core",
  "colecto-extension-api",
  "colecto-package",

@@ -263,8 +263,8 @@ toast's left edge, under the icon.
 Notifications show above everything in the window, Settings and menus included: the region
 is a `popover="manual"` element in the browser's top layer. A modal dialog opened later
 (an account sheet, the install warning) goes above it, and the next notification raises the
-region over the dialog again. Where popovers are missing, the overlay's layer (1250) still
-keeps it above Settings.
+region over the dialog again. Where popovers are missing, its layer (1250) still keeps it
+above Settings.
 
 **New updates** (on by default) tells the owner once per version when a newer stable
 release is published, with a **View release** button that opens the release page (in the

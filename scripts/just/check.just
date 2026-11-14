@@ -19,9 +19,7 @@ native:
 # Check Rust formatting without modifying files.
 fmt:
     cargo fmt --all -- --check
-    cargo fmt --manifest-path docs/extensions/examples/oneko/Cargo.toml -- --check
 
 # Treat Clippy warnings as errors.
 lint:
     cargo clippy --all-targets --locked -- -D warnings
-    cargo clippy --manifest-path docs/extensions/examples/oneko/Cargo.toml --all-targets --locked -- -D warnings

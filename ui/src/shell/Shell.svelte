@@ -11,10 +11,11 @@
   import { setAccessToken } from '../lib/api';
   import { onMount, tick, untrack } from 'svelte';
   import { claimBack, goBack, settled } from '../lib/back';
-  import ExtensionPanel from '../ExtensionPanel.svelte';
+  import Surface from '../renderer/Surface.svelte';
+  import { runtimes } from '../runtime/runtimes.svelte';
   import DockArea, { type PaneInfo } from '../DockArea.svelte';
   import { activate as showPane, defaultLayout, dock, dockEdge, groupOf, parseLayout, reconcile, setVisible, type Edge, type Layout } from '../lib/layout';
-  import { aiExtension, mailExtensions } from '../extensions/registry';
+  import { aiExtension, mailExtensions, overlayExtensions } from '../extensions/registry';
   import ApiKeys from '../ApiKeys.svelte';
   import SendApprovals from '../SendApprovals.svelte';
   import ExtensionSettings from './ExtensionSettings.svelte';
@@ -47,7 +48,7 @@
   // Settings is a card over the workspace: the workspace stays mounted behind it, so opening it never closes a message or draft.
   let settingsOpen = $state(false);
   // Enabled extensions that declare settings each get a page, grouped by bundled or third-party.
-  let extensionPages = $derived(extensionStates.filter(e => e.enabled && e.manifest.settings?.length));
+  let extensionPages = $derived(extensionStates.filter(e => e.enabled && (e.manifest.settings?.length || (e.manifest.settings_page && e.manifest.client))));
   let currentExtension = $derived(extensionPages.find(e => `extension:${e.manifest.id}` === settingsPage));
   let settingsPage = $state<SettingsPage>('accounts');
   // On a phone Settings is a list of sections that opens one page at a time; wider, the list is
@@ -71,9 +72,17 @@
   let syncStatus = $state<Record<string, AccountSync>>({});
   let font = $state(DEFAULT_FONT);
   let textSize = $state(DEFAULT_TEXT_SIZE);
-  $effect(() => { void applyTypography(font, textSize); });
+  $effect(() => { void applyTypography(font, textSize).then(() => runtimes.refreshTheme()); });
   $effect(() => setBusAccount(accountId));
-  $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); });
+  $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); runtimes.refreshTheme(); });
+  // Client parts run while their extension is on, and always know the selected account.
+  $effect(() => { const states = extensionStates; untrack(() => runtimes.sync(states)); });
+  $effect(() => {
+    const account = accounts.find(item => item.id === accountId);
+    const summary = { id: accountId, name: account?.settings?.name ?? '', address: account?.settings?.address ?? '', connected, configured: account?.configured ?? false };
+    untrack(() => runtimes.setAccount(summary));
+  });
+  $effect(() => () => runtimes.stopAll());
   let accountsEnabled = $state<Record<string, boolean>>({});
   const isOn = (id: string) => accountOn(accountsEnabled, id);
   function savePreferences(input: PreferencesInput) {
@@ -203,7 +212,8 @@
   }
 
   // Panes are extension surfaces placed in docks. Hidden panes stay mounted, so moving or switching never loses a draft.
-  let thirdParty = $derived(extensionStates.filter(extension => !extension.bundled && extension.enabled && !extension.manifest.capabilities.includes('window.overlay')));
+  // Extensions that declare a pane get one; the shell draws its tab and chrome.
+  let thirdParty = $derived(extensionStates.filter(extension => extension.enabled && extension.manifest.pane && extension.manifest.client));
   let panes: PaneInfo[] = $derived([
     { id: 'mailbox', title: 'Mail', icon: 'inbox' }, { id: 'reader', title: 'Reader', icon: 'mail' },
     { id: 'accounts', title: 'Accounts', icon: 'account' },
@@ -215,7 +225,6 @@
   let layout = $derived(reconcile(savedLayout, panes.map(pane => pane.id)));
   let focus = $state('mailbox');
   let compact = $state(false);
-  let panelRuns = $state<Record<string, number>>({});
   let unsaved: Layout | null = null;
   let saving = false;
   function commitLayout(next: Layout) {
@@ -235,8 +244,7 @@
   function activate(pane: string) { focus = pane; commitLayout(showPane(layout, pane)); }
   function openPanel(id: string) {
     if (!leaveSettings()) return;
-    // Each explicit open runs the panel again, so it reflects permission changes.
-    panelRuns[id] = (panelRuns[id] ?? 0) + 1; activate(`ext:${id}`);
+    activate(`ext:${id}`);
   }
   const shownPane = (pane: string) => !!groupOf(layout, pane);
   const workspace: Workspace = { shown: shownPane, toggle: (pane, on) => commitLayout(setVisible(layout, pane, on)) };
@@ -329,7 +337,7 @@
     { id: 'layout-reset', name: 'Layout: Reset to default', run: () => commitLayout(defaultLayout()), disabled: settingsOpen || compact },
     ...accounts.filter(account => isOn(account.id)).map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
     ...currentTabs.map(tab => ({ id: `tab-${tab.id}`, name: `Open message: ${tab.subject}`, run: () => activateTab(tab) })),
-    ...extensionStates.filter(extension => !extension.bundled && extension.enabled && !extension.manifest.capabilities.includes('window.overlay')).map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => openPanel(extension.manifest.id) })),
+    ...thirdParty.map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => openPanel(extension.manifest.id) })),
     ...Object.keys(labels).map(name => ({ id: `label-${name}`, name: `Filter label: ${name}`, run: () => { navigate('Inbox'); if (!dirty && folder === 'Inbox' && !settingsOpen) labelFilter = name; } })),
     ...(view?.kind === 'draft' ? ['Save draft', ...(connected ? ['Send message'] : [])].map(name => ({ id: name, name, run: () => { document.querySelector<HTMLButtonElement>(`.composer [data-command="${name === 'Save draft' ? 'save' : 'send'}"]`)?.click(); } })) : []),
     ...(view?.kind === 'message' ? [{ id: 'close-tab', name: 'Close current message tab', run: () => { if (view?.kind === 'message') void closeTab(view.id); } }] : []),
@@ -548,6 +556,7 @@
 </script>
 
 <svelte:window onbeforeunload={beforeUnload} onkeydown={keyboard} />
+{#if notificationsOn}<overlayExtensions.notifications />{/if}
 <CommandRunner bind:this={runner} {commands} messages={Mailbox ? hits : []} scope={folder} onopen={(id) => void open(id)} onsearch={Mailbox ? searchFor : undefined} />
 {#snippet accountSwitcher(placement: 'above' | 'below')}
   <Select label="Current account" value={accountId} options={accountOptions} disabled={busy || !initialized} {placement} onchange={selectAccount}>
@@ -579,7 +588,8 @@
       {:else if pane === 'accounts'}<div class="account-pane">{@render accountSwitcher('above')}</div>
       {:else}
         {@const id = pane.slice(4)}
-        {#if panelRuns[id] || groupOf(layout, pane)?.active === pane}{#key `${accountId}:${id}:${panelRuns[id] ?? 0}`}<ExtensionPanel {id} account={accountId} onback={() => goBack() || activate('mailbox')} />{/key}{/if}
+        {@const runtime = runtimes.get(id)}
+        {#if runtime}<div class="extension-pane" role="region" aria-label={runtime.name}><Surface {runtime} surface="pane" /></div>{/if}
       {/if}
     {/snippet}
   </DockArea>{/if}
@@ -613,11 +623,16 @@
       <div class="settings-main" inert={phone && !settingsPageShown}>
         <header class="settings-head">
           {#if phone}<button class="icon-button" aria-label="Back to Settings" disabled={busy} onclick={() => goBack() || (settingsPageShown = false)}><Icon name="back" size={20} /></button>{/if}
-          <p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name ?? currentExtension?.manifest.name ?? 'Extension'}</strong></p>
+          <p class="settings-crumb"><span>Settings</span><span aria-hidden="true">/</span><strong>{current?.name ?? currentExtension?.manifest.settings_page?.title ?? currentExtension?.manifest.name ?? 'Extension'}</strong></p>
           {#if !phone}<button class="icon-button" aria-label="Close settings" title="Close  Esc" disabled={busy} onclick={closeSettings}><Icon name="close" size={16} /></button>{/if}
         </header>
         <div class="settings-page">
-          {#if settingsPage.startsWith('extension:')}{#if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
+          {#if settingsPage.startsWith('extension:')}
+            {@const runtime = currentExtension?.manifest.settings_page ? runtimes.get(currentExtension.manifest.id) : undefined}
+            {#if runtime && currentExtension?.manifest.settings_page}
+              <!-- An extension's own section, always labelled with who drew it. -->
+              <section class="settings-section" aria-labelledby="extension-page-title"><header class="section-head"><h2 id="extension-page-title">{currentExtension.manifest.settings_page.title}</h2><p class="extension-from">From {runtime.name}</p></header><Surface {runtime} surface="settings" /></section>
+            {:else if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
           {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} pane={{ shown: shownPane('accounts'), toggle: (on) => workspace.toggle('accounts', on) }} enabled={isOn} ontoggle={toggleAccount} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => busy = value} />
           {:else if settingsPage === 'mail'}<MailSettings {prefetch} onchange={(next) => savePreferences({ prefetch: next })} />
           {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} density={listDensity} {dateGroups} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences} onlist={savePreferences} />
@@ -639,7 +654,7 @@
 {#snippet aiSummary(slot: import('../lib/reader-slots').ReaderSlot)}<aiExtension.summary reader={slot} account={accountId} />{/snippet}
 {#snippet extensionNav(extension: import('../lib/api').ExtensionState)}
   {@const id = `extension:${extension.manifest.id}` as const}
-  <button class="nav-item" class:active={settingsPage === id} aria-current={settingsPage === id ? 'page' : undefined} title={navCollapsed && !phone ? extension.manifest.name : undefined} disabled={busy} onclick={() => settingsTab(id)}><span class="nav-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1).toUpperCase()}</span><span class="nav-label">{extension.manifest.name}</span><Icon name="next" /></button>
+  <button class="nav-item" class:active={settingsPage === id} aria-current={settingsPage === id ? 'page' : undefined} title={navCollapsed && !phone ? extension.manifest.name : undefined} disabled={busy} onclick={() => settingsTab(id)}><span class="nav-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1).toUpperCase()}</span><span class="nav-label">{extension.manifest.settings_page?.title ?? extension.manifest.name}</span><Icon name="next" /></button>
 {/snippet}
 {#snippet folderNav()}
 <nav class="folder-nav" aria-label="Mail folders">

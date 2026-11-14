@@ -146,7 +146,9 @@ mod tests {
         // No wildcard: a new capability fails to compile here until it is given a version.
         let for_extensions = |c: Capability| match c {
             ExtensionsBus | AccountRead | MessagesList | MessagesRead | DraftsList | DraftsRead
-            | DraftsWrite | MessagesSend | MessagesLabel | MessagesOrganize | WindowOverlay => true,
+            | DraftsWrite | MessagesSend | MessagesLabel | MessagesOrganize | UiFrame
+            | UiFrameRemote | UiCommands | UiAppActions | UiToasts | UiContribute
+            | ApprovalsNotify | ReleasesRead | AiText | AiDecide | AiConfigure => true,
             AppNavigate => false,
         };
         let all = [
@@ -160,7 +162,17 @@ mod tests {
             MessagesSend,
             MessagesLabel,
             MessagesOrganize,
-            WindowOverlay,
+            UiFrame,
+            UiFrameRemote,
+            UiCommands,
+            UiAppActions,
+            UiToasts,
+            UiContribute,
+            ApprovalsNotify,
+            ReleasesRead,
+            AiText,
+            AiDecide,
+            AiConfigure,
             AppNavigate,
         ];
         for capability in all.into_iter().filter(|&c| for_extensions(c)) {

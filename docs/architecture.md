@@ -14,16 +14,17 @@ locations, see the [documentation index](README.md#where-things-are).
 ## Layers
 
 ```
- ┌──────────────── Svelte UI ────────────────┐   ┌── third-party extensions ──┐
- │ shell + bundled extensions (trusted code) │   │ WebAssembly in wasmi       │
- └─────────────────────┬─────────────────────┘   └─────────────┬──────────────┘
-                       │ HTTP API (/api/v1), SSE events         │ Host bridge
- ┌─────────────────────▼────────────────────────────────────────▼─────────────┐
- │ Host: auth, extension policy and sandbox, API keys, approvals, MCP, prefs  │
- ├────────────────────────────────────────────────────────────────────────────┤
- │ Core services: accounts, credential vault, IMAP/SMTP/JMAP, drafts, labels, │
- │ snapshot cache, Turso storage                                              │
- └────────────────────────────────────────────────────────────────────────────┘
+ ┌─────────── Svelte UI (app origin, trusted) ───────────┐   ┌─ opaque-origin frames ─┐
+ │ shell (ui/src/shell), renderer, extension runtimes;    │◄─►│ extension client parts │
+ │ bundled extensions not yet moved: trusted Svelte       │   │ in Web Workers         │
+ └───────────────────────────┬────────────────────────────┘   └────────────────────────┘
+                             │ HTTP API (/api/v1), SSE events
+ ┌───────────────────────────▼────────────────────────────────────────────────────────┐
+ │ Host: auth, extension policy, credentials and service parts (wasmi), API keys, MCP │
+ ├────────────────────────────────────────────────────────────────────────────────────┤
+ │ Core services: accounts, credential vault, IMAP/SMTP/JMAP, drafts, labels,         │
+ │ snapshot cache, Turso storage                                                      │
+ └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Core services** (`colecto-core`) own accounts and credentials, receiving and
@@ -42,14 +43,18 @@ an extension never disables core services or recovery controls.
 version 1). They never touch credential stores, the database, unrestricted networking
 or Tauri commands directly. An extension holds every capability its manifest declares
 while enabled and none while disabled; the owner consents once, when installing.
-Bundled extensions are trusted Svelte code compiled into the app; third-party
-extensions run in a fuel- and memory-limited `wasmi` runtime without WASI and can
-only emit declarative views or overlay sprites. See the
-[extension contract](extensions/README.md). Rust guests can use the
-[Rust SDK](extensions/rust-sdk.md) instead of the raw imports.
+An extension's client part runs in a Web Worker inside an opaque-origin sandboxed frame,
+with no DOM and no network; it sends component trees that the shell's renderer draws,
+and reaches the API only through the shell, with its own credential that the Host checks
+on every call. An optional service part runs in a fuel- and memory-limited `wasmi`
+runtime without WASI. Bundled extensions are moving to that runtime one at a time; until
+then they run as trusted Svelte. See the [extension contract](extensions/README.md) and
+the [extension UI model](extensions/ui-model.md). Rust service parts can use the
+[Rust SDK](extensions/rust-sdk.md).
 
-Only bootstrapping, permission prompts, credential controls and recovery stay outside
-the extension composition.
+The app frame, docking workspace, account switcher, Settings, command runner, toasts,
+bootstrapping, permission prompts, credential controls and recovery are core UI
+(`ui/src/shell/` and `ui/src/`), not extensions.
 
 ## Mail
 

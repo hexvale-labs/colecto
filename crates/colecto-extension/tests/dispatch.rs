@@ -16,13 +16,12 @@ struct Reply {
 }
 colecto_extension::bus_request!(Shout => Reply, bus = "shouter", version = 1, name = "shout");
 
-fn panel(event: PanelEvent, cx: &mut Context) -> Result<View> {
-    let title = match event {
-        PanelEvent::Open => "Opened".to_string(),
-        PanelEvent::Action(label) => label,
-    };
-    let count = cx.messages()?.len();
-    Ok(View::new(title, format!("{count} messages")).action("Refresh"))
+/// Answers with how many messages the account has, through a service call.
+#[derive(Serialize, Deserialize)]
+struct Count {}
+colecto_extension::bus_request!(Count => usize, bus = "shouter", version = 1, name = "count");
+fn count(_: Count, cx: &mut Context) -> Result<usize> {
+    Ok(cx.messages()?.len())
 }
 
 fn shout(request: Shout, cx: &mut Context) -> Result<Reply> {
@@ -48,8 +47,7 @@ fn opened(event: reader::v1::MessageOpened, cx: &mut Context) -> Result<()> {
 }
 
 colecto_extension::export! {
-    panel: panel,
-    requests: [shout],
+    requests: [shout, count],
     events: [opened],
 }
 
@@ -67,25 +65,19 @@ fn host(log: std::rc::Rc<std::cell::RefCell<Vec<Value>>>) -> TestHost {
 }
 
 #[test]
-fn panel_views_and_errors() {
-    let log = Default::default();
-    let mut host = host(std::rc::Rc::clone(&log));
-    let view = host.run(colecto_main, "open").unwrap();
+fn service_calls_and_their_errors() {
+    let count =
+        json!({"event": "bus.request", "from": "x", "name": "v1/count", "payload": {}}).to_string();
+    let mut host = host(Default::default());
     assert_eq!(
-        view,
-        json!({"title": "Opened", "text": "2 messages", "actions": ["Refresh"]})
+        host.run(colecto_main, &count),
+        Some(json!({"bus": {"response": 2}}))
     );
-    assert_eq!(
-        host.run(colecto_main, "Refresh").unwrap()["title"],
-        "Refresh"
-    );
-
+    // A denied service call means no answer; the caller sees null.
     let mut denied = TestHost::new(|_| Err("Capability not granted".into()));
-    let view = denied.run(colecto_main, "open").unwrap();
-    assert_eq!(
-        (view["title"].as_str(), view["text"].as_str()),
-        (Some("Error"), Some("Capability not granted"))
-    );
+    assert_eq!(denied.run(colecto_main, &count), None);
+    // Anything that is not a bus action does nothing.
+    assert_eq!(host.run(colecto_main, "open"), None);
 }
 
 #[test]

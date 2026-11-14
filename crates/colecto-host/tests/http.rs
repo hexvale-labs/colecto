@@ -386,8 +386,46 @@ async fn extension_controls_are_host_only_and_revocation_reaches_service_boundar
     }
 }
 
+/// The example extension's package, with an optional service module and asset.
+fn example_package(service: Option<&[u8]>, asset: bool) -> Vec<u8> {
+    let mut package = colecto_host::package::Package {
+        manifest: include_str!("../../../docs/extensions/examples/hello-pane/manifest.toml")
+            .replace(
+                "client = ",
+                if service.is_some() {
+                    "service = \"service.wasm\"\nclient = "
+                } else {
+                    "client = "
+                },
+            ),
+        ..Default::default()
+    };
+    package.client.insert(
+        "client/main.js".into(),
+        include_bytes!("../../../docs/extensions/examples/hello-pane/client/main.js").to_vec(),
+    );
+    package.service = service.map(|bytes| ("service.wasm".into(), bytes.to_vec()));
+    if asset {
+        package
+            .assets
+            .insert("cat.png".into(), b"\x89PNG\r\n\x1a\n".to_vec());
+    }
+    colecto_host::package::write(&package)
+}
+async fn body(response: axum::response::Response) -> serde_json::Value {
+    serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap()
+}
+fn as_extension(mut request: Request<Body>, token: &str) -> Request<Body> {
+    request.headers_mut().insert(
+        "authorization",
+        format!("Colecto-Extension {token}").parse().unwrap(),
+    );
+    request.headers_mut().remove("x-colecto-extension");
+    request
+}
+
 #[tokio::test]
-async fn installed_wasm_uses_consented_account_grants_and_cannot_call_http_services() {
+async fn client_credentials_reach_only_declared_capabilities_and_die_with_their_generation() {
     let dir = tempfile::tempdir().unwrap();
     let authority = "127.0.0.1:4173";
     let origin = "http://127.0.0.1:4173";
@@ -399,14 +437,7 @@ async fn installed_wasm_uses_consented_account_grants_and_cannot_call_http_servi
         )
     };
     let router = authenticated(create()).await;
-    let manifest =
-        include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");
-    let module = wat::parse_str(include_str!(
-        "../../../docs/extensions/examples/connection-panel/module.wat"
-    ))
-    .unwrap();
-    let package =
-        serde_json::json!({"package": colecto_host::package::write(manifest, &module)}).to_string();
+    let package = serde_json::json!({"package": example_package(None, false)}).to_string();
     let response = router
         .clone()
         .oneshot(request(
@@ -419,19 +450,70 @@ async fn installed_wasm_uses_consented_account_grants_and_cannot_call_http_servi
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let run = "/api/v1/extensions/connection-panel/run";
+    let mint = |router: axum::Router| async move {
+        let response = router
+            .oneshot(request(
+                "POST",
+                "/api/v1/extensions/hello-pane/credential",
+                "host",
+                origin,
+                "{}",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        body(response).await["token"].as_str().unwrap().to_owned()
+    };
+    let token = mint(router.clone()).await;
+    // The client file the shell posts into the runtime frame, for the owner only.
+    let file = "/api/v1/extensions/hello-pane/client/main.js";
     let response = router
         .clone()
-        .oneshot(request("POST", run, "host", origin, r#"{"action":"open"}"#))
+        .oneshot(request("GET", file, "host", origin, ""))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    for (policy, text) in [(r#"{"enabled":true}"#, "Account disconnected")] {
+    assert_eq!(
+        response.headers()["content-type"],
+        "application/octet-stream"
+    );
+    for (method, path, status) in [
+        // account.read is declared.
+        ("GET", "/api/v1/account", 200),
+        ("GET", "/api/v1/extensions/hello-pane/settings", 200),
+        // messages.list is not.
+        ("GET", "/api/v1/messages/cache?folder=inbox", 403),
+        ("GET", "/api/v1/extensions/reader/settings", 403),
+        // Owner controls are out of reach, whatever headers the call carries.
+        ("GET", "/api/v1/extensions", 403),
+        ("GET", "/api/v1/preferences", 403),
+        ("GET", "/api/v1/accounts", 403),
+        ("POST", "/api/v1/extensions/hello-pane/credential", 403),
+        ("GET", file, 403),
+        ("POST", "/api/v1/extensions/events", 403),
+    ] {
+        let mut call = as_extension(request(method, path, "host", origin, "{}"), &token);
+        call.headers_mut()
+            .insert("x-colecto-extension", "host".parse().unwrap());
+        let response = router.clone().oneshot(call).await.unwrap();
+        assert_eq!(response.status().as_u16(), status, "{method} {path}");
+    }
+    let response = router
+        .clone()
+        .oneshot(as_extension(
+            request("GET", "/api/v1/account", "", origin, ""),
+            &"0".repeat(64),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    // Disabling revokes; enabling again does not bring the old credential back.
+    for policy in [r#"{"enabled":false}"#, r#"{"enabled":true}"#] {
         let response = router
             .clone()
             .oneshot(request(
                 "POST",
-                "/api/v1/extensions/connection-panel",
+                "/api/v1/extensions/hello-pane",
                 "host",
                 origin,
                 policy,
@@ -441,51 +523,31 @@ async fn installed_wasm_uses_consented_account_grants_and_cannot_call_http_servi
         assert_eq!(response.status(), StatusCode::OK);
         let response = router
             .clone()
-            .oneshot(request(
-                "POST",
-                run,
-                "host",
-                origin,
-                r#"{"action":"Refresh"}"#,
+            .oneshot(as_extension(
+                request("GET", "/api/v1/account", "", origin, ""),
+                &token,
             ))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body: serde_json::Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
-        assert!(body["text"].as_str().unwrap().contains(text));
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
-    let response = router
-        .clone()
-        .oneshot(request(
-            "GET",
-            "/api/v1/account",
-            "connection-panel",
-            origin,
-            "",
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let token = mint(router.clone()).await;
     drop(router);
+    // Tokens live in memory only: a restarted Host knows none of them.
     let restarted = authenticated(create()).await;
     let response = restarted
         .clone()
-        .oneshot(request("POST", run, "host", origin, r#"{"action":"open"}"#))
+        .oneshot(as_extension(
+            request("GET", "/api/v1/account", "", origin, ""),
+            &token,
+        ))
         .await
         .unwrap();
-    let body: serde_json::Value =
-        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
-    assert!(
-        body["text"]
-            .as_str()
-            .unwrap()
-            .contains("Account disconnected")
-    );
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let response = restarted
         .oneshot(request(
             "DELETE",
-            "/api/v1/extensions/connection-panel",
+            "/api/v1/extensions/hello-pane",
             "host",
             origin,
             "{}",
@@ -499,8 +561,11 @@ async fn authenticated(router: axum::Router) -> axum::Router {
     let bearer = owner_bearer(&router).await;
     router.layer(axum::middleware::from_fn(
         move |mut req: axum::extract::Request, next: axum::middleware::Next| {
-            req.headers_mut()
-                .insert("authorization", bearer.parse().unwrap());
+            // Requests that bring their own credential (a client part's) keep it.
+            if !req.headers().contains_key("authorization") {
+                req.headers_mut()
+                    .insert("authorization", bearer.parse().unwrap());
+            }
             async move { next.run(req).await }
         },
     ))
@@ -1034,7 +1099,7 @@ async fn assets_require_owner_host_identity_and_enabled_package() {
     ))
     .await;
     let origin = "http://127.0.0.1:4173";
-    let package = include_bytes!("../../../docs/extensions/examples/oneko.colectoext");
+    let package = example_package(Some(&wat::parse_str("(module)").unwrap()), true);
     let response = router
         .clone()
         .oneshot(request(
@@ -1042,35 +1107,12 @@ async fn assets_require_owner_host_identity_and_enabled_package() {
             "/api/v1/extensions",
             "host",
             origin,
-            &serde_json::json!({"package":package.as_slice()}).to_string(),
+            &serde_json::json!({"package":package}).to_string(),
         ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    // The SDK-built guest must run in the real sandbox: within fuel, reading its
-    // settings, and producing overlay output the Host accepts.
-    let frame = serde_json::json!({"action": serde_json::json!({"event":"frame","time_ms":0,"pointer":{"x":400,"y":16,"inside":true},"viewport":{"width":800,"height":600},"state":""}).to_string()});
-    let response = router
-        .clone()
-        .oneshot(request(
-            "POST",
-            "/api/v1/extensions/oneko/run",
-            "host",
-            origin,
-            &frame.to_string(),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let output: serde_json::Value =
-        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
-    let item = &output["overlay"]["items"][0];
-    assert_eq!(
-        (item["image"].as_str(), item["x"].as_f64()),
-        (Some("oneko.png"), Some(10.0))
-    );
-    assert!(output["state"].as_str().unwrap().contains("\"tick\":1.0"));
-    let path = "/api/v1/extensions/oneko/assets/oneko.png";
+    let path = "/api/v1/extensions/hello-pane/assets/cat.png";
     let response = router
         .clone()
         .oneshot(request("GET", path, "host", origin, ""))
@@ -1093,7 +1135,7 @@ async fn assets_require_owner_host_identity_and_enabled_package() {
         .clone()
         .oneshot(request(
             "POST",
-            "/api/v1/extensions/oneko",
+            "/api/v1/extensions/hello-pane",
             "host",
             origin,
             r#"{"enabled":false}"#,
@@ -1117,29 +1159,15 @@ async fn binary_package_uploads_exceed_the_default_json_body_limit() {
         dir.path().into(),
     ))
     .await;
-    let manifest =
-        include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");
-    // A large custom section is valid Wasm and exercises upload/storage without expensive guest work.
-    let mut module = wat::parse_str("(module (func (export \"run\")))").unwrap();
-    let size = 1024 * 1024 + 1;
-    module.push(0);
-    let mut remaining = size;
-    loop {
-        let byte = (remaining & 127) as u8;
-        remaining >>= 7;
-        module.push(byte | if remaining > 0 { 128 } else { 0 });
-        if remaining == 0 {
-            break;
-        }
-    }
-    module.push(0);
-    module.resize(module.len() + size - 1, 0);
-    // Store the ZIP rather than deflating this intentionally repetitive custom section.
+    let manifest = include_str!("../../../docs/extensions/examples/hello-pane/manifest.toml");
+    // A large client file exercises upload and storage without any guest work.
+    let script = vec![b' '; 1024 * 1024 + 1];
+    // Store the ZIP rather than deflating this intentionally repetitive file.
     let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     use std::io::Write;
     for (name, data) in [
         ("manifest.toml", manifest.as_bytes()),
-        ("module.wasm", module.as_slice()),
+        ("client/main.js", script.as_slice()),
     ] {
         archive
             .start_file(

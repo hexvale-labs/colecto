@@ -28,16 +28,18 @@ fn invoke(host: &Host, caller: &str, account: &str, bus: &str, input: &Input) ->
     if depth >= 4 {
         return Value::Null;
     }
-    let (module, bundled) = {
+    let service = {
         let Ok(extensions) = host.extensions.lock() else {
             return Value::Null;
         };
         if !extensions.allows(bus, account, Capability::ExtensionsBus) {
             return Value::Null;
         }
-        (extensions.module(bus), extensions.bundled_identity(bus))
+        extensions.service(bus)
     };
-    if bundled {
+    // Without a service part, the extension answers in its client part (or, for bundled
+    // extensions not yet on the runtime, its Svelte code), through the event stream.
+    let Some((epoch, module)) = service else {
         let Ok(id) = api_keys::random() else {
             return Value::Null;
         };
@@ -63,9 +65,6 @@ fn invoke(host: &Host, caller: &str, account: &str, bus: &str, input: &Input) ->
             replies.remove(&id);
         }
         return result;
-    }
-    let Some((epoch, module)) = module else {
-        return Value::Null;
     };
     DEPTH.with(|d| d.set(depth + 1));
     let result = deliver(
@@ -88,16 +87,15 @@ fn deliver(
     action: Value,
 ) -> Result<Value, String> {
     let (host, id, account) = (host.clone(), id.to_owned(), account.to_owned());
-    sandbox::run_output(
+    sandbox::invoke(
         module,
         &action.to_string(),
         Box::new(move |request| extension_service(&host, &id, &account, epoch, request)),
-        None,
     )
 }
 async fn publish(host: Host, bus: String, account: String, input: Input) {
     let topic = format!("{bus}/{}", input.name);
-    let (targets, bundled) = host
+    let (targets, clients) = host
         .extensions
         .lock()
         .map(|e| {
@@ -109,20 +107,20 @@ async fn publish(host: Host, bus: String, account: String, input: Input) {
                         .as_ref()
                         .is_some_and(|b| b.subscribe.contains(&topic))
             });
-            let mut bundled = false;
+            let mut clients = false;
             let mut targets = Vec::new();
             for s in subscribers {
-                if s.bundled {
-                    bundled = true;
-                } else if let Some((epoch, module)) = e.module(&s.manifest.id) {
+                if let Some((epoch, module)) = e.service(&s.manifest.id) {
                     targets.push((s.manifest.id, epoch, module));
+                } else {
+                    clients = true;
                 }
             }
-            (targets, bundled)
+            (targets, clients)
         })
         .unwrap_or_default();
-    // Bundled subscribers live in the UI; they receive the event over the event stream.
-    if bundled {
+    // Subscribers without a service part live in the UI and receive it over the event stream.
+    if clients {
         let _ = host.events.send((
             "bus.event",
             json!({"bus":bus,"name":input.name,"payload":input.payload}).to_string(),
@@ -159,7 +157,7 @@ pub(super) fn service(
         .extensions
         .lock()
         .map_err(|_| "Policy unavailable")?
-        .allows_guest(extension, account, Capability::ExtensionsBus, epoch)
+        .allows_generation(extension, account, Capability::ExtensionsBus, epoch)
     {
         return Err("Capability not granted".into());
     }
@@ -168,18 +166,6 @@ pub(super) fn service(
         payload: request["payload"].clone(),
     };
     validate(&input)?;
-    let api_version = host
-        .extensions
-        .lock()
-        .map_err(|_| "Policy unavailable")?
-        .api_version(extension)
-        .unwrap_or(0);
-    if !crate::package::manifest::bus_name_allowed(&input.name, api_version) {
-        return Err(format!(
-            "Bus names with '.' need api_version = {} or later",
-            crate::package::manifest::DOTTED_BUS_NAMES_SINCE
-        ));
-    }
     if request["operation"] == "bus.emit" {
         tokio::runtime::Handle::current().spawn(publish(
             host.clone(),
@@ -198,24 +184,32 @@ pub(super) fn service(
         ))
     }
 }
-fn identity(host: &Host, headers: &HeaderMap) -> Result<(String, String), Failure> {
-    let account = grant(host, &Principal::Owner, headers, Capability::ExtensionsBus)?;
-    Ok((
-        headers
+/// Who is calling: a client part's credential names its extension; bundled Svelte that is not
+/// on the runtime yet names itself in `x-colecto-extension` behind the owner bearer.
+fn identity(
+    host: &Host,
+    principal: &Principal,
+    headers: &HeaderMap,
+) -> Result<(String, String), Failure> {
+    let account = grant(host, principal, headers, Capability::ExtensionsBus)?;
+    let caller = match principal {
+        Principal::Extension(token) => caller_extension(host, token)?.0,
+        _ => headers
             .get("x-colecto-extension")
             .and_then(|v| v.to_str().ok())
             .ok_or_else(forbidden)?
             .into(),
-        account,
-    ))
+    };
+    Ok((caller, account))
 }
 pub(super) async fn request_http(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path(bus): Path<String>,
     Json(input): Json<Input>,
 ) -> Result<Json<Value>, Failure> {
-    let (caller, account) = identity(&host, &headers)?;
+    let (caller, account) = identity(&host, &principal, &headers)?;
     validate(&input).map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
     let permit = host
         .execution
@@ -232,10 +226,11 @@ pub(super) async fn request_http(
 }
 pub(super) async fn emit_http(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Json(input): Json<Input>,
 ) -> Result<Json<Value>, Failure> {
-    let (caller, account) = identity(&host, &headers)?;
+    let (caller, account) = identity(&host, &principal, &headers)?;
     validate(&input).map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
     let task = tokio::spawn(publish(host, caller, account, input));
     let _ = tokio::time::timeout(Duration::from_millis(1500), task).await;
@@ -248,11 +243,12 @@ pub(super) struct Reply {
 }
 pub(super) async fn reply_http(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Json(reply): Json<Reply>,
 ) -> Result<Json<Value>, Failure> {
-    let (caller, _) = identity(&host, &headers)?;
+    let (caller, _) = identity(&host, &principal, &headers)?;
     if serde_json::to_vec(&reply.data)
         .map_err(|_| forbidden())?
         .len()
@@ -300,6 +296,7 @@ mod tests {
                 origin: "http://localhost".into(),
                 execution: Arc::new(tokio::sync::Semaphore::new(2)),
                 sync: Arc::default(),
+                credentials: Arc::default(),
             },
             dir,
         )
@@ -318,12 +315,15 @@ mod tests {
             )
         };
         let source = format!(
-            "id = {id:?}\nname = 'Test'\ndescription = 'Test'\nauthor = 'Test'\napi_version = 1\nslot = 'panel'\ncapabilities = ['extensions.bus']"
+            "id = {id:?}\nname = 'Test'\ndescription = 'Test'\nauthor = 'Test'\napi_version = 1\nclient = 'client/main.js'\ncapabilities = ['extensions.bus']"
         );
         host.extensions
             .lock()
             .unwrap()
-            .install(&source, wat::parse_str(module).unwrap())
+            .install(&extensions::tests::package(
+                &source,
+                Some(wat::parse_str(module).unwrap()),
+            ))
             .unwrap();
     }
     #[tokio::test]
@@ -352,6 +352,7 @@ mod tests {
         headers.insert("x-colecto-account", "demo".parse().unwrap());
         let _ = reply_http(
             State(host.clone()),
+            axum::Extension(Principal::Owner),
             headers.clone(),
             Path(id.clone()),
             Json(Reply {
@@ -366,6 +367,7 @@ mod tests {
         for data in ["first", "second"] {
             let _ = reply_http(
                 State(host.clone()),
+                axum::Extension(Principal::Owner),
                 headers.clone(),
                 Path(id.clone()),
                 Json(Reply { data: json!(data) }),

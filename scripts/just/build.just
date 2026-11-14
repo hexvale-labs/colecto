@@ -21,11 +21,7 @@ release: ui
     cargo build -p colecto-app -p colecto-host --release --locked
     @echo "Release binaries: $(cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')/release/"
 
-# Build the small installable example extension package from its WAT source.
+# Build the installable example extension package (a JavaScript client part).
 extension:
     cargo run -p colecto-host --example build-extension --locked
 
-# Build, check and package the third-party pixel cat example with `cargo colecto`.
-oneko:
-    rustup target add wasm32-unknown-unknown
-    cargo run --locked -p cargo-colecto -- build --locked --manifest-path docs/extensions/examples/oneko/Cargo.toml --out docs/extensions/examples/oneko.colectoext

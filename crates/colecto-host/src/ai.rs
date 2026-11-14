@@ -1147,6 +1147,7 @@ mod tests {
             origin: "http://localhost".into(),
             execution: Arc::new(tokio::sync::Semaphore::new(2)),
             sync: Arc::default(),
+            credentials: Arc::default(),
         };
         (host, dir)
     }

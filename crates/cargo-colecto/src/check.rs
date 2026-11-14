@@ -16,6 +16,12 @@ const IMPORTS: [&str; 3] = ["action", "request", "emit"];
 
 pub fn check(manifest: &ExtensionManifest, module: &Module) -> Report {
     let mut report = Report::default();
+    if manifest.service.is_none() {
+        report.errors.push(
+            "the crate builds the service part, so extension.toml needs service = \"service.wasm\""
+                .into(),
+        );
+    }
     for (from, name) in &module.imports {
         if from != "colecto" || !IMPORTS.contains(&name.as_str()) {
             report.errors.push(format!(
@@ -36,21 +42,6 @@ pub fn check(manifest: &ExtensionManifest, module: &Module) -> Report {
         );
         return report;
     };
-
-    let slot = manifest.slot.as_str();
-    let has = |kind| handlers.iter().any(|h| h.kind == kind);
-    for (kind, entry) in [(Kind::Panel, "panel"), (Kind::Overlay, "overlay")] {
-        if has(kind) && slot != entry {
-            report.errors.push(format!(
-                "export! registers `{entry}:`, but extension.toml has slot = \"{slot}\""
-            ));
-        }
-    }
-    if !has(Kind::Panel) && !has(Kind::Overlay) {
-        report.warnings.push(format!(
-            "export! registers no `{slot}:` function, so the {slot} will show an error when displayed"
-        ));
-    }
 
     let bus_handlers = handlers
         .iter()
@@ -123,7 +114,7 @@ mod tests {
 
     fn manifest(extra: &str) -> ExtensionManifest {
         colecto_package::manifest::parse(&format!(
-            "id = \"counter\"\nname = \"Counter\"\ndescription = \"Counts.\"\nauthor = \"Me\"\napi_version = 1\nslot = \"panel\"\n{extra}"
+            "id = \"counter\"\nname = \"Counter\"\ndescription = \"Counts.\"\nauthor = \"Me\"\napi_version = 1\nclient = \"client/main.js\"\nservice = \"service.wasm\"\n{extra}"
         ))
         .unwrap()
     }
@@ -151,7 +142,6 @@ mod tests {
             "{BUS}[bus]\nsubscribe = [\"reader/v1/message_opened\"]"
         ));
         let module = module(&[
-            (Kind::Panel, "", ""),
             (Kind::Request, "counter", "v1/count"),
             (Kind::Event, "reader", "v1/message_opened"),
         ]);
@@ -163,10 +153,7 @@ mod tests {
         let manifest = manifest(&format!("{BUS}[bus]\nsubscribe = [\"inbox/v1/selected\"]"));
         let report = check(
             &manifest,
-            &module(&[
-                (Kind::Panel, "", ""),
-                (Kind::Event, "reader", "v1/message_opened"),
-            ]),
+            &module(&[(Kind::Event, "reader", "v1/message_opened")]),
         );
         assert_eq!(report.errors.len(), 2, "{report:?}");
         assert!(report.errors[0].contains("does not subscribe to it"));
@@ -180,11 +167,8 @@ mod tests {
     }
 
     #[test]
-    fn reports_slot_capability_bus_and_import_mistakes() {
-        let mut module = module(&[
-            (Kind::Overlay, "", ""),
-            (Kind::Request, "someone-else", "v1/x"),
-        ]);
+    fn reports_capability_bus_and_import_mistakes() {
+        let mut module = module(&[(Kind::Request, "someone-else", "v1/x")]);
         module
             .imports
             .push(("wasi_snapshot_preview1".into(), "fd_write".into()));
@@ -193,7 +177,6 @@ mod tests {
         let expected = [
             "wasi_snapshot_preview1.fd_write",
             "memory",
-            "slot = \"panel\"",
             "`extensions.bus`",
             "own bus `counter`",
         ];
@@ -201,10 +184,12 @@ mod tests {
         for (error, fragment) in report.errors.iter().zip(expected) {
             assert!(error.contains(fragment), "{error}");
         }
-        assert!(
-            report.warnings.is_empty(),
-            "an overlay function counts as a slot function"
-        );
+        assert!(report.warnings.is_empty());
+        let without = colecto_package::manifest::parse(
+            "id = \"counter\"\nname = \"Counter\"\ndescription = \"Counts.\"\nauthor = \"Me\"\napi_version = 1\nclient = \"client/main.js\"\ncapabilities = []\n",
+        )
+        .unwrap();
+        assert!(check(&without, &self::module(&[])).errors[0].contains("service = "));
     }
 
     #[test]

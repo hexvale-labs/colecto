@@ -65,7 +65,6 @@
       - text: Capabilities · all accounts
       - list:
         - listitem: Talk to other extensions by name
-        - listitem: Draw over the workspace
     - group "AI":
       - text: ""
       - paragraph: Bundled By Colecto · API 1

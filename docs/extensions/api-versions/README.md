@@ -8,7 +8,7 @@ source of truth. The pages here explain it; where they disagree, the JSON wins.
 
 | Version | Between | Who numbers it | Where |
 | --- | --- | --- | --- |
-| **API version** | An extension and Colecto (manifest, capabilities, Wasm ABI, operations, limits) | Colecto, sequentially: 1, 2, 3, … | `api_version` in `extension.toml`; the registry |
+| **API version** | An extension and Colecto (manifest, capabilities, protocol, components, ABIs, operations, limits) | Colecto, sequentially: 1, 2, 3, … | `api_version` in the manifest; the registry |
 | **Bus version** | One extension and another (bus requests and events) | Each extension, any way it likes | The request or event name, such as `v1/add_button` |
 
 They are not interchangeable. This page covers API versions. For bus versions see
@@ -59,8 +59,9 @@ ships a version sets its `released_in`.
    breaking (see [EXAMPLE.md](EXAMPLE.md) for what counts).
 2. Gate the new behaviour on the caller's `api_version` in the Host where an older
    extension could otherwise observe it. Capabilities are gated automatically from the
-   registry; anything else needs a check, such as `DOTTED_BUS_NAMES_SINCE` in
-   `crates/colecto-package/src/manifest.rs`.
+   registry; anything else needs a check in the Host or the renderer, for example on a
+   manifest field in `crates/colecto-package/src/manifest.rs` or a component in
+   `ui/src/runtime/protocol.ts`.
 3. Write `API-<n>.md` (or `API-<n>-breaking.md`) from [EXAMPLE.md](EXAMPLE.md).
 4. Update the contract pages that own the topic ([extension contract](../README.md),
    [guide](../guide.md), [Rust SDK](../rust-sdk.md)) and say which version adds it.
@@ -73,6 +74,9 @@ Do not move every bundled extension and example to the newest version. Versions 
 so old targets keep working. Raise `api_version` only in the extension that uses the
 new feature. For example, if a new capability is only needed by the composer, change
 only `ui/src/extensions/composer/extension.toml`.
+
+The registry was reset to a single API 1 when the extension system was rebuilt; see
+[API 1](API-1.md).
 
 ## Changing signatures
 

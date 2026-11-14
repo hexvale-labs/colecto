@@ -7,7 +7,6 @@
   import { onMount } from 'svelte';
   import Shell from './shell/Shell.svelte';
   import Toasts from './shell/Toasts.svelte';
-  import OverlayLayer from './OverlayLayer.svelte';
   import { capabilityLabel } from './lib/capabilities';
   import FilePick from './FilePick.svelte';
   import InstallWarning from './InstallWarning.svelte';
@@ -148,12 +147,12 @@
       <h3 class="group-label">Installed</h3>
       <div class="settings-list">
         {#each extensions as extension (extension.manifest.id)}
-          {@const pane = extension.bundled ? bundledPanes[extension.manifest.id] : extension.manifest.slot === 'panel' && !extension.manifest.capabilities.includes('window.overlay') ? `ext:${extension.manifest.id}` : undefined}
+          {@const pane = extension.bundled ? bundledPanes[extension.manifest.id] : extension.manifest.pane ? `ext:${extension.manifest.id}` : undefined}
           <fieldset class="extension-card" class:off={!extension.enabled} disabled={busy || loading}>
             <legend class="sr-only">{extension.manifest.name}</legend>
             <div class="extension-top">
               <span class="extension-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1)}</span>
-              <div class="extension-title"><strong class="extension-name" aria-hidden="true">{extension.manifest.name}</strong><p class="meta"><span class="tag" class:trusted={extension.bundled}>{extension.bundled ? 'Bundled' : 'Third-party · Wasm'}</span>By {extension.manifest.author} · API {extension.manifest.api_version}</p></div>
+              <div class="extension-title"><strong class="extension-name" aria-hidden="true">{extension.manifest.name}</strong><p class="meta"><span class="tag" class:trusted={extension.bundled}>{extension.bundled ? 'Bundled' : 'Third-party'}</span>By {extension.manifest.author} · API {extension.manifest.api_version}</p></div>
               <label class="switch"><input type="checkbox" checked={extension.enabled} disabled={!!extension.discontinued} onchange={(event) => void update(extension, event.currentTarget.checked)} /><span class="sr-only">Enabled for all accounts</span></label>
             </div>
             <p class="extension-description">{extension.manifest.description}</p>
@@ -192,4 +191,3 @@
 {#if warning}{@const file = warning}<InstallWarning capabilities={requested} name={file.name} oncancel={() => warning = null} onconfirm={() => void install(file)} />{/if}
 
 <Toasts />
-<OverlayLayer {extensions} {account} />

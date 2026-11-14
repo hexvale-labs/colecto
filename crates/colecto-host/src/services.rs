@@ -216,10 +216,11 @@ pub(crate) async fn handle(
     if !path.starts_with("/api/v1/") {
         return next.run(request).await;
     }
-    let owner = matches!(
-        request.extensions().get::<crate::api_keys::Principal>(),
-        Some(crate::api_keys::Principal::Owner)
-    );
+    let principal = request.extensions().get::<crate::api_keys::Principal>();
+    let owner = matches!(principal, Some(crate::api_keys::Principal::Owner));
+    // A client part's credential was minted by the daemon this Host forwards to (the mint
+    // route is an owner route, so it went there too); it passes through unchanged.
+    let extension = matches!(principal, Some(crate::api_keys::Principal::Extension(_)));
     // Installing units and choosing the upstream are owner actions, whatever reaches this layer.
     if (path == "/api/v1/upstream" || path.starts_with("/api/v1/services")) && !owner {
         return StatusCode::FORBIDDEN.into_response();
@@ -279,10 +280,10 @@ pub(crate) async fn handle(
     let upstream = control.upstream.lock().unwrap().clone();
     if let Some(upstream) = upstream {
         // Scoped API keys must never be promoted to the daemon owner.
-        if !owner {
+        if !owner && !extension {
             return StatusCode::FORBIDDEN.into_response();
         }
-        return proxy(&control.client, upstream, request)
+        return proxy(&control.client, upstream, request, extension)
             .await
             .unwrap_or_else(|e| {
                 (
@@ -324,20 +325,23 @@ async fn proxy(
     client: &reqwest::Client,
     upstream: Upstream,
     mut request: Request,
+    keep_authorization: bool,
 ) -> Result<Response, String> {
-    let token = zeroize::Zeroizing::new(
-        crate::runtime::read_token(&upstream.token_file).map_err(|e| e.to_string())?,
-    );
     strip_hop_headers(request.headers_mut());
     for name in ["proxy-authorization", "cookie", "host", "origin"] {
         request.headers_mut().remove(name);
     }
-    request.headers_mut().insert(
-        "authorization",
-        format!("Bearer {}", token.as_str())
-            .parse()
-            .map_err(|_| "Invalid token")?,
-    );
+    if !keep_authorization {
+        let token = zeroize::Zeroizing::new(
+            crate::runtime::read_token(&upstream.token_file).map_err(|e| e.to_string())?,
+        );
+        request.headers_mut().insert(
+            "authorization",
+            format!("Bearer {}", token.as_str())
+                .parse()
+                .map_err(|_| "Invalid token")?,
+        );
+    }
     let mut response = match upstream.address.strip_prefix("unix:") {
         Some(path) => proxy_socket(Path::new(path), request).await?,
         None => proxy_remote(client, &upstream.address, request).await?,
