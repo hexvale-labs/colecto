@@ -20,7 +20,8 @@ async function start(page: Page, size: keyof typeof widths, scheme: typeof schem
   await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
   await page.clock.setFixedTime(now);
   // Keep the event stream quiet so no toast or refresh lands mid-capture, and hide what other
-  // specs leave behind in the shared Host: accounts, installed extensions, keys and requests.
+  // specs leave behind in the shared Host: accounts, installed extensions, keys, requests and
+  // credential protection.
   await page.route('**/api/v1/events', route => route.fulfill({ status: 204 }));
   await page.route('**/api/v1/accounts', async route => {
     if (route.request().method() !== 'GET') return route.fallback();
@@ -34,6 +35,7 @@ async function start(page: Page, size: keyof typeof widths, scheme: typeof schem
   });
   await page.route('**/api/v1/api-keys', route => route.request().method() === 'GET' ? route.fulfill({ json: [] }) : route.fallback());
   await page.route('**/api/v1/send-requests', route => route.fulfill({ json: [] }));
+  await page.route('**/api/v1/security', route => route.request().method() === 'GET' ? route.fulfill({ json: { protected: false, locked: false, cleanup_pending: false } }) : route.fallback());
   await page.goto('/');
   await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
