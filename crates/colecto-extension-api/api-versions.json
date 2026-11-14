@@ -24,14 +24,14 @@
     {
       "version": 2,
       "breaking": false,
-      "released_in": null,
+      "released_in": "v0.5.4",
       "capabilities": [],
       "changes": []
     },
     {
       "version": 3,
       "breaking": false,
-      "released_in": null,
+      "released_in": "v0.5.4",
       "capabilities": [],
       "changes": [
         "Bus request and event names may contain '.', for example v0.1.2/add_button."
