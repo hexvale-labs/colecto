@@ -1,0 +1,9 @@
+- /children: deep-equal
+- dialog "Settings":
+  - banner:
+    - button "Back to Settings"
+  - region "Send approvals":
+    - heading "Send approvals" [level=2]
+    - paragraph: /Automation cannot send until you approve the exact message below\. Requests expire after \d+ minutes, and any change needs a new request\./
+    - button "Refresh"
+    - paragraph: Nothing waiting for you. Automation is behaving.

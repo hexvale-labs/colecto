@@ -1,0 +1,78 @@
+- /children: deep-equal
+- dialog "Settings":
+  - banner:
+    - button "Back to Settings"
+  - region "Extensions":
+    - heading "Extensions" [level=2]
+    - paragraph: Enabled extensions have every capability they declare, on every account. Changes apply to new requests and are kept across restarts.
+    - heading "Install an extension" [level=3]
+    - paragraph:
+      - text: Pick or drop a
+      - code: .colectoext
+      - text: package. You review what it asks for before anything is installed. Author names are self-reported, not verified.
+    - group "Install extension":
+      - text: ""
+      - button "Extension package"
+      - text: /Extension package \.colectoext, up to \d+ MiB Browse/
+      - button "Install" [disabled]
+    - heading "Installed" [level=3]
+    - group "Mailbox":
+      - text: ""
+      - paragraph: Bundled By Colecto · API 1
+      - checkbox "Enabled for all accounts" [checked]
+      - text: Enabled for all accounts
+      - paragraph: Browse messages and saved drafts for the selected account.
+      - checkbox "Show in the workspace" [checked]
+      - text: Show in the workspace Capabilities · all accounts
+      - list:
+        - listitem: Talk to other extensions by name
+        - listitem: Read account connection status
+        - listitem: Organize messages
+        - listitem: List messages
+        - listitem: List drafts
+    - group "Message reader":
+      - text: ""
+      - paragraph: Bundled By Colecto · API 1
+      - checkbox "Enabled for all accounts" [checked]
+      - text: Enabled for all accounts
+      - paragraph: Read messages, including sandboxed HTML and attachments.
+      - checkbox "Show in the workspace" [checked]
+      - text: Show in the workspace Capabilities · all accounts
+      - list:
+        - listitem: Talk to other extensions by name
+        - listitem: Organize messages
+        - listitem: Read messages and attachments
+        - listitem: Manage message labels
+    - group "Composer":
+      - text: ""
+      - paragraph: Bundled By Colecto · API 1
+      - checkbox "Enabled for all accounts" [checked]
+      - text: Enabled for all accounts
+      - paragraph: Write, reply, forward, and send mail with attachments; save drafts.
+      - text: Capabilities · all accounts
+      - list:
+        - listitem: Talk to other extensions by name
+        - listitem: Read drafts
+        - listitem: Create and edit drafts
+        - listitem: Send mail
+        - listitem: Read messages and attachments
+    - group "Notifications":
+      - text: ""
+      - paragraph: Bundled By Colecto · API 1
+      - checkbox "Enabled for all accounts" [checked]
+      - text: Enabled for all accounts
+      - paragraph: New mail and delivery approval notifications.
+      - text: Capabilities · all accounts
+      - list:
+        - listitem: Talk to other extensions by name
+        - listitem: Draw over the workspace
+    - group "AI":
+      - text: ""
+      - paragraph: Bundled By Colecto · API 1
+      - checkbox "Enabled for all accounts" [checked]
+      - text: Enabled for all accounts
+      - paragraph: Optional summaries, drafted replies and automatic labels using AI services you configure. Off until you turn it on in Settings → AI.
+      - text: Capabilities · all accounts
+      - list:
+        - listitem: Read messages and attachments
+        - listitem: List messages

@@ -1,0 +1,29 @@
+- /children: deep-equal
+- dialog "Settings":
+  - navigation "Settings sections":
+    - heading "Settings" [level=1]
+    - button "Collapse the section list" [expanded]
+    - group "Built-in":
+      - text: ""
+      - button "Accounts"
+      - button "Mail"
+      - button "Appearance"
+      - button "Notifications"
+      - button "Privacy"
+      - button "Connection"
+      - button "Extensions"
+      - button "AI"
+      - button "API keys"
+      - button "Send approvals"
+  - banner:
+    - paragraph:
+      - text: Settings
+      - strong: Privacy
+    - button "Close settings"
+  - region "Privacy":
+    - heading "Privacy" [level=2]
+    - paragraph: Choose what Colecto fetches from other servers when you open a message.
+    - heading "Load remote images automatically" [level=3]
+    - paragraph: Senders can use remote images to see when and where you open their mail. When this is off, each message asks first.
+    - checkbox "Load remote images automatically"
+    - text: Load remote images automatically

@@ -47,7 +47,10 @@ The runtime accepts binary Wasm, not JavaScript, Svelte, HTML, arbitrary URLs or
 WASI applications. Third-party UI currently contributes **panels and overlays**; replacing the
 bundled mailbox, reader, composer or shell with a Wasm package is not supported.
 Those bundled components remain explicitly registered trusted Svelte code, with
-TOML manifests in `ui/src/extensions/<id>/extension.toml`. They initially receive their
+TOML manifests in `ui/src/extensions/<id>/extension.toml`. The app frame, docking
+workspace, account switcher, Settings, command runner and toast surface are core UI in
+`ui/src/shell/` and cannot be turned off; the `notifications` extension decides what to
+announce and shows it on that core surface. They initially receive their
 manifest permissions. Account and credential protection, extension consent and
 failure recovery remain trusted Host controls.
 
@@ -131,9 +134,11 @@ platform testing; this runner does not claim mobile parity.
 
 ## Workspace panes
 
-Bundled `inbox`, `reader` and `accounts` extensions and every enabled third-party
-`panel` each get a pane in the workspace. Settings → Extensions turns an extension on
-or off and, for those with a pane, chooses whether it shows in the workspace. A newly
+Bundled `inbox` and `reader` extensions and every enabled third-party `panel` each get a
+pane in the workspace, next to the core Accounts pane (the account switcher), which is
+shell UI, not an extension: hide it from its tab's menu or Settings → Accounts →
+**Accounts pane**. Settings → Extensions turns an extension on or off and, for those
+with a pane, chooses whether it shows in the workspace. A newly
 installed panel joins the reader's group once enabled; drag its tab anywhere from
 there. The layout and hidden panes are owner preferences stored by the Host. Panes
 are never told where they are placed, so they must work at any size.

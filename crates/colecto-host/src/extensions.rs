@@ -50,11 +50,9 @@ const MAX_POLICY_BYTES: u64 = 4 * 1024 * 1024;
 impl Extensions {
     pub fn bundled() -> Self {
         let manifests: Vec<ExtensionManifest> = [
-            include_str!("../../../ui/src/extensions/mail-shell/extension.toml"),
             include_str!("../../../ui/src/extensions/inbox/extension.toml"),
             include_str!("../../../ui/src/extensions/reader/extension.toml"),
             include_str!("../../../ui/src/extensions/composer/extension.toml"),
-            include_str!("../../../ui/src/extensions/accounts/extension.toml"),
             include_str!("../../../ui/src/extensions/notifications/extension.toml"),
             include_str!("../../../ui/src/extensions/ai/extension.toml"),
         ]
@@ -89,7 +87,21 @@ impl Extensions {
             "extensions",
             || empty,
             |bytes| {
-                let policy: Policy = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+                let mut policy: Policy =
+                    serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+                // Bundled extensions that became core UI (`mail-shell`, `accounts`) may still be
+                // listed as disabled; forget them instead of refusing to start.
+                let known: HashSet<&str> = extensions
+                    .manifests
+                    .iter()
+                    .map(|m| m.id.as_str())
+                    .chain(policy.packages.iter().map(|p| p.manifest.id.as_str()))
+                    .collect();
+                let disabled = std::mem::take(&mut policy.disabled);
+                policy.disabled = disabled
+                    .into_iter()
+                    .filter(|id| known.contains(id.as_str()))
+                    .collect();
                 extensions.check(&policy)?;
                 Ok(policy)
             },
@@ -601,6 +613,23 @@ mod tests {
         ] {
             assert!(parse_manifest(&invalid).is_err());
         }
+    }
+    #[test]
+    fn extensions_that_became_core_ui_are_forgotten() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        let old = Policy {
+            version: 1,
+            disabled: ["mail-shell", "accounts", "ai"].map(String::from).into(),
+            _obsolete_grants: serde_json::Value::Null,
+            packages: vec![],
+        };
+        crate::store::save(&database, "extensions", &old).unwrap();
+        let extensions = Extensions::open(database).unwrap();
+        assert_eq!(
+            extensions.policy.disabled,
+            HashSet::from(["ai".to_string()])
+        );
     }
     #[test]
     fn install_enables_declared_access_everywhere_and_disable_revokes() {

@@ -424,6 +424,6 @@ mod tests {
         DEPTH.with(|d| d.set(0));
         let request =
             json!({"operation":"bus.request","bus":"answer","name":"v1/test","payload":null});
-        assert!(service(&host, "mail-shell", "demo", 0, request).is_err());
+        assert!(service(&host, "ai", "demo", 0, request).is_err());
     }
 }

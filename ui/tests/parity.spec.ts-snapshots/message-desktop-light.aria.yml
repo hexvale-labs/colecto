@@ -1,0 +1,73 @@
+- /children: deep-equal
+- banner:
+  - link "Colecto, go to Inbox":
+    - /url: /
+  - button "Commands": Search mail or run a command
+  - button "Settings"
+- region "Mail group":
+  - tablist "Panes in this group":
+    - tab "Mail" [selected]
+  - button "Arrange Mail"
+- region "Accounts group":
+  - tablist "Panes in this group":
+    - tab "Accounts" [selected]
+  - button "Arrange Accounts"
+- region "Reader group":
+  - tablist "Panes in this group":
+    - tab "Reader" [selected]
+  - navigation "Open messages":
+    - button "A small plan for the weekend" [pressed]
+    - button "Close A small plan for the weekend"
+  - button "Arrange Reader"
+- separator "Resize the panes above and below"
+- separator "Resize the panes on either side"
+- tabpanel "Mail":
+  - search:
+    - text: Search Inbox
+    - searchbox "Search Inbox"
+  - button "Compose"
+  - navigation "Mail folders":
+    - button "Inbox"
+    - button "Drafts"
+    - button "Sent"
+  - group "Filter by label":
+    - textbox "New label"
+    - button "Create label" [disabled]
+  - region "Inbox messages":
+    - heading "Inbox" [level=1]
+    - heading "November" [level=3]
+    - button "The Colecto team Nov 7 A quieter place for your mail Welcome to Colecto. A little space to read, think, and write. This inbox contains sample mail, so you can explore without connecting an account. Open a message, start a draft, and make yourself at home. Saved drafts stay on this computer, even after you restart the demo. The Colecto team":
+      - text: The Colecto team
+      - time: Nov 7
+      - text: A quieter place for your mail Welcome to Colecto. A little space to read, think, and write. This inbox contains sample mail, so you can explore without connecting an account. Open a message, start a draft, and make yourself at home. Saved drafts stay on this computer, even after you restart the demo. The Colecto team
+    - button "Maya Chen Nov 6 A small plan for the weekend Hey, I found a little bookshop by the river. Coffee, a walk, and no particular agenda? Let me know what you think. Maya" [pressed]:
+      - text: Maya Chen
+      - time: Nov 6
+      - text: A small plan for the weekend Hey, I found a little bookshop by the river. Coffee, a walk, and no particular agenda? Let me know what you think. Maya
+    - 'button "Studio North Nov 5 Notes from our last conversation A few things to keep close: • Make room for the work that matters. • Keep the defaults simple. • Leave things better than you found them. See you next week."':
+      - text: Studio North
+      - time: Nov 5
+      - text: "Notes from our last conversation A few things to keep close: • Make room for the work that matters. • Keep the defaults simple. • Leave things better than you found them. See you next week."
+    - 'button "Alex Rivera Nov 4 Plain text, with a little character Hello 世界 👋 Mail should be readable, whatever language you write in. This is text, not a button: <button>Do not click</button> And this is just text too: <script>alert(''hello'')</script> Alex"':
+      - text: Alex Rivera
+      - time: Nov 4
+      - text: "Plain text, with a little character Hello 世界 👋 Mail should be readable, whatever language you write in. This is text, not a button: <button>Do not click</button> And this is just text too: <script>alert('hello')</script> Alex"
+    - text: /Updated \d+:\d+ AM/
+    - button "Refresh"
+- tabpanel "Accounts":
+  - button "Current account": Demo account Local sample mail
+- tabpanel "Reader":
+  - region "Message reader":
+    - text: Inbox
+    - group "Respond":
+      - button "Reply"
+      - button "Reply all"
+      - button "Forward"
+    - button "Copy message text": Copy
+    - article:
+      - heading "A small plan for the weekend" [level=2]
+      - strong: Maya Chen
+      - text: maya@example.test
+      - time: /Friday, November 6, \d+/
+      - text: Hey, I found a little bookshop by the river. Coffee, a walk, and no particular agenda? Let me know what you think. Maya
+- region "Notifications"

@@ -1,0 +1,70 @@
+- /children: deep-equal
+- dialog "Settings":
+  - navigation "Settings sections":
+    - heading "Settings" [level=1]
+    - button "Collapse the section list" [expanded]
+    - group "Built-in":
+      - text: ""
+      - button "Accounts"
+      - button "Mail"
+      - button "Appearance"
+      - button "Notifications"
+      - button "Privacy"
+      - button "Connection"
+      - button "Extensions"
+      - button "AI"
+      - button "API keys"
+      - button "Send approvals"
+  - banner:
+    - paragraph:
+      - text: Settings
+      - strong: Notifications
+    - button "Close settings"
+  - region "Notifications":
+    - heading "Notifications" [level=2]
+    - paragraph: Colecto tells you about new mail, automation waiting for your approval and new releases. Notifications show over everything in the window, Settings included.
+    - heading "Show notifications" [level=3]
+    - paragraph: Turn every in-app and desktop notification on or off.
+    - checkbox "Show notifications" [checked]
+    - text: Show notifications
+    - group "Notify me about":
+      - text: ""
+      - heading "New mail" [level=3]
+      - paragraph: When a message arrives in any connected account.
+      - checkbox "New mail" [checked]
+      - text: New mail
+      - heading "Send approvals" [level=3]
+      - paragraph: When automation asks to send a message. Approve or reject it from the notification.
+      - checkbox "Send approvals" [checked]
+      - text: Send approvals
+      - heading "New updates" [level=3]
+      - paragraph: When a newer Colecto release is published. Off means Colecto never checks.
+      - checkbox "New updates" [checked]
+      - text: New updates
+    - group "Delivery":
+      - text: ""
+      - heading "Desktop notifications" [level=3]
+      - paragraph: Also alert your desktop, but only while Colecto is in the background.
+      - checkbox "Desktop notifications"
+      - text: Desktop notifications
+      - heading "Position" [level=3]
+      - paragraph: Where notifications appear in the window.
+      - group "Notification position":
+        - text: ""
+        - radio "Top left"
+        - text: Top left
+        - radio "Top center" [checked]
+        - text: Top center
+        - radio "Top right"
+        - text: Top right
+        - radio "Right"
+        - text: Right
+        - radio "Bottom right"
+        - text: Bottom right
+        - radio "Bottom center"
+        - text: Bottom center
+        - radio "Bottom left"
+        - text: Bottom left
+        - radio "Left"
+        - text: Left
+      - button "Show a test notification"

@@ -222,20 +222,14 @@ test('waits for restored account before allowing compose', async ({ page }) => {
   await expect(page.getByRole('region', { name: 'Draft editor' }).getByText('remembered@example.test', { exact: true })).toBeVisible();
 });
 
-test('extension controls expose TOML metadata and recover a disabled mail workspace', async ({ page }) => {
+test('extension controls expose TOML metadata, and the workspace itself is not an extension', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
-  page.on('dialog', dialog => dialog.accept());
   await openExtensions(page);
-  const shell = page.getByRole('group', { name: 'Mail workspace' });
-  await expect(shell.getByText('By Colecto · API 1')).toBeVisible();
-  await shell.getByRole('checkbox').uncheck();
-  await page.getByRole('button', { name: 'Back to mail', exact: true }).click();
-  await expect(page.getByText('Mail workspace disabled. Open Extensions to restore it.')).toBeVisible();
-  await openExtensions(page);
-  await shell.getByRole('checkbox').check();
-  await page.getByRole('button', { name: 'Back to mail', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Mailbox' }).getByText('By Colecto · API 1')).toBeVisible();
+  // The mail workspace and the account switcher are core UI: nothing here turns them off.
+  await expect(page.getByRole('group', { name: 'Mail workspace' })).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Account switcher' })).toHaveCount(0);
 });
 
 test('install consent enables all capabilities and settings keep them read-only', async ({ page }) => {
@@ -442,17 +436,30 @@ test('owner reviews the complete immutable automation snapshot on a phone and se
 
 
 test('notifications can be disabled while the mail workspace keeps working', async ({ page }) => {
+  let mail = false;
+  // One new-mail event per page load, sent once the shell listens.
+  await page.route('**/api/v1/events', async route => {
+    if (mail) return route.fulfill({ status: 204 });
+    mail = true;
+    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeEnabled();
+    return route.fulfill({ status: 200, contentType: 'text/event-stream', body: `event: mail\ndata: ${JSON.stringify({ account: 'demo', ids: ['n1', 'n2'] })}\n\n` });
+  });
   await page.goto('/');
+  await expect(page.getByRole('status', { name: '2 new messages' })).toBeVisible();
   await openExtensions(page);
   const toggle = page.getByRole('group', { name: 'Notifications', exact: true }).getByRole('checkbox', { name: 'Enabled for all accounts' });
   await toggle.uncheck();
   await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-  await expect(page.locator('section.toasts')).toHaveCount(0);
+  mail = false;
+  await page.reload();
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+  await expect.poll(() => mail).toBe(true);
+  // The toast surface is core UI and stays; the extension that decides what to announce is off.
+  await expect(page.locator('section.toasts')).toHaveCount(1);
+  await expect(page.getByRole('status', { name: '2 new messages' })).toHaveCount(0);
   await openExtensions(page);
   await toggle.check();
   await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-  await expect(page.locator('section.toasts')).toHaveCount(1);
 });
 
 test('pending attachment reads reserve limits and block sending, and failures remain visible', async ({ page }) => {

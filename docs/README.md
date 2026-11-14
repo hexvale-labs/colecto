@@ -56,7 +56,8 @@ Start with the page that matches what you want to do:
 | `crates/colecto-host/` | The mail service: HTTP API, auth, extension policy and Wasm sandbox, MCP; binaries `colecto-host`, `colecto-daemon`, `colecto-mcp` |
 | `crates/colecto-app/` | Tauri app; runs the mail service in-process and embeds the UI |
 | `crates/colecto-native/` | Tauri plugin for the mobile app: Android back gestures, press sounds and haptics (Kotlin, Swift) |
-| `ui/src/` | Svelte app shell, settings screens and shared components |
+| `ui/src/` | Svelte app (`App.svelte`), settings screens and shared components |
+| `ui/src/shell/` | Core UI: app frame, docking workspace, account switcher, Settings card, toast surface |
 | `ui/src/extensions/<id>/` | Bundled extensions: Svelte code next to its `extension.toml` |
 | `ui/src/lib/` | API client, layout, navigation, layer (z-index) registry and helpers |
 | `ui/tests/` | Playwright specs (`*.spec.ts`) and Bun tests (`*.test.mjs`) |

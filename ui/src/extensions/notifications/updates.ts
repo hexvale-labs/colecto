@@ -2,7 +2,7 @@
 // The Host asks GitHub (the UI's content security policy only allows its own origin) and caches
 // the answer; with update notifications off, nothing asks at all.
 import { hostService } from '../../lib/api';
-import { notify } from './store.svelte';
+import { notify } from '../../shell/toasts.svelte';
 
 export async function checkForUpdate() {
   const saved = await hostService.preferences();
