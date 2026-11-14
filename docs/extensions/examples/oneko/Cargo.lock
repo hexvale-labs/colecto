@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "colecto-extension"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "colecto-extension-sys",
  "serde",
@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "colecto-extension-sys"
-version = "0.5.3"
+version = "0.5.4"
 
 [[package]]
 name = "itoa"

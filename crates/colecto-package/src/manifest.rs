@@ -1,23 +1,65 @@
 //! `extension.toml` / `manifest.toml` rules, shared by the Host and `cargo colecto`.
 use crate::MAX_MANIFEST;
-use colecto_extension_api::{API_VERSION, Capability, ExtensionManifest};
+use colecto_extension_api::{
+    ApiSupport, Capability, ExtensionManifest, api_support, capability_since, latest_api_version,
+};
 
-/// A bus request or event name: 1–64 bytes of lowercase ASCII, digits, `-`, `_` and `/`.
+/// The API version that first allows `.` in bus names, as in `v0.1.2/add_button`.
+pub const DOTTED_BUS_NAMES_SINCE: u32 = 3;
+
+/// A bus request or event name: 1–64 bytes of lowercase ASCII, digits, `-`, `_`, `.` and
+/// `/`. Names with `.` also need [`DOTTED_BUS_NAMES_SINCE`]; see [`bus_name_allowed`].
 pub fn valid_bus_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name
             .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-_/".contains(&b))
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-_./".contains(&b))
+}
+
+/// [`valid_bus_name`] for an extension that targets `api_version`.
+pub fn bus_name_allowed(name: &str, api_version: u32) -> bool {
+    valid_bus_name(name) && (api_version >= DOTTED_BUS_NAMES_SINCE || !name.contains('.'))
+}
+
+/// Why this build cannot run an extension that targets `api_version`, or `None` if it can.
+pub fn unsupported(api_version: u32) -> Option<String> {
+    explain(api_version, api_support(api_version))
+}
+
+/// The message for an extension that targets `api_version` with the given support.
+pub fn explain(api_version: u32, support: ApiSupport) -> Option<String> {
+    match support {
+        ApiSupport::Supported => None,
+        ApiSupport::Discontinued(release) => Some(format!(
+            "This extension uses extension API {api_version}, which Colecto stopped supporting in {release}."
+        )),
+        ApiSupport::Newer => Some(format!(
+            "This extension needs extension API {api_version}, but this Colecto supports up to API {}. Update Colecto to use it.",
+            latest_api_version()
+        )),
+        ApiSupport::Unknown => Some("Unsupported extension API version".into()),
+    }
 }
 
 /// Parses and checks a manifest against the rules shared by bundled and third-party
-/// extensions.
+/// extensions, including that this build supports its API version.
 pub fn parse(source: &str) -> Result<ExtensionManifest, String> {
+    let manifest = parse_any_version(source)?;
+    match unsupported(manifest.api_version) {
+        Some(error) => Err(error),
+        None => Ok(manifest),
+    }
+}
+
+/// [`parse`], but also accepting API versions this build discontinued, so installed
+/// packages that target one can still be listed and removed.
+pub fn parse_any_version(source: &str) -> Result<ExtensionManifest, String> {
     let manifest: ExtensionManifest = toml::from_str(source).map_err(|e| e.to_string())?;
     colecto_extension_api::validate_settings(&manifest.settings)?;
-    if manifest.api_version != API_VERSION {
-        return Err("Unsupported extension API version".into());
+    let version = manifest.api_version;
+    if let ApiSupport::Newer | ApiSupport::Unknown = api_support(version) {
+        return Err(unsupported(version).unwrap_or_default());
     }
     if manifest.id.is_empty()
         || !manifest
@@ -50,9 +92,19 @@ pub fn parse(source: &str) -> Result<ExtensionManifest, String> {
     } else if manifest.z_index.is_some() {
         return Err("z_index requires window.overlay".into());
     }
-    for (index, capability) in manifest.capabilities.iter().enumerate() {
-        if manifest.capabilities[..index].contains(capability) {
+    for (index, &capability) in manifest.capabilities.iter().enumerate() {
+        if manifest.capabilities[..index].contains(&capability) {
             return Err("Duplicate capability".into());
+        }
+        if capability_since(capability).is_none_or(|since| since > version) {
+            let name = toml::Value::try_from(capability)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            return Err(match capability_since(capability) {
+                Some(since) => format!("{name} needs api_version = {since} or later"),
+                None => format!("{name} is not available to extensions"),
+            });
         }
     }
     if let Some(bus) = &manifest.bus {
@@ -66,7 +118,7 @@ pub fn parse(source: &str) -> Result<ExtensionManifest, String> {
                         || !bus
                             .bytes()
                             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-                        || !valid_bus_name(name)
+                        || !bus_name_allowed(name, version)
                 })
             })
         {
@@ -77,8 +129,9 @@ pub fn parse(source: &str) -> Result<ExtensionManifest, String> {
 }
 
 /// The extra rules for third-party (Wasm) packages.
+/// Like [`parse_any_version`], it accepts discontinued API versions.
 pub fn validate(manifest: &ExtensionManifest) -> Result<(), String> {
-    parse(&toml::to_string(manifest).map_err(|e| e.to_string())?)?;
+    parse_any_version(&toml::to_string(manifest).map_err(|e| e.to_string())?)?;
     // Guests can only emit declarative panels or sprites.
     if !["panel", "overlay"].contains(&manifest.slot.as_str()) {
         return Err("Wasm extensions require slot = panel or overlay".into());

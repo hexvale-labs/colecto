@@ -1,0 +1,41 @@
+{
+  "versions": [
+    {
+      "version": 1,
+      "breaking": false,
+      "released_in": "v0.1.0",
+      "capabilities": [
+        "extensions.bus",
+        "account.read",
+        "messages.list",
+        "messages.read",
+        "drafts.list",
+        "drafts.read",
+        "drafts.write",
+        "messages.send",
+        "messages.label",
+        "messages.organize",
+        "window.overlay"
+      ],
+      "changes": [
+        "The first extension contract: manifest, Wasm ABI (colecto.action, colecto.request, colecto.emit), capabilities, panels, overlays, owner settings and the extension bus. It changed in place during alpha."
+      ]
+    },
+    {
+      "version": 2,
+      "breaking": false,
+      "released_in": "v0.5.4",
+      "capabilities": [],
+      "changes": []
+    },
+    {
+      "version": 3,
+      "breaking": false,
+      "released_in": "v0.5.4",
+      "capabilities": [],
+      "changes": [
+        "Bus request and event names may contain '.', for example v0.1.2/add_button."
+      ]
+    }
+  ]
+}
