@@ -57,7 +57,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Mobile feel: system back and predictive back, press sounds and haptics, compact/medium/expanded layouts, phone Settings | Done; real-device validation pending |
 | Android: UnifiedPush from a self-hosted daemon (Web Push, no foreground service) | Next |
 | Android: optional foreground service for local accounts without a daemon | Next |
-| Signed macOS and iOS builds | Later (needs an Apple developer account) |
+| macOS and iOS release builds (removed from CI: unsigned, doubled CI time, no device to test on) | Later (needs an Apple device and developer account) |
 | Several users on one daemon | Later |
 | Synchronizing state between devices | Later |
 

@@ -82,11 +82,15 @@ See the [roadmap](docs/roadmap.md) for status.
 
 To build and run from a checkout instead, see [development](docs/development.md).
 
-Release CI also builds macOS DMGs and iOS IPAs, but these are experimental Apple
-artifacts, not supported platforms. The DMGs are not Developer ID signed or
-notarized; macOS may allow a manual Gatekeeper exception. Unsigned IPAs cannot run
-on a standard iPhone until signed and provisioned for the device. See
-[Apple build limitations](docs/install.md#experimental-apple-builds).
+### Apple builds
+
+Releases no longer include macOS or iOS builds. They may come back, but for now they
+do not make sense: they were not signed or notarized, so they were awkward to install
+at all, and building them made CI take about twice as long. The maintainer has no
+Apple device to test them on and no plans to buy one at the moment.
+
+The macOS and iOS code and setup are still in the repository, so you can build them
+yourself on a Mac; see [Apple builds](docs/install.md#apple-builds).
 
 ## Security
 

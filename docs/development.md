@@ -110,8 +110,8 @@ under `docs/performance/results/`. See [performance](performance/README.md).
 ## Icons
 
 Every app icon comes from `crates/colecto-app/icons/icon.svg`. `just icons`
-regenerates the desktop set; the release workflow generates the Android and iOS sets
-from the same file.
+regenerates the desktop set; the release workflow generates the Android set from the
+same file (an iOS build needs `bunx tauri icon icons/icon.svg -o icons` after `ios init`).
 
 ## Branches
 
@@ -143,7 +143,7 @@ Pushing a semver tag such as `v1.2.3` runs `.github/workflows/release.yml` and
 publishes. Pushes to `main` that change `Cargo.lock`, a `Cargo.toml`, the workflow or
 `.github/actions/` also run it, as does a schedule on Mondays and Thursdays; those runs
 only build, to refresh the build caches (see below). It builds the app
-for Linux, Windows, Android, and unsigned macOS and iOS, names each file
+for Linux, Windows and Android (not macOS or iOS; see [installing](install.md#apple-builds)), names each file
 `colecto-v1.2.3-<platform>-<arch>.<ext>`, publishes a GitHub release with
 `SHA256SUMS.txt`, and pushes the daemon image to
 `ghcr.io/hexvale-labs/colectod` (tags `vX.Y.Z`, `vX.Y`, `vX`, `latest`). To test the pipeline without releasing, start
