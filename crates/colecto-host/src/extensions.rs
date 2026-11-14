@@ -1,8 +1,10 @@
 //! Only immutable bundled packages may execute in the trusted application origin.
 use crate::package::MAX_INSTALLED;
-use crate::package::manifest::{parse as parse_manifest, validate as validate_manifest};
+use crate::package::manifest::{explain, parse as parse_manifest, validate as validate_manifest};
 use colecto_core::Database;
-use colecto_extension_api::{Capability, ExtensionManifest, ExtensionState};
+use colecto_extension_api::{
+    ApiSupport, Capability, ExtensionManifest, ExtensionState, api_support,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -41,6 +43,8 @@ pub struct Extensions {
     epoch: u64,
     cache: HashMap<String, Arc<CachedPackage>>,
     memory_packages: HashMap<String, Arc<Vec<u8>>>,
+    /// `api_support`, replaceable in tests because no real version is discontinued yet.
+    support: fn(u32) -> ApiSupport,
 }
 const MAX_POLICY_BYTES: u64 = 4 * 1024 * 1024;
 impl Extensions {
@@ -70,10 +74,15 @@ impl Extensions {
             epoch: 0,
             cache: HashMap::new(),
             memory_packages: HashMap::new(),
+            support: api_support,
         }
     }
     pub fn open(database: Database) -> Result<Self, String> {
+        Self::open_with(database, api_support)
+    }
+    fn open_with(database: Database, support: fn(u32) -> ApiSupport) -> Result<Self, String> {
         let mut extensions = Self::bundled();
+        extensions.support = support;
         let empty = extensions.policy.clone();
         extensions.policy = crate::store::open(
             &database,
@@ -119,6 +128,7 @@ impl Extensions {
             .packages
             .iter()
             .filter(|p| !extensions.policy.disabled.contains(&p.manifest.id))
+            .filter(|p| extensions.discontinued(&p.manifest).is_none())
             .map(|p| p.manifest.id.clone())
             .collect();
         for id in enabled {
@@ -214,17 +224,22 @@ impl Extensions {
             .chain(self.policy.packages.iter().map(|p| &p.manifest))
             .map(|manifest| {
                 let bundled = self.manifests.iter().any(|m| m.id == manifest.id);
+                let discontinued = self.discontinued(manifest);
                 ExtensionState {
                     manifest: manifest.clone(),
                     bundled,
-                    enabled: !self.policy.disabled.contains(&manifest.id),
+                    enabled: discontinued.is_none() && !self.policy.disabled.contains(&manifest.id),
+                    discontinued,
                 }
             })
             .collect()
     }
     pub fn update(&mut self, id: &str, enabled: bool) -> Result<(), String> {
-        if self.manifest(id).is_none() {
-            return Err("Unknown extension".into());
+        let manifest = self.manifest(id).ok_or("Unknown extension")?;
+        if enabled
+            && let Some(error) = explain(manifest.api_version, (self.support)(manifest.api_version))
+        {
+            return Err(error);
         }
         let mut next = self.clone();
         if enabled {
@@ -379,6 +394,16 @@ impl Extensions {
             && self.policy.packages.iter().any(|p| p.manifest.id == id)
             && self.allows(id, account, capability)
     }
+    /// The release that discontinued this manifest's API version, if any.
+    fn discontinued(&self, manifest: &ExtensionManifest) -> Option<String> {
+        match (self.support)(manifest.api_version) {
+            ApiSupport::Discontinued(release) => Some(release.into()),
+            _ => None,
+        }
+    }
+    pub fn api_version(&self, id: &str) -> Option<u32> {
+        self.manifest(id).map(|m| m.api_version)
+    }
     pub fn bundled_identity(&self, id: &str) -> bool {
         self.manifests.iter().any(|m| m.id == id)
     }
@@ -465,6 +490,55 @@ mod tests {
         ));
     }
     #[test]
+    fn discontinued_api_versions_stay_listed_but_never_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let database = Database::open(dir.path()).unwrap();
+        let source =
+            include_str!("../../../docs/extensions/examples/connection-panel/extension.toml");
+        let mut extensions = Extensions::open(database.clone()).unwrap();
+        extensions
+            .install(
+                source,
+                wat::parse_str("(module (func (export \"run\")))").unwrap(),
+            )
+            .unwrap();
+        // Pretend a later release dropped API 1, which the example targets.
+        let dropped = |v| match v {
+            1 => ApiSupport::Discontinued("v9.0.0"),
+            _ => api_support(v),
+        };
+        let mut upgraded = Extensions::open_with(database, dropped).unwrap();
+        let state = upgraded
+            .list("a")
+            .into_iter()
+            .find(|e| e.manifest.id == "connection-panel")
+            .unwrap();
+        assert_eq!(state.discontinued.as_deref(), Some("v9.0.0"));
+        assert!(!state.enabled);
+        assert!(upgraded.module("connection-panel").is_none());
+        assert!(!upgraded.allows("connection-panel", "a", Capability::AccountRead));
+        assert!(
+            upgraded
+                .update("connection-panel", true)
+                .unwrap_err()
+                .contains("stopped supporting in v9.0.0")
+        );
+        upgraded.remove("connection-panel").unwrap();
+    }
+    #[test]
+    fn dotted_bus_names_need_their_api_version() {
+        let base =
+            include_str!("../../../docs/extensions/examples/connection-panel/extension.toml")
+                .replace("account.read", "extensions.bus");
+        let dotted = format!("{base}\n[bus]\nsubscribe = ['reader/v0.1.2/message_opened']");
+        assert!(parse_manifest(&dotted).is_err());
+        let since = crate::package::manifest::DOTTED_BUS_NAMES_SINCE;
+        assert!(
+            parse_manifest(&dotted.replace("api_version = 1", &format!("api_version = {since}")))
+                .is_ok()
+        );
+    }
+    #[test]
     fn installed_package_count_boundary() {
         let mut extensions = Extensions::bundled();
         let source =
@@ -520,7 +594,8 @@ mod tests {
         restored.remove("connection-panel").unwrap();
         assert!(open().module("connection-panel").is_none());
         for invalid in [
-            source.replace("api_version = 1", "api_version = 2"),
+            source.replace("api_version = 1", "api_version = 0"),
+            source.replace("api_version = 1", "api_version = 999"),
             source.replace("account.read", "accounts.manage"),
             source.replace("connection-panel", "../escape"),
         ] {

@@ -169,7 +169,13 @@ export interface ExtensionState {
   manifest: { settings?: ExtensionSetting[]; id: string; name: string; description: string; author: string; api_version: number; slot: string; z_index?: number; capabilities: Capability[] };
   bundled: boolean;
   enabled: boolean;
+  /** The release that discontinued this extension's API version; it never runs. */
+  discontinued?: string;
 }
+/** A review: a `discontinued` package cannot be installed. */
+export interface ExtensionReview { manifest: ExtensionState['manifest']; discontinued?: string }
+/** The release notes section that explains why a release dropped an extension API version. */
+export const breakingApiNotes = (release: string) => `https://github.com/hexvale-labs/colecto/releases/tag/${encodeURIComponent(release)}#breaking-api-changes`;
 export interface ExtensionView { title: string; text: string; actions: string[] }
 async function uploadExtension<T>(path: string, pkg: Uint8Array): Promise<T> {
   let response: Response;
@@ -185,7 +191,7 @@ export const extensionHost = {
   saveSettings: (id: string, values: ExtensionSettings["values"]) => request<ExtensionSettings>("host", "demo", `/extensions/${encodeURIComponent(id)}/settings`, values, "PUT"),
   /** `pkg` is a .colectoext file: a zip with manifest.toml and module.wasm. */
   install: (pkg: Uint8Array) => uploadExtension<boolean>('', pkg),
-  review: (pkg: Uint8Array) => uploadExtension<ExtensionState['manifest']>('/review', pkg),
+  review: (pkg: Uint8Array) => uploadExtension<ExtensionReview>('/review', pkg),
   asset: (id: string, name: string) => download('host', 'demo', `/extensions/${encodeURIComponent(id)}/assets/${encodeURIComponent(name)}`),
   frame: (account: string, id: string, action: string) => request<OverlayOutput>('host', account, `/extensions/${encodeURIComponent(id)}/run`, { action }),
   remove: (id: string) => request<boolean>('host', 'demo', `/extensions/${encodeURIComponent(id)}`, {}, 'DELETE'),

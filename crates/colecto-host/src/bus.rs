@@ -168,6 +168,18 @@ pub(super) fn service(
         payload: request["payload"].clone(),
     };
     validate(&input)?;
+    let api_version = host
+        .extensions
+        .lock()
+        .map_err(|_| "Policy unavailable")?
+        .api_version(extension)
+        .unwrap_or(0);
+    if !crate::package::manifest::bus_name_allowed(&input.name, api_version) {
+        return Err(format!(
+            "Bus names with '.' need api_version = {} or later",
+            crate::package::manifest::DOTTED_BUS_NAMES_SINCE
+        ));
+    }
     if request["operation"] == "bus.emit" {
         tokio::runtime::Handle::current().spawn(publish(
             host.clone(),

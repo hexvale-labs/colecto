@@ -18,6 +18,8 @@ Start with the page that matches what you want to do:
 | See what is done and what is next | [Roadmap](roadmap.md) |
 | Write an extension | [Make your own extension](extensions/guide.md), then the [extension contract](extensions/README.md) |
 | Write an extension in Rust | [Rust extension SDK](extensions/rust-sdk.md) |
+| Change the extension API, or see what each version adds | [API versions](extensions/api-versions/README.md) |
+| Use or change a bundled extension's bus requests and events | [Bundled bus surfaces](extensions/bundled-bus.md) |
 | Change how data is stored | [Storage](storage.md) |
 | Work on the interface | [Design](DESIGN.md) and [product principles](PRODUCT.md) |
 | Measure resource use | [Performance](performance/README.md) |
@@ -45,7 +47,7 @@ Start with the page that matches what you want to do:
 | Path | Contents |
 | --- | --- |
 | `crates/colecto-core/` | Mail transports (IMAP, SMTP, JMAP), MIME decoding, accounts, credential vault, drafts, labels, snapshot cache, Turso storage |
-| `crates/colecto-extension-api/` | Version 1 wire types shared by the Host and the UI |
+| `crates/colecto-extension-api/` | Wire types shared by the Host and the UI; the API version registry (`api-versions.json`, `api-support.json`) |
 | `crates/colecto-extension/` | Rust SDK for third-party extensions (typed calls, bus messages, mock Host) |
 | `crates/colecto-extension-sys/` | The SDK's raw Wasm imports and `run` export; the only SDK crate with `unsafe` code |
 | `crates/colecto-package/` | `.colectoext` reading and writing, package limits and manifest rules, shared by the Host and `cargo colecto` |
@@ -63,7 +65,7 @@ Start with the page that matches what you want to do:
 | `scripts/python/`, `scripts/javascript/` | Resource benchmark and AUR publishing helpers |
 | `packaging/` | Linux desktop entry, systemd units, Docker Compose, AUR PKGBUILDs |
 | `.github/workflows/` | CI (`ci.yml`) and releases (`release.yml`) |
-| `.github/release-notes/` | Release notes used when a `vX.Y.Z` tag is published |
+| `.github/release-notes/` | Release notes used when a `vX.Y.Z` tag is published; `pending.md` collects notes for the next release |
 
 ## Words we use
 

@@ -188,7 +188,13 @@ An agent ships a release only when the maintainer asks for one in the current se
    summary, then short sections grouped by what users notice. Write for users, not
    commit by commit, link docs at the tag (`blob/vX.Y.Z/docs/...`), and leave out
    changes nobody outside the repository would notice. Mark roadmap items shipped in
-   `docs/roadmap.md`.
+   `docs/roadmap.md`. Move the text in `.github/release-notes/pending.md` into the
+   notes and empty it back to its comment. Set `released_in` to `vX.Y.Z` on every
+   unreleased version in `crates/colecto-extension-api/api-versions.json`. If the
+   release discontinues an extension API version (`api-support.json`), the notes need
+   a `## Breaking API changes` section with a `### API N` subsection per version saying
+   exactly why it was dropped; the app's error dialog links there (see
+   [API versions](extensions/api-versions/README.md#discontinuing-a-version)).
 5. Open `chore: release vX.Y.Z` against `develop` and merge it once `verify` passes.
 6. Open a pull request from `develop` into `main` titled `release: vX.Y.Z` and merge it
    with a merge commit (not squash or rebase), so `main` keeps `develop`'s commits.

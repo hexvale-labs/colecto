@@ -10,10 +10,11 @@
   import { capabilityLabel } from './lib/capabilities';
   import FilePick from './FilePick.svelte';
   import InstallWarning from './InstallWarning.svelte';
+  import ApiVersionError, { type Discontinued } from './ApiVersionError.svelte';
   import Onboarding, { needsOnboarding } from './Onboarding.svelte';
   import ServiceUnavailable from './ServiceUnavailable.svelte';
   import mark from './assets/logo-square.svg';
-  import { extensionHost, hostService, setAccessToken } from './lib/api';
+  import { breakingApiNotes, extensionHost, hostService, setAccessToken } from './lib/api';
   import type { AccountInfo, Capability, ExtensionState } from './lib/api';
   let authRequired = $state(false);
   let token = $state('');
@@ -56,6 +57,17 @@
     finally { busy = false; }
   }
   let requested = $state<Capability[]>([]);
+  // Extensions on a discontinued API version: shown once each (per release) at startup, or on review.
+  let unsupported = $state<{ items: Discontinued[]; installing: boolean } | null>(null);
+  const SHOWN = 'colecto.discontinued-shown';
+  function announceDiscontinued(list: ExtensionState[]) {
+    let shown: string[] = [];
+    try { shown = JSON.parse(localStorage.getItem(SHOWN) ?? '[]'); } catch { /* storage unavailable */ }
+    const fresh = list.filter(e => e.discontinued && !shown.includes(`${e.manifest.id}@${e.discontinued}`));
+    if (!fresh.length) return;
+    unsupported = { installing: false, items: fresh.map(e => ({ name: e.manifest.name, version: e.manifest.api_version, release: e.discontinued! })) };
+    try { localStorage.setItem(SHOWN, JSON.stringify([...shown, ...fresh.map(e => `${e.manifest.id}@${e.discontinued}`)])); } catch { /* storage unavailable */ }
+  }
   let installError = $state('');
   let dropping = $state(false);
   /** Why a file cannot be an extension package, or an empty string. */
@@ -68,7 +80,11 @@
     installNotice = '';
     installError = unusable(file);
     if (installError) return;
-    try { requested = (await extensionHost.review(new Uint8Array(await file.arrayBuffer()))).capabilities; warning = file; } catch (e) { installError = (e as Error).message; }
+    try {
+      const { manifest, discontinued } = await extensionHost.review(new Uint8Array(await file.arrayBuffer()));
+      if (discontinued) unsupported = { installing: true, items: [{ name: manifest.name, version: manifest.api_version, release: discontinued }] };
+      else { requested = manifest.capabilities; warning = file; }
+    } catch (e) { installError = (e as Error).message; }
   }
   // A package dropped anywhere on the Extensions page goes straight to the same review as Install.
   function dropped(files: FileList) {
@@ -103,7 +119,7 @@
   }
   onMount(() => {
     const requireToken = () => authRequired = true; window.addEventListener('colecto-auth-required', requireToken);
-    void Promise.all([extensionHost.list('demo').then(value => extensions = value).catch(e => error = (e as Error).message), checkOnboarding()])
+    void Promise.all([extensionHost.list('demo').then(value => { extensions = value; announceDiscontinued(value); }).catch(e => error = (e as Error).message), checkOnboarding()])
       .finally(() => loading = false);
     return () => window.removeEventListener('colecto-auth-required', requireToken);
   });
@@ -137,9 +153,10 @@
             <div class="extension-top">
               <span class="extension-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1)}</span>
               <div class="extension-title"><strong class="extension-name" aria-hidden="true">{extension.manifest.name}</strong><p class="meta"><span class="tag" class:trusted={extension.bundled}>{extension.bundled ? 'Bundled' : 'Third-party · Wasm'}</span>By {extension.manifest.author} · API {extension.manifest.api_version}</p></div>
-              <label class="switch"><input type="checkbox" checked={extension.enabled} onchange={(event) => void update(extension, event.currentTarget.checked)} /><span class="sr-only">Enabled for all accounts</span></label>
+              <label class="switch"><input type="checkbox" checked={extension.enabled} disabled={!!extension.discontinued} onchange={(event) => void update(extension, event.currentTarget.checked)} /><span class="sr-only">Enabled for all accounts</span></label>
             </div>
             <p class="extension-description">{extension.manifest.description}</p>
+            {#if extension.discontinued}{@const release = extension.discontinued}<p class="error-box">Can’t run: it uses extension API {extension.manifest.api_version}, which Colecto stopped supporting in {release}. <button class="text-button" onclick={() => window.open(breakingApiNotes(release), '_blank', 'noopener')}>Why?</button></p>{/if}
             {#if workspace && pane && extension.enabled}<label class="choice show-pane"><input type="checkbox" checked={workspace.shown(pane)} onchange={(event) => workspace.toggle(pane, event.currentTarget.checked)} />Show in the workspace</label>{/if}
             {#if extension.manifest.capabilities.length}<div class="grants"><span class="grants-title">Capabilities · all accounts</span><ul>{#each extension.manifest.capabilities as capability}<li>{capabilityLabel(capability)}</li>{/each}</ul></div>{/if}
             {#if !extension.bundled}<button class="text-button danger-text" onclick={() => void remove(extension)}>Remove extension</button>{/if}
@@ -173,6 +190,7 @@
 {/if}
 {#if error && extensions.length}<p class="error-box" role="alert">{error}<button class="secondary" disabled={busy} onclick={() => void reload()}>Retry</button></p>{/if}
 {#if !authRequired && !managing && extensions.length && !extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}<button class="secondary" onclick={manage}>Extensions</button>{/if}
+{#if unsupported}<ApiVersionError items={unsupported.items} installing={unsupported.installing} onclose={() => unsupported = null} />{/if}
 {#if warning}{@const file = warning}<InstallWarning capabilities={requested} name={file.name} oncancel={() => warning = null} onconfirm={() => void install(file)} />{/if}
 
 <OverlayLayer {extensions} {account} />

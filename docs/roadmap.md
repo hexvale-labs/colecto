@@ -47,7 +47,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Show service unit versions and update outdated units from Connection | Done; real systemd validation pending |
 | Install the daemon as a Windows logon task | Next |
 | Stress testing with thousands of messages and very long HTML mail | Next |
-| Warning when an extension targets an API version that can no longer fully work | Later |
+| Sequential extension API versions; refuse extensions on a discontinued version with a link to why | Done |
 
 ## Platforms and hosting
 
