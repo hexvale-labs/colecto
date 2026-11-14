@@ -85,8 +85,8 @@ prototypes are ignored.
 Business logic stays in Rust and presentation in Svelte. Native platform adapters
 belong in the Host or the Tauri app, never in the core. Tauri 2 hosts the desktop and
 mobile apps; the browser reaches the same Rust service over HTTP. Linux, Windows,
-Android and the browser are supported. macOS and iOS builds are produced but unsigned
-and untested (see [installing](install.md#experimental-apple-builds)).
+Android and the browser are supported. macOS and iOS still build from source but are
+not released or tested (see [installing](install.md#apple-builds)).
 
 On Android and iOS the app also loads `tauri-plugin-colecto-native`
 (`crates/colecto-native/`), which carries its own Kotlin and Swift because CI generates

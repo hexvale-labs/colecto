@@ -41,7 +41,7 @@ bump-version version:
     grep -q '^version = "{{version}}"' Cargo.toml && grep -q '"version": "{{version}}"' ui/package.json
     echo "Version set to {{version}}"
 
-# Android and iOS icons are generated into their projects by the release workflow.
+# Android icons are generated into its project by the release workflow; iOS builds are manual.
 # Regenerate the desktop app icons from the single source, crates/colecto-app/icons/icon.svg.
 icons:
     #!/usr/bin/env bash
