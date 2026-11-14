@@ -1,4 +1,5 @@
 // Version 1 wire contracts mirror colecto-extension-api. Rust validates all input.
+import type { Discovery } from './discovery';
 export type Labels = Record<string, string[]>;
 export interface Message { seen: boolean; flagged: boolean; id: string; sender: string; address: string; subject: string; body: string; date: string }
 export interface MailSnapshot { folder: string; messages: Message[]; fetched_at: number | null }
@@ -148,6 +149,8 @@ export const hostService = {
   revokeApiKey: (id: string) => request<boolean>('host', 'demo', `/api-keys/${encodeURIComponent(id)}`, {}, 'DELETE'),
   accounts: () => request<AccountInfo[]>('host', 'demo', '/accounts'),
   save: (input: AccountSettings & { id?: string; secret: string }) => request<AccountInfo>('host', 'demo', '/accounts', input),
+  /** Looks up server settings for an address (provider list, autoconfig, DNS); waits up to ~9 s. */
+  discover: (address: string) => request<Discovery | null>('host', 'demo', '/accounts/discover', { address }),
   remove: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}`, {}, 'DELETE'),
   disconnect: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}/disconnect`, {}),
   security: () => request<SecurityInfo>('host', 'demo', '/security'),

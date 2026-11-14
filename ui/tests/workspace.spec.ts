@@ -367,14 +367,18 @@ test('account dialog and long identities remain usable at 360px', async ({ page 
   const edit = page.getByRole('button', { name: 'Edit Aleksandra Wiśniewska-Kowalczyk', exact: true });
   await edit.click();
   await expect(page.locator('dialog.account-dialog')).toBeVisible();
-  await expect(page.getByLabel('Name (optional)')).toHaveValue('Aleksandra Wiśniewska-Kowalczyk');
+  // Editing opens on the server step; the review shows the long identity without overflowing.
+  await expect(page.getByLabel('Incoming (IMAP) server')).toHaveValue('imap.example.test');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('Account name (optional)')).toHaveValue('Aleksandra Wiśniewska-Kowalczyk');
+  expect(await page.locator('dialog.account-dialog').evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
   await page.keyboard.press('Escape');
   await expect(page.locator('dialog.account-dialog')).not.toBeVisible();
   // Where the sheet leaves a backdrop (it fills phone screens), a click there closes it like
   // Escape; one inside it does not.
   await page.setViewportSize({ width: 1024, height: 800 });
   await edit.click();
-  await page.getByLabel('Name (optional)').click();
+  await page.getByLabel('Incoming (IMAP) server').click();
   await expect(page.locator('dialog.account-dialog')).toBeVisible();
   await page.mouse.click(4, 4);
   await expect(page.locator('dialog.account-dialog')).not.toBeVisible();
@@ -382,18 +386,19 @@ test('account dialog and long identities remain usable at 360px', async ({ page 
   await page.setViewportSize({ width: 360, height: 800 });
   await page.getByRole('button', { name: 'Add account', exact: true }).click();
   await page.getByLabel('Email address', { exact: true }).fill('jo@example.test');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByLabel('Username', { exact: true })).toHaveValue('jo@example.test');
   // Proton Mail Bridge style: STARTTLS on custom ports with a pinned certificate.
   const incoming = page.getByRole('group', { name: 'Security for incoming mail' });
   const outgoing = page.getByRole('group', { name: 'Security for outgoing mail' });
   await incoming.getByRole('radio', { name: 'STARTTLS', exact: true }).focus();
   await page.keyboard.press('Space');
-  await expect(page.getByLabel('Port').first()).toHaveValue('143');
-  await page.getByLabel('Port').nth(1).fill('1025');
+  await expect(page.getByRole('group', { name: 'IMAP port' }).getByRole('radio', { name: /^143/ })).toBeChecked();
+  await page.getByLabel('Other SMTP port').fill('1025');
   await expect(outgoing.getByRole('radio', { name: 'STARTTLS', exact: true })).toBeChecked();
   await outgoing.getByRole('radio', { name: 'TLS', exact: true }).focus();
   await page.keyboard.press('Space');
-  await expect(page.getByLabel('Port').nth(1)).toHaveValue('465');
+  await expect(page.getByRole('group', { name: 'SMTP port' }).getByRole('radio', { name: /^465/ })).toBeChecked();
   await page.getByText('Trusted certificate', { exact: true }).click();
   await page.locator('dialog.account-dialog input[type=file]').setInputFiles({ name: 'cert.pem', mimeType: 'application/x-pem-file', buffer: Buffer.from('-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n') });
   await expect(page.getByText('Custom certificate in use')).toBeVisible();
@@ -408,7 +413,7 @@ test('account dialog and long identities remain usable at 360px', async ({ page 
   const dialog = page.locator('dialog.account-dialog');
   expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
   page.once('dialog', prompt => prompt.accept());
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
 });
 

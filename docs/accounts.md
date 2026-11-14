@@ -7,7 +7,25 @@ Host and daemon. Storage layout is described in [storage](storage.md).
 
 IMAP receives mail; SMTP sends mail. **POP3 will not be supported.**
 Use **Settings → Accounts** inside the app to add IMAP/SMTP or JMAP accounts, edit
-settings, reconnect, and disconnect. The account selector stays available on
+settings, reconnect, and disconnect. Adding an account is a three-step wizard (the
+same one first-run onboarding uses):
+
+| Step | What happens |
+| --- | --- |
+| **Email** | Enter the address. **Continue** looks up its server settings (see below); **Enter settings myself** skips the lookup. |
+| **Servers** | Protocol, servers, ports, security, username and password. If the lookup found settings, a note above the fields names the provider and every standard used; if it found nothing, no note appears. |
+| **Review** | A short summary of where mail comes from, where it is sent, and who signs in, with **Change** links back to each field, warnings for likely mistakes (port 25, TLS on port 143, an SMTP host in the IMAP field), and the optional account name. |
+
+**Back** returns to earlier steps without losing anything. Changing the address on the
+first step only updates server fields the owner has not edited; when the new address
+finds nothing, every server field stays as it was. A username that was never edited
+follows the address. Editing an existing account opens on **Servers** and never lets a
+lookup overwrite saved values.
+
+Each port is a joined control: the usual ports (IMAP `993`, `143`; SMTP `465`, `587`,
+`25`; JMAP `443`, `8443`) plus an **Other** box that accepts any port from 1 to 65535.
+Picking IMAP `993` or `143` also sets TLS or STARTTLS; a custom port keeps the chosen
+security. For JMAP, the chosen port is written into the session URL. The account selector stays available on
 narrow screens. Inbox, drafts, and the compose sender belong to the selected
 account. Saving settings does not verify the provider connection: open Inbox to
 check it. Connection errors keep local drafts available.
@@ -63,10 +81,45 @@ success. Server/network operations run outside the async executor and serialize 
 account, with 30-second socket timeouts. Another account can continue independently.
 Credential changes and locking report busy while an account operation is active.
 
+## Finding server settings
+
+`POST /api/v1/accounts/discover` with `{ "address": "…" }` (owner only) returns the
+settings the Host found, or `null`. It runs on the Host, because the interface's
+content security policy only allows its own origin. Methods, in the order their
+answers win:
+
+| Method | Request | Notes |
+| --- | --- | --- |
+| Built-in provider list | none | Gmail, Yahoo Mail, iCloud Mail, Fastmail (IMAP and JMAP), GMX, mailbox.org, Posteo, Zoho Mail, Yandex Mail and AOL Mail, matched by domain or by MX host. Outlook.com and Tuta are listed only to explain that they cannot be used; Proton Mail fills in Proton Mail Bridge's defaults (`127.0.0.1`, `1143` and `1025`, STARTTLS). Gmail, Yahoo, iCloud, Fastmail, Yandex and AOL ask for an app password. |
+| Thunderbird Autoconfig | `https://autoconfig.<domain>/mail/config-v1.1.xml` and `https://<domain>/.well-known/autoconfig/mail/config-v1.1.xml`, with `?emailaddress=` | Served by the domain itself (cPanel, Mailcow, Mailu, Stalwart and many hosts). |
+| Thunderbird ISPDB | `https://autoconfig.thunderbird.net/v1.1/<domain>` | Mozilla's central database. **Mozilla learns the domain** (never the full address). |
+| DNS SRV ([RFC 6186](https://www.rfc-editor.org/rfc/rfc6186), [RFC 8314](https://www.rfc-editor.org/rfc/rfc8314)) | `_imaps`, `_imap`, `_submissions`, `_submission` | Through the system resolver. |
+| MX record | the domain's MX, then the built-in list or ISPDB for the MX's domain | Finds custom domains hosted by Google Workspace, iCloud+, Fastmail and others. The MX's domain is a two-label heuristic (three under `co.uk`-style suffixes), not the public suffix list. |
+| JMAP ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620)) | `https://<domain>/.well-known/jmap`, then a `_jmap._tcp` SRV record | Counts only a JMAP session, or a `401` with `WWW-Authenticate`. Added to whichever result wins. |
+
+Microsoft Autodiscover is not used: it mostly returns Exchange settings, wants
+credentials, and its fallback URLs have leaked passwords to unrelated domains.
+
+Limits and safety:
+
+- Every lookup request is HTTPS only (redirects too, at most 3), times out after 5
+  seconds, and reads at most 64 KB. DNS queries time out after 3 seconds. The whole
+  lookup gives up after 9 seconds; the wizard's **Skip** stops waiting sooner.
+- Addresses whose domain is an IP address, a single label, or ends in `localhost`,
+  `local`, `internal`, `test`, `invalid` or `example` are never looked up.
+- Autoconfig XML is parsed without DTDs. Only servers Colecto can use are taken: TLS or
+  STARTTLS, password sign-in, and for SMTP implicit TLS only on port `465`. A provider
+  that offers only OAuth is reported as such instead.
+- Nothing is guessed or tried with the password, and nothing is saved until the owner
+  confirms the review. Unsigned DNS answers can be spoofed; showing every value for
+  review is the defence, as RFC 6186 recommends.
+- When the system resolver configuration cannot be read, DNS methods are skipped and
+  the HTTPS methods still run. Discovery on Android is unverified.
+
 ## Connection security
 
 Every IMAP and SMTP connection is encrypted before the password is sent; there is no
-plaintext mode. Each server row in the account dialog has a **Security** choice:
+plaintext mode. Each server on the wizard's **Servers** step has a **Security** choice:
 
 | Server | Setting | Behaviour |
 | --- | --- | --- |
@@ -103,9 +156,10 @@ SMTP on this computer with its own self-signed certificate:
    ports, username and Bridge password. Keep both connections on STARTTLS.
 2. Export Bridge's TLS certificate (advanced settings, **Export TLS certificates**);
    only `cert.pem` is needed.
-3. In Colecto, add an IMAP + SMTP account with server `127.0.0.1` for both, the Bridge
-   ports, **STARTTLS** for both, the Bridge username and password, and `cert.pem` as
-   the trusted certificate.
+3. In Colecto, add an account with your Proton address. The wizard fills in Bridge's
+   defaults (`127.0.0.1`, ports `1143` and `1025`, **STARTTLS** for both); change the
+   ports if Bridge shows others, then enter the Bridge username and password and
+   choose `cert.pem` as the trusted certificate.
 
 Bridge must run on the same machine as the Colecto Host: the desktop app works, while a
 daemon in Docker needs Bridge in a reachable container or network. Bridge does not run
