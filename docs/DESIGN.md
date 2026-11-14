@@ -123,7 +123,7 @@ and the in-app back arrows all close the newest thing first:
 
 | Claims back | While |
 | --- | --- |
-| Every modal `<dialog>` | Open (`showModal` is wrapped once; back sends it `cancel`, like Escape) |
+| Every modal `<dialog>` | Open (`showModal` is wrapped once; back and a click on the backdrop send it `cancel`, like Escape) |
 | An open listbox (`Select.svelte`) | Open |
 | Settings | Open |
 | A Settings page | Open over the section list (compact) |
@@ -255,7 +255,9 @@ a close button; approvals carry Approve, Reject and Review and stay until acted 
 others leave after six seconds unless hovered or focused. Owners can turn them off
 entirely or by type, choose one of eight positions on a drawn window (corners and edge
 midpoints, never a screenshot), and opt into desktop notifications, which only fire while
-Colecto is in the background. The default is top center. Action buttons start at the
+Colecto is in the background. In the desktop app the webview grants the notification
+permission itself (`on_permission_request` in `colecto-app/src/lib.rs`), because WebKitGTK
+denies any request nobody handles; other permissions stay denied. The default is top center. Action buttons start at the
 toast's left edge, under the icon.
 
 Notifications show above everything in the window, Settings and menus included: the region
@@ -332,5 +334,5 @@ least 44 px tall.
 
 Keep switches for booleans, radio segments for small exclusive choices, accent
 swatches for colours and the corner picker for notification placement. Native
-account dialogs trap focus, support Escape, scroll within the viewport and keep
+account dialogs trap focus, close on Escape or a click on the backdrop, scroll within the viewport and keep
 destructive actions behind a confirmation.

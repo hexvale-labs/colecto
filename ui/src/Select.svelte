@@ -15,18 +15,45 @@
   let button: HTMLButtonElement;
   let list = $state<HTMLElement>();
   let current = $derived(options.find(option => option.value === value));
+  // The side and height actually used: flips to the roomier side and never grows past the
+  // nearest clipping ancestor. If neither side fits, the menu is clipped rather than scrolling
+  // that ancestor, which would shift the whole app.
+  let side = $state<'below' | 'above'>('below');
+  let room = $state<number | undefined>();
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Closing is quicker than opening and shrinks back toward the trigger.
   function leave(node: HTMLElement) {
-    const from = placement === 'above' ? 4 : -4;
+    const from = side === 'above' ? 4 : -4;
     return { duration: reduced ? 0 : 120, easing: (t: number) => t * (2 - t), css: (t: number) => `opacity:${t};transform:scale(${0.97 + 0.03 * t}) translateY(${(1 - t) * from}px)` };
   }
   async function show() {
     if (disabled || !options.length) return;
     onopen?.();
     active = Math.max(0, options.findIndex(option => option.value === value));
-    open = true; await tick(); list?.focus();
-    document.getElementById(`${id}-${active}`)?.scrollIntoView({ block: 'nearest' });
+    place();
+    open = true; await tick(); list?.focus({ preventScroll: true });
+    reveal();
+  }
+  function place() {
+    const trigger = button.getBoundingClientRect();
+    let top = 0, bottom = window.innerHeight;
+    for (let node = button.parentElement; node; node = node.parentElement) {
+      if (getComputedStyle(node).overflowY === 'visible') continue;
+      const rect = node.getBoundingClientRect();
+      top = Math.max(top, rect.top); bottom = Math.min(bottom, rect.bottom);
+    }
+    const below = bottom - trigger.bottom - 12, above = trigger.top - top - 12;
+    const wanted = Math.min(320, window.innerHeight * 0.6, options.length * 40 + 12);
+    const fits = (space: number) => space >= wanted;
+    side = placement === 'above' ? (fits(above) || above >= below ? 'above' : 'below') : (fits(below) || below >= above ? 'below' : 'above');
+    room = Math.max(120, side === 'above' ? above : below);
+  }
+  // Scrolls only the list itself; scrollIntoView would also scroll clipped ancestors.
+  function reveal() {
+    const item = document.getElementById(`${id}-${active}`);
+    if (!list || !item) return;
+    if (item.offsetTop < list.scrollTop) list.scrollTop = item.offsetTop;
+    else if (item.offsetTop + item.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = item.offsetTop + item.offsetHeight - list.clientHeight;
   }
   // Typing jumps to the next option starting with those letters, as native menus do.
   let typed = '';
@@ -35,7 +62,7 @@
     typed = (Date.now() - typedAt > 700 ? '' : typed) + key.toLocaleLowerCase(); typedAt = Date.now();
     const order = [...options.keys()].map(offset => (active + (typed.length === 1 ? 1 : 0) + offset) % options.length);
     const found = order.find(index => options[index].label.toLocaleLowerCase().startsWith(typed));
-    if (found !== undefined) { active = found; document.getElementById(`${id}-${active}`)?.scrollIntoView({ block: 'nearest' }); }
+    if (found !== undefined) { active = found; reveal(); }
   }
   function hide(refocus = true) { open = false; if (refocus) button.focus(); }
   // Back closes an open list, like Escape.
@@ -44,7 +71,7 @@
   function keydown(event: KeyboardEvent) {
     const last = options.length - 1;
     const moves: Record<string, number> = { ArrowDown: active + 1, ArrowUp: active - 1, Home: 0, End: last };
-    if (event.key in moves) { event.preventDefault(); active = Math.min(last, Math.max(0, moves[event.key])); document.getElementById(`${id}-${active}`)?.scrollIntoView({ block: 'nearest' }); }
+    if (event.key in moves) { event.preventDefault(); active = Math.min(last, Math.max(0, moves[event.key])); reveal(); }
     else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(active); }
     else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hide(); }
     else if (event.key === 'Tab') hide(false);
@@ -60,7 +87,7 @@
   </button>
   {#if open}
     <div class="select-scrim" aria-hidden="true" onpointerdown={() => hide(false)}></div>
-    <ul bind:this={list} {id} class="select-menu {placement}" out:leave role="listbox" tabindex="-1" aria-label={label} aria-activedescendant={`${id}-${active}`} onkeydown={keydown}>
+    <ul bind:this={list} {id} class="select-menu {side}" style:--room={room === undefined ? undefined : `${room}px`} out:leave role="listbox" tabindex="-1" aria-label={label} aria-activedescendant={`${id}-${active}`} onkeydown={keydown}>
       {#each options as option, index (option.value)}
         {#if option.group && (index === 0 || options[index - 1].group !== option.group)}<li role="presentation" class="select-group">{option.group}</li>{/if}
         <!-- svelte-ignore a11y_click_events_have_key_events (the listbox handles keys) -->

@@ -45,9 +45,7 @@
     } else if (event.key === 'Enter') { event.preventDefault(); run(entries[active]); }
   }
 </script>
-<!-- Clicks on the backdrop land on the dialog itself; its content covers the rest. -->
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions (Escape closes the dialog natively) -->
-<dialog bind:this={dialog} class="command-runner" aria-label="Commands" onclick={(event) => { if (event.target === dialog) dialog.close(); }} onclose={() => previous?.isConnected && previous.focus()}>
+<dialog bind:this={dialog} class="command-runner" aria-label="Commands" onclose={() => previous?.isConnected && previous.focus()}>
   <h2 class="sr-only">Commands</h2>
   <div class="command-input"><Icon name="search" size={18} /><input bind:this={input} aria-label="Search commands and mail" role="combobox" aria-expanded="true" aria-controls="command-results" aria-activedescendant={entries.length ? `command-${active}` : undefined} autocomplete="off" spellcheck="false" placeholder="Search mail or type a command" bind:value={query} oninput={() => active = 0} onkeydown={keydown} /><kbd>Esc</kbd></div>
   <div id="command-results" role="listbox" aria-label="Results">
