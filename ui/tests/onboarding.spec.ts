@@ -44,11 +44,13 @@ test('adding the first account finishes onboarding and opens it', async ({ page 
   const saved = await preferences(page, { onboarded: false, accounts_enabled: {} });
   await page.goto('/');
   await page.getByRole('button', { name: 'Add your first account' }).click();
-  await page.getByLabel('Name (optional)').fill('Work');
   await page.getByLabel('Email address', { exact: true }).fill('work@example.test');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByLabel('Incoming (IMAP) server').fill('imap.example.test');
   await page.getByLabel('Outgoing (SMTP) server').fill('smtp.example.test');
   await page.getByLabel('Password', { exact: true }).fill('provider-secret');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByLabel('Account name (optional)').fill('Work');
   await page.getByRole('button', { name: 'Connect account' }).click();
   await expect(page.getByRole('heading', { name: 'You’re all set' })).toBeVisible();
   await page.getByRole('button', { name: 'Open Inbox' }).click();

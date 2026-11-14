@@ -58,6 +58,9 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 # Auto-label rules; linear-time matching with size limits, already in the tree.
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
+# Account setup: MX and SRV lookups through the system resolver, and autoconfig XML.
+hickory-resolver = { version = "0.26", default-features = false, features = ["system-config", "tokio"] }
+roxmltree = "0.21"
 
 argon2 = "0.5"
 chacha20poly1305 = "0.10"

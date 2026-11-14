@@ -40,6 +40,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Calmer settings, notifications above Settings, drag-and-drop extension install | Done |
 | Message list density and date headings; new-release notification | Done |
 | Font choice and text size, account rows and add/edit account dialog, account removal | Done |
+| Account setup wizard with settings lookup (provider list, Thunderbird Autoconfig and ISPDB, DNS SRV and MX, JMAP well-known) | Done |
 | Loading screen and selection polish | Done |
 | Custom ports in every server field | Done |
 | Install the daemon and notifier as Linux systemd user services from Connection | Done; real systemd validation pending |
