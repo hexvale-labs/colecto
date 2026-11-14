@@ -293,8 +293,8 @@ test('docks panes by dragging onto edges and tab strips, keeps an open draft, an
   await expect(group('Reader').getByRole('tab')).toHaveText(['Reader', 'Mail']);
   await expect(page.getByRole('tab', { name: 'Accounts', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Extensions', exact: true }).click();
-  await page.getByRole('group', { name: 'Account switcher' }).getByLabel('Show in the workspace').check();
+  await page.getByRole('button', { name: 'Accounts', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Accounts pane' }).check();
   await page.getByRole('button', { name: 'Close settings', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Accounts', exact: true })).toBeVisible();
   await page.keyboard.press('Control+k');

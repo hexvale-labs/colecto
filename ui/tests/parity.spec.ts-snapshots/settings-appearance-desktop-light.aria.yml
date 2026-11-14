@@ -1,0 +1,79 @@
+- /children: deep-equal
+- dialog "Settings":
+  - navigation "Settings sections":
+    - heading "Settings" [level=1]
+    - button "Collapse the section list" [expanded]
+    - group "Built-in":
+      - text: ""
+      - button "Accounts"
+      - button "Mail"
+      - button "Appearance"
+      - button "Notifications"
+      - button "Privacy"
+      - button "Connection"
+      - button "Extensions"
+      - button "AI"
+      - button "API keys"
+      - button "Send approvals"
+  - banner:
+    - paragraph:
+      - text: Settings
+      - strong: Appearance
+    - button "Close settings"
+  - region "Appearance":
+    - heading "Appearance" [level=2]
+    - paragraph: Colecto stays dark. Choose how text looks, how dense the message list is, and the accent used for selection, focus and primary buttons.
+    - heading "Text" [level=3]
+    - heading "Font" [level=3]
+    - paragraph: Bundled fonts work offline on every device. System fonts must be installed where you use Colecto.
+    - button "Interface font": Mona Sans
+    - button "List all installed fonts"
+    - group "Text size":
+      - text: ""
+      - heading "Text size" [level=3]
+      - paragraph: Scales text across the app. Spacing stays compact.
+      - radio "Small"
+      - text: Small
+      - radio "Default" [checked]
+      - text: Default
+      - radio "Large"
+      - text: Large
+      - radio "Larger"
+      - text: Larger
+    - heading "Message list" [level=3]
+    - group "List density":
+      - text: ""
+      - heading "Density" [level=3]
+      - paragraph: Full shows a preview line, Medium is shorter, Compact fits each message on one line.
+      - radio "Full" [checked]
+      - text: Full
+      - radio "Medium"
+      - text: Medium
+      - radio "Compact"
+      - text: Compact
+    - heading "Date headings" [level=3]
+    - paragraph: Group messages under Today, Yesterday and month names.
+    - checkbox "Date headings" [checked]
+    - text: Date headings
+    - heading "Colour" [level=3]
+    - heading "Accent" [level=3]
+    - paragraph: Used for selection, focus and primary buttons. Pick a preset or any colour.
+    - radiogroup "Accent":
+      - radio "Mint" [checked]
+      - text: Mint
+      - radio "Sky"
+      - text: Sky
+      - radio "Periwinkle"
+      - text: Periwinkle
+      - radio "Lilac"
+      - text: Lilac
+      - radio "Rose"
+      - text: Rose
+      - radio "Coral"
+      - text: Coral
+      - radio "Amber"
+      - text: Amber
+      - radio "Lime"
+      - text: Lime
+      - textbox "Custom colour": "#a2d6b1"
+      - text: Custom colour

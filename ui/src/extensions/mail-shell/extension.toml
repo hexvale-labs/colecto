@@ -1,7 +1,0 @@
-id = "mail-shell"
-name = "Mail workspace"
-api_version = 1
-slot = "shell"
-capabilities = []
-description = "Mail navigation, the command runner and the dockable workspace."
-author = "Colecto"

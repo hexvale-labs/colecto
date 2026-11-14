@@ -1,0 +1,81 @@
+- /children: deep-equal
+- dialog "Settings":
+  - navigation "Settings sections":
+    - heading "Settings" [level=1]
+    - button "Collapse the section list" [expanded]
+    - group "Built-in":
+      - text: ""
+      - button "Accounts"
+      - button "Mail"
+      - button "Appearance"
+      - button "Notifications"
+      - button "Privacy"
+      - button "Connection"
+      - button "Extensions"
+      - button "AI"
+      - button "API keys"
+      - button "Send approvals"
+  - banner:
+    - paragraph:
+      - text: Settings
+      - strong: AI
+    - button "Close settings"
+  - region "AI":
+    - heading "AI" [level=2]
+    - paragraph: Optional help from AI services you choose. While this is off, Colecto never contacts them. When it is on, summaries and replies send the message you are reading, and automatic labels send newly arrived mail, to the service you set below.
+    - heading "Use AI features" [level=3]
+    - paragraph: Turns on summaries, drafted replies and automatic labels. Off by default.
+    - checkbox "Use AI features"
+    - text: Use AI features
+    - group "AI services":
+      - text: ""
+      - heading "Text model" [level=3]
+      - paragraph: Writes summaries and replies. Works with any service that offers an OpenAI-compatible chat completions API, including ones on your own computer.
+      - text: Base URL
+      - textbox "Base URL" [disabled]:
+        - /placeholder: https://api.openai.com/v1
+      - text: Model
+      - textbox "Model" [disabled]:
+        - /placeholder: Model name
+      - text: Max tokens
+      - spinbutton "Max tokens" [disabled]: /\d+/
+      - text: API key
+      - textbox "API key" [disabled]:
+        - /placeholder: Paste the key; services on your computer often need none
+      - button "Save key" [disabled]
+      - group "Thinking effort":
+        - text: ""
+        - radio "Default" [checked] [disabled]
+        - text: Default
+        - radio "None" [disabled]
+        - text: None
+        - radio "Low" [disabled]
+        - text: Low
+        - radio "Medium" [disabled]
+        - text: Medium
+        - radio "High" [disabled]
+        - text: High
+        - paragraph: Only sent when not Default. Not every model supports it.
+      - button "Test connection" [disabled]
+      - heading "Decision model" [level=3]
+      - paragraph: Answers yes-or-no questions for automatic labels, such as “does this belong under Receipts?”. Uses the OpenRouter Decisions API.
+      - text: Base URL
+      - textbox "Base URL" [disabled]: https://openrouter.ai
+      - text: Model
+      - textbox "Model" [disabled]: /typesafe\/jev-\d+\.\d+/
+      - text: API key
+      - textbox "API key" [disabled]:
+        - /placeholder: Paste the key; services on your computer often need none
+      - button "Save key" [disabled]
+      - text: Confidence needed
+      - status: /\d+%/
+      - slider "Confidence needed" [disabled]: "0.7"
+      - button "Test connection" [disabled]
+      - heading "Automatic labels" [level=3]
+      - heading "Label new mail automatically" [level=3]
+      - paragraph: Sorts newly arrived mail into your labels. Rules match text and need no AI service; a label can also ask the decision model. A message is only checked once, so a label you remove stays removed.
+      - checkbox "Label new mail automatically" [disabled]
+      - text: Label new mail automatically
+      - heading "Labels in Demo account" [level=4]
+      - paragraph: No labels yet. Create one from a message or with “Create a local label” in the command palette.
+      - list

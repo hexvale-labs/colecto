@@ -1,0 +1,40 @@
+- /children: deep-equal
+- banner:
+  - link "Colecto, go to Inbox":
+    - /url: /
+  - button "Commands"
+  - button "Current account"
+  - button "Settings"
+- search:
+  - text: Search Inbox
+  - searchbox "Search Inbox"
+- button "Compose"
+- group "Filter by label":
+  - textbox "New label"
+  - button "Create label" [disabled]
+- region "Inbox messages":
+  - heading "Inbox" [level=1]
+  - heading "November" [level=3]
+  - button "The Colecto team Nov 7 A quieter place for your mail Welcome to Colecto. A little space to read, think, and write. This inbox contains sample mail, so you can explore without connecting an account. Open a message, start a draft, and make yourself at home. Saved drafts stay on this computer, even after you restart the demo. The Colecto team":
+    - text: The Colecto team
+    - time: Nov 7
+    - text: A quieter place for your mail Welcome to Colecto. A little space to read, think, and write. This inbox contains sample mail, so you can explore without connecting an account. Open a message, start a draft, and make yourself at home. Saved drafts stay on this computer, even after you restart the demo. The Colecto team
+  - button "Maya Chen Nov 6 A small plan for the weekend Hey, I found a little bookshop by the river. Coffee, a walk, and no particular agenda? Let me know what you think. Maya":
+    - text: Maya Chen
+    - time: Nov 6
+    - text: A small plan for the weekend Hey, I found a little bookshop by the river. Coffee, a walk, and no particular agenda? Let me know what you think. Maya
+  - 'button "Studio North Nov 5 Notes from our last conversation A few things to keep close: • Make room for the work that matters. • Keep the defaults simple. • Leave things better than you found them. See you next week."':
+    - text: Studio North
+    - time: Nov 5
+    - text: "Notes from our last conversation A few things to keep close: • Make room for the work that matters. • Keep the defaults simple. • Leave things better than you found them. See you next week."
+  - 'button "Alex Rivera Nov 4 Plain text, with a little character Hello 世界 👋 Mail should be readable, whatever language you write in. This is text, not a button: <button>Do not click</button> And this is just text too: <script>alert(''hello'')</script> Alex"':
+    - text: Alex Rivera
+    - time: Nov 4
+    - text: "Plain text, with a little character Hello 世界 👋 Mail should be readable, whatever language you write in. This is text, not a button: <button>Do not click</button> And this is just text too: <script>alert('hello')</script> Alex"
+  - text: /Updated \d+:\d+ AM/
+  - button "Refresh"
+- navigation "Mail folders":
+  - button "Inbox"
+  - button "Drafts"
+  - button "Sent"
+- region "Notifications"

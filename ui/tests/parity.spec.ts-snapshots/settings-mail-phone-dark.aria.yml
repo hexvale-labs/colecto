@@ -1,0 +1,16 @@
+- /children: deep-equal
+- dialog "Settings":
+  - banner:
+    - button "Back to Settings"
+  - region "Mail":
+    - heading "Mail" [level=2]
+    - paragraph: How Colecto keeps your mail ready to read.
+    - heading "Ready to read" [level=3]
+    - heading "Download recent mail ahead of time" [level=3]
+    - paragraph: After each refresh, the newest messages are saved so they open instantly, even offline. This never marks them as read.
+    - checkbox "Download recent mail ahead of time" [checked]
+    - text: Download recent mail ahead of time
+    - heading "Messages to keep ready" [level=3]
+    - status: /\d+/
+    - paragraph: /The newest messages in your Inbox\. More uses more storage and bandwidth; messages over \d+ MB still open on demand\./
+    - slider "Messages to keep ready": /\d+/

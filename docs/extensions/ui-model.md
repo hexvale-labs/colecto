@@ -4,7 +4,8 @@ The planned replacement for today's extension system: every extension, bundled o
 third-party, runs its client part in a Web Worker on the device and describes its
 interface as a component tree that trusted Colecto code renders.
 
-**Status: proposed design, not implemented.** Nothing on this page works yet. The
+**Status: approved design, being built.** Step 2 ([Core UI out](#migration-order)) is
+done; nothing else on this page works yet. The
 current system is described in the [extension contract](README.md). This page becomes
 the contract, section by section, as each step in [Migration order](#migration-order)
 lands; until then, where the two disagree, the current contract describes what runs.

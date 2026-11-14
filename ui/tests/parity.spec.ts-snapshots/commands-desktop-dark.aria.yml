@@ -1,0 +1,53 @@
+- /children: deep-equal
+- dialog "Commands":
+  - heading "Commands" [level=2]
+  - combobox "Search commands and mail" [expanded]
+  - text: Esc
+  - listbox "Results":
+    - text: Commands
+    - option "Compose a new message" [selected]
+    - option "Go to Inbox"
+    - option "Go to Drafts"
+    - option "Go to Sent"
+    - 'option "Settings: Accounts"'
+    - 'option "Settings: Mail"'
+    - 'option "Settings: Appearance"'
+    - 'option "Settings: Notifications"'
+    - 'option "Settings: Privacy"'
+    - 'option "Settings: Connection"'
+    - 'option "Settings: Extensions"'
+    - 'option "Settings: AI"'
+    - 'option "Settings: API keys"'
+    - 'option "Settings: Send approvals"'
+    - option "Search emails"
+    - 'option "Sort: Oldest first"'
+    - 'option "Sort: Sender A–Z"'
+    - 'option "Sort: Subject A–Z"'
+    - option "Create a local label"
+    - option "Refresh current mailbox"
+    - option "Back to message list"
+    - 'option "Layout: Dock Mail along the left edge"'
+    - 'option "Layout: Dock Mail along the right edge"'
+    - 'option "Layout: Dock Mail along the top edge"'
+    - 'option "Layout: Dock Mail along the bottom edge"'
+    - 'option "Layout: Put Mail in a tab beside Reader"'
+    - 'option "Layout: Put Mail in a tab beside Accounts"'
+    - 'option "Layout: Hide Mail"'
+    - 'option "Layout: Dock Reader along the left edge"'
+    - 'option "Layout: Dock Reader along the right edge"'
+    - 'option "Layout: Dock Reader along the top edge"'
+    - 'option "Layout: Dock Reader along the bottom edge"'
+    - 'option "Layout: Put Reader in a tab beside Mail"'
+    - 'option "Layout: Put Reader in a tab beside Accounts"'
+    - 'option "Layout: Hide Reader"'
+    - 'option "Layout: Dock Accounts along the left edge"'
+    - 'option "Layout: Dock Accounts along the right edge"'
+    - 'option "Layout: Dock Accounts along the top edge"'
+    - 'option "Layout: Dock Accounts along the bottom edge"'
+    - 'option "Layout: Put Accounts in a tab beside Mail"'
+    - 'option "Layout: Put Accounts in a tab beside Reader"'
+    - 'option "Layout: Hide Accounts"'
+    - 'option "Layout: Reset to default"'
+    - 'option "Switch account: Demo account"'
+    - option "Reload the app"
+  - contentinfo: ↑ ↓ Move ↵ Run Esc Close

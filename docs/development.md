@@ -93,6 +93,18 @@ answer mock `/api/v1/releases/latest`.
 The shared Playwright fixture skips the startup-screen delay; timing tests opt back
 in. Playwright may need system browser libraries.
 
+`ui/tests/parity.spec.ts` guards the move to the [client-side extension
+model](extensions/ui-model.md): the workspace, an open message, the composer, the command
+runner and every Settings section, at 390 px and 1280 px, with `colorScheme` light and
+dark. Its accessibility snapshots (`parity.spec.ts-snapshots/*.aria.yml`) start with
+`/children: deep-equal`, so roles, names, states and order must match exactly; Playwright's
+default is a partial match. Screenshots depend on fonts and GPU, so they are compared only
+with `COLECTO_PARITY_SCREENSHOTS=1` on the machine that recorded them (0.2% of pixels may
+differ). A change that alters these views on purpose re-records them with
+`--update-snapshots=changed`, puts the `deep-equal` line back, checks that generated
+snapshots match themselves (Playwright sometimes writes `text: ""` or drops a button's
+visible text), and lists the difference in its pull request.
+
 `ui/tests/html-mail.spec.ts` opens five published company email templates
 (`ui/tests/fixtures/html-mail/`, sources and licences in its `README.md`) in Chromium
 and WebKit, the engine behind the Linux and macOS apps. After one untimed open that
