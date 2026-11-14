@@ -35,7 +35,7 @@ Start with the page that matches what you want to do:
 | Third-party extensions | WebAssembly run by `wasmi` (no WASI) |
 | Automation | MCP server (`rmcp`), scoped API keys with send approval |
 | Interface | Svelte 5, TypeScript, Vite; Bun as package manager and runner |
-| Desktop and mobile app | Tauri 2 (Linux, Windows and Android supported; Apple builds are unsigned experiments) |
+| Desktop and mobile app | Tauri 2 (Linux, Windows and Android supported; macOS and iOS build from source only) |
 | Tests | `cargo test`, Playwright, `bun test`; a real JMAP server in Docker |
 | Tasks | `just` (recipes in `scripts/just/`) |
 | Packaging | GitHub Actions releases, Docker image `ghcr.io/hexvale-labs/colectod`, AUR packages |

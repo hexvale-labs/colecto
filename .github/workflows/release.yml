@@ -1,7 +1,8 @@
 name: Release
 
-# A semver tag such as `v1.2.3` builds every platform Tauri supports, publishes a GitHub
+# A semver tag such as `v1.2.3` builds Linux, Windows and Android, publishes a GitHub
 # release and pushes the daemon image. Every other run builds everything without publishing.
+# macOS and iOS are not built here; see "Apple builds" in README.md.
 #
 # Build caches: a tag run can restore caches saved on main but not those saved by an earlier
 # tag, so only main saves them. Main rebuilds when dependencies or this workflow change, and
@@ -86,8 +87,6 @@ jobs:
           - { platform: windows, arch: x64, runner: windows-2025, target: x86_64-pc-windows-msvc, bundles: "msi,nsis" }
           # WiX cannot build Arm64 MSIs; NSIS can.
           - { platform: windows, arch: arm64, runner: windows-11-arm, target: aarch64-pc-windows-msvc, bundles: "nsis" }
-          - { platform: macos, arch: arm64, runner: macos-15, target: aarch64-apple-darwin, bundles: "dmg" }
-          - { platform: macos, arch: x64, runner: macos-15, target: x86_64-apple-darwin, bundles: "dmg" }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
@@ -147,7 +146,7 @@ jobs:
           name="colecto-$TAG-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir dist
           for file in "$TARGET_DIR"/deb/*.deb "$TARGET_DIR"/rpm/*.rpm "$TARGET_DIR"/appimage/*.AppImage \
-                      "$TARGET_DIR"/msi/*.msi "$TARGET_DIR"/dmg/*.dmg; do
+                      "$TARGET_DIR"/msi/*.msi; do
             cp "$file" "dist/$name.${file##*.}"
           done
           for file in "$TARGET_DIR"/nsis/*.exe; do cp "$file" "dist/$name-setup.exe"; done
@@ -226,7 +225,7 @@ jobs:
           # Vendored OpenSSL looks for `<triple>-ranlib`, which current NDKs only ship as llvm-ranlib.
           echo "TARGET_RANLIB=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" >> "$GITHUB_ENV"
           export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
-          # Xcode and Gradle call back into the CLI as `bun tauri ...`, which needs a package script.
+          # Gradle calls back into the CLI as `bun tauri ...`, which needs a package script.
           echo '{"private":true,"scripts":{"tauri":"tauri"},"devDependencies":{"@tauri-apps/cli":"'"${TAURI_CLI##*@}"'"}}' > package.json
           bun install
           bun tauri android init --ci
@@ -280,79 +279,10 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  ios:
-    needs: version
-    runs-on: macos-15
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          targets: aarch64-apple-ios
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: release-aarch64-apple-ios-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: ui/package.json
-
-      - name: Build the UI
-        working-directory: ui
-        run: |
-          bun install --frozen-lockfile
-          bun run --bun build
-
-      - name: Generate the Xcode project
-        working-directory: crates/colecto-app
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-          HOMEBREW_NO_INSTALL_CLEANUP: "1"
-        run: |
-          brew install xcodegen
-          # Xcode and Gradle call back into the CLI as `bun tauri ...`, which needs a package script.
-          echo '{"private":true,"scripts":{"tauri":"tauri"},"devDependencies":{"@tauri-apps/cli":"'"${TAURI_CLI##*@}"'"}}' > package.json
-          bun install
-          bun tauri ios init --ci
-          bunx "$TAURI_CLI" icon icons/icon.svg -o icons
-
-      # Without an Apple developer account the app cannot be signed, so build it unsigned and
-      # package the .app as an .ipa by hand. Sideloading tools re-sign it on install.
-      - name: Build the unsigned IPA
-        working-directory: crates/colecto-app
-        env:
-          TAG: ${{ needs.version.outputs.tag }}
-          VERSION: ${{ needs.version.outputs.number }}
-        run: |
-          set -euo pipefail
-          project=$(ls -d gen/apple/*.xcodeproj)/project.pbxproj
-          sed -i '' 's/buildSettings = {/buildSettings = { CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO; CODE_SIGN_IDENTITY = ""; DEVELOPMENT_TEAM = "";/' "$project"
-          # The build succeeds; exporting a signed archive afterwards cannot, so look for the .app.
-          bun tauri ios build --ci --target aarch64 --config "{\"version\":\"$VERSION\"}" || true
-          app=$(find gen/apple/build "$HOME/Library/Developer/Xcode/DerivedData" -name '*.app' -path '*-iphoneos*' -type d 2>/dev/null | head -1)
-          [ -n "$app" ] || { echo "::error::No .app was built"; exit 1; }
-          mkdir -p "$RUNNER_TEMP/ipa/Payload" "$GITHUB_WORKSPACE/dist"
-          cp -R "$app" "$RUNNER_TEMP/ipa/Payload/"
-          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/dist/colecto-$TAG-ios-arm64.ipa" Payload)
-          ls -l "$GITHUB_WORKSPACE/dist"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: env.UPLOAD == 'true'
-        with:
-          name: ios
-          path: dist/*
-          if-no-files-found: error
-
   prune-caches:
     # Wait for action post-steps to save caches, including when another target failed.
     if: always() && github.ref == 'refs/heads/main'
-    needs: [desktop, android, ios]
+    needs: [desktop, android]
     permissions:
       actions: write
     uses: ./.github/workflows/prune-caches.yml
@@ -412,7 +342,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [version, desktop, android, ios, daemon-image]
+    needs: [version, desktop, android, daemon-image]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

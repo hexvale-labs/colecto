@@ -5,9 +5,8 @@ Download the file for your system from the
 named `colecto-<version>-<platform>-<architecture>.<ext>`. Check a download against
 `SHA256SUMS.txt` with `sha256sum -c SHA256SUMS.txt --ignore-missing`.
 
-Windows installers lack a trusted code-signing certificate, and Apple builds lack
-Developer ID signing or device provisioning. Android APKs use a temporary signing
-key. Platform-specific installation limits are described below.
+Windows installers lack a trusted code-signing certificate, and Android APKs use a
+temporary signing key. Releases do not include macOS or iOS builds. Platform-specific installation limits are described below.
 
 | System | File | Notes |
 | --- | --- | --- |
@@ -21,21 +20,23 @@ phones). There are no 32-bit builds.
 Mobile builds are new and lightly tested. To keep mail flowing while your devices are
 off, [host the daemon](self-hosting.md) and connect the apps to it.
 
-## Experimental Apple builds
+## Apple builds
 
-CI builds macOS `.dmg` and unsigned iOS `.ipa` artifacts. Neither platform is
-currently supported or validated on physical hardware.
+Release CI does not build macOS or iOS: the builds could not be signed or notarized,
+they doubled CI time, and the maintainer has no Apple device to test them on. The
+source still supports both (the Tauri app and the Swift half of
+`crates/colecto-native/`), so you can build them yourself on a Mac with Xcode. Neither
+platform is tested. Build the UI first (`cd ui && bun install && bun run build`), then
+work in `crates/colecto-app/`:
 
-macOS does not always require a paid Developer ID signature to run an app, but
-Gatekeeper can block these unnotarized downloads. Where available, Apple's
-[manual opening procedure](https://support.apple.com/en-ie/102445) uses
-**System Settings → Privacy & Security → Open Anyway**. We cannot guarantee
-that a particular unsigned build will launch.
+| Target | Build | Notes |
+| --- | --- | --- |
+| macOS | `bunx @tauri-apps/cli@2.12.4 build --bundles dmg` | Gatekeeper may block the unsigned, unnotarized app; Apple's [manual opening procedure](https://support.apple.com/en-ie/102445) uses **System Settings → Privacy & Security → Open Anyway** |
+| iOS | `ios init`, then `ios build` with the same CLI | Xcode calls back into the CLI as `bun tauri`, so add a `package.json` with a `tauri` script first. Sign with your own certificate and provision it for your device; see Apple's [device distribution documentation](https://developer.apple.com/documentation/xcode/distributing-your-app-to-registered-devices) |
 
-An unsigned IPA cannot run as downloaded on a standard iPhone. It must first be
-signed with a suitable certificate and provisioned for the device; Apple's
-[device distribution documentation](https://developer.apple.com/documentation/xcode/distributing-your-app-to-registered-devices)
-describes those requirements. Producing an IPA is not evidence of working iOS support.
+The last release workflow that built both, including an unsigned `.ipa`, is the `ios`
+job and the `macos` desktop entries of `.github/workflows/release.yml` at commit
+`b42c216`.
 
 On Linux, Settings → Connection can install the mail and desktop notification user
 services using the currently running executable, including an AppImage. Keep that
