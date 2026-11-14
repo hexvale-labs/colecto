@@ -1,6 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
-  import AccountForm from './AccountForm.svelte';
+  import AccountWizard from './AccountWizard.svelte';
   import { createServices, hostService } from './lib/api';
   import type { AccountInfo, SecurityInfo } from './lib/api';
   import { hue, initial } from './lib/initial';
@@ -140,8 +140,8 @@
 
 <dialog bind:this={dialog} class="sheet account-dialog" aria-labelledby="account-dialog-title" oncancel={(event) => { event.preventDefault(); close(); }}>
   <header class="sheet-head">
-    <div><h2 id="account-dialog-title">{editing ? 'Edit account' : 'Add an account'}</h2><p>Use your provider’s server settings, and an app password if it asks for one. POP3 is not supported.</p></div>
+    <div><h2 id="account-dialog-title">{editing ? 'Edit account' : 'Add an account'}</h2><p>{editing ? 'Change servers or sign-in details.' : 'Start with your email address; Colecto looks up the server settings.'} IMAP, SMTP and JMAP; POP3 is not supported.</p></div>
     <button type="button" class="icon-button" aria-label="Close" onclick={close}><Icon name="close" size={16} /></button>
   </header>
-  {#key session}<AccountForm account={editing} bind:working={saving} submitLabel={editing ? 'Save changes' : 'Save account'} oncancel={close} onsaved={saved} ondirty={(value) => formDirty = value} />{/key}
+  {#key session}<AccountWizard account={editing} bind:working={saving} submitLabel={editing ? 'Save changes' : 'Save account'} oncancel={close} onsaved={saved} ondirty={(value) => formDirty = value} />{/key}
 </dialog>

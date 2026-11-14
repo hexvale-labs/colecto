@@ -3,6 +3,7 @@ mod ai;
 pub mod api_keys;
 pub mod approvals;
 mod bus;
+mod discovery;
 pub mod mcp;
 pub mod preferences;
 mod releases;
@@ -196,6 +197,7 @@ fn build_app(host: Host, assets: Assets) -> Router {
         .route("/bus/replies/{id}", axum::routing::post(bus::reply_http))
         .route("/extensions/{id}/run", axum::routing::post(run_extension))
         .route("/accounts", get(list_accounts).post(upsert_account))
+        .route("/accounts/discover", axum::routing::post(discover_account))
         .route("/accounts/{id}", axum::routing::delete(remove_account))
         .route(
             "/accounts/{id}/disconnect",
@@ -1167,6 +1169,30 @@ async fn upsert_account(
     with_accounts(host, move |a| a.upsert(input))
         .await
         .map(Json)
+}
+#[derive(serde::Deserialize)]
+struct DiscoverInput {
+    address: String,
+}
+/// Looks up server settings for an address; `null` when nothing usable was found.
+async fn discover_account(
+    headers: HeaderMap,
+    input: Result<Json<DiscoverInput>, JsonRejection>,
+) -> Result<Json<Option<discovery::Discovery>>, Failure> {
+    host_grant(&headers)?;
+    let Json(input) =
+        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid email address".into()))?;
+    if input.address.len() > 320 {
+        return Err(Failure(
+            StatusCode::BAD_REQUEST,
+            "Invalid email address".into(),
+        ));
+    }
+    let found = tokio::time::timeout(discovery::DEADLINE, discovery::discover(&input.address))
+        .await
+        .ok()
+        .flatten();
+    Ok(Json(found))
 }
 async fn remove_account(
     State(host): State<Host>,

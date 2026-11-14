@@ -7,7 +7,7 @@
 <script lang="ts">
   // First-run setup. It stays in the shell rather than an extension: it is bootstrapping and handles credentials.
   import { onMount, tick } from 'svelte';
-  import AccountForm from './AccountForm.svelte';
+  import AccountWizard from './AccountWizard.svelte';
   import Icon from './Icon.svelte';
   import mark from './assets/logo-square.svg';
   import { hostService } from './lib/api';
@@ -48,9 +48,9 @@
       {:else if step === 'account'}
         <header class="account-head enter" style:--i="0">
           <button class="icon-button" aria-label="Back" disabled={saving} onclick={() => go('welcome')}><Icon name="back" size={18} /></button>
-          <div><h1 id="onboarding-title" tabindex="-1" bind:this={heading}>Add your account</h1><p>Use your provider’s server settings, and an app password if it asks for one.</p></div>
+          <div><h1 id="onboarding-title" tabindex="-1" bind:this={heading}>Add your account</h1><p>Start with your email address; Colecto looks up the server settings.</p></div>
         </header>
-        <div class="enter" style:--i="1"><AccountForm bind:working={saving} submitLabel="Connect account" onsaved={saved} /></div>
+        <div class="enter" style:--i="1"><AccountWizard bind:working={saving} submitLabel="Connect account" onsaved={saved} /></div>
       {:else}
         <svg class="done-mark" viewBox="0 0 64 64" aria-hidden="true"><circle class="ring" cx="32" cy="32" r="28" /><path class="tick" d="M20 33.5l8 8 16-17" /></svg>
         <h1 id="onboarding-title" class="enter" style:--i="1" tabindex="-1" bind:this={heading}>You’re all set</h1>

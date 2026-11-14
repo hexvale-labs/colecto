@@ -133,12 +133,14 @@ test('manages encrypted accounts, switches drafts and protects unsaved changes',
   await expect(page.getByText('Password protection enabled', { exact: true })).toBeVisible({ timeout: 20000 });
   await expect(page.getByLabel('Name (optional)')).not.toBeVisible();
   await page.getByRole('button', { name: 'Add account', exact: true }).click();
-  await page.getByLabel('Name (optional)').fill('Work');
   await page.getByLabel('Email address', { exact: true }).fill('work@example.test');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByLabel('Incoming (IMAP) server').fill('imap.example.test');
   await page.getByLabel('Outgoing (SMTP) server').fill('smtp.example.test');
   await page.getByLabel('Username').fill('work@example.test');
   await page.getByLabel('Password', { exact: true }).fill('provider-secret');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByLabel('Account name (optional)').fill('Work');
   await page.getByRole('button', { name: 'Save account', exact: true }).click();
   await expect(page.getByText('Work saved. Colecto checks the connection in the background.')).toBeVisible();
   // Back goes from the page to the list, then closes Settings.
