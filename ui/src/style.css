@@ -100,6 +100,7 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 .compose-icon:active:not(:disabled) { transform: scale(0.95); }
 .topbar .select-trigger { max-width: 220px; }
 .topbar .select-menu { left: auto; right: 0; min-width: 240px; transform-origin: top right; }
+.topbar .select-menu.above { transform-origin: bottom right; }
 .account-name { display: grid; flex: 1; min-width: 0; text-align: left; font-size: calc(13px * var(--text-scale)); font-weight: 600; line-height: 1.25; }
 .account-title, .status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Room for the status glow: nothing around the dot clips. */
@@ -138,6 +139,7 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 @media (hover: hover) and (pointer: fine) { .dock-move .select-trigger:hover:not(:disabled) { background: var(--raise); color: var(--ink); } }
 .dock-move .select-trigger > .icon:last-child { display: none; }
 .dock-move .select-menu { left: auto; right: 0; min-width: 210px; transform-origin: top right; }
+.dock-move .select-menu.above { transform-origin: bottom right; }
 .pane { position: absolute; z-index: var(--layer-content); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .pane[hidden] { display: none; }
 /* An open listbox may extend past a short pane, like the account switcher's. */
@@ -509,7 +511,7 @@ p.error-box.boot { padding: 12px 14px; color: oklch(0.9 0.04 30); }
 .select-trigger > .icon { color: var(--ink-3); }
 @media (hover: hover) and (pointer: fine) { .select-trigger:hover:not(:disabled) { border-color: oklch(0.36 0.01 165); } }
 .select-scrim { position: fixed; inset: 0; z-index: var(--layer-scrim); }
-.select-menu { position: absolute; z-index: var(--layer-menus); left: 0; min-width: 100%; max-height: min(320px, 60vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--float); box-shadow: 0 18px 40px -10px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.25); outline: none; transition: opacity 180ms var(--ease-out), transform 200ms var(--ease-out), filter 180ms var(--ease-out); }
+.select-menu { position: absolute; z-index: var(--layer-menus); left: 0; min-width: 100%; max-height: min(320px, 60vh, var(--room, 100vh)); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--float); box-shadow: 0 18px 40px -10px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.25); outline: none; transition: opacity 180ms var(--ease-out), transform 200ms var(--ease-out), filter 180ms var(--ease-out); }
 .select-menu.below { top: calc(100% + 6px); transform-origin: top left; }
 .select-menu.above { bottom: calc(100% + 6px); transform-origin: bottom left; }
 /* Grow out of the trigger: a little scale, a little travel, a hint of blur to soften the first frames. */
@@ -815,7 +817,7 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 /* Appearance: font picker and text size. */
 .font-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 14px; }
 .font-picker .select-trigger { width: 280px; max-width: 100%; }
-.font-picker .select-menu { width: 280px; max-height: min(360px, 60vh); }
+.font-picker .select-menu { width: 280px; max-height: min(360px, 60vh, var(--room, 100vh)); }
 .font-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale)); }
 .select-group { padding: 10px 10px 4px; color: var(--ink-3); font-size: calc(10.5px * var(--text-scale)); font-weight: 640; letter-spacing: 0.08em; text-transform: uppercase; pointer-events: none; }
 .select-group:first-child { padding-top: 6px; }

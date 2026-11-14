@@ -370,6 +370,16 @@ test('account dialog and long identities remain usable at 360px', async ({ page 
   await expect(page.getByLabel('Name (optional)')).toHaveValue('Aleksandra Wiśniewska-Kowalczyk');
   await page.keyboard.press('Escape');
   await expect(page.locator('dialog.account-dialog')).not.toBeVisible();
+  // Where the sheet leaves a backdrop (it fills phone screens), a click there closes it like
+  // Escape; one inside it does not.
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await edit.click();
+  await page.getByLabel('Name (optional)').click();
+  await expect(page.locator('dialog.account-dialog')).toBeVisible();
+  await page.mouse.click(4, 4);
+  await expect(page.locator('dialog.account-dialog')).not.toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await page.setViewportSize({ width: 360, height: 800 });
   await page.getByRole('button', { name: 'Add account', exact: true }).click();
   await page.getByLabel('Email address', { exact: true }).fill('jo@example.test');
   await expect(page.getByLabel('Username', { exact: true })).toHaveValue('jo@example.test');
@@ -434,4 +444,22 @@ test('the command runner reloads the app', async ({ page }) => {
   await Promise.all([page.waitForEvent('load'), page.keyboard.press('Enter')]);
   expect(await page.evaluate(() => (window as unknown as { beforeReload?: boolean }).beforeReload)).toBeUndefined();
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
+});
+
+test('a pane menu without room stays inside the window instead of scrolling the app', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 440 });
+  await page.goto('/');
+  // Any scrolled element besides the menu means a clipping ancestor moved and the app shifted.
+  const scrolled = () => page.evaluate(() => [...document.querySelectorAll('*')].filter(node => !node.matches('.select-menu') && (node.scrollTop || node.scrollLeft)).map(node => `${node.tagName}.${node.className}`));
+  const trigger = page.getByRole('button', { name: 'Arrange Accounts' });
+  await expect(trigger).toBeVisible();
+  const before = await scrolled();
+  await trigger.click();
+  const menu = page.getByRole('listbox', { name: 'Arrange Accounts' });
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('End');
+  expect(await scrolled()).toEqual(before);
+  const box = (await menu.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(440);
 });
