@@ -40,10 +40,9 @@
   you between devices
 - **Keyboard first:** command palette (<kbd>Ctrl</kbd>+<kbd>K</kbd>), <kbd>C</kbd> to
   compose, keyboard-resizable panes
-- **Extensions:** the whole UI is built from bundled extensions; third-party panels
-  and overlays run in an isolated WebAssembly sandbox
-  ([make your own](docs/extensions/guide.md), or try the
-  [Oneko cat](docs/extensions/examples/oneko.colectoext))
+- **Extensions:** mail views are extensions; third-party extensions run in an isolated
+  Web Worker and describe their interface as components Colecto draws, with optional
+  background work in a WebAssembly sandbox ([make your own](docs/extensions/guide.md))
 - **Self-hostable daemon** that keeps receiving mail while every app is closed, with
   [Docker](docs/self-hosting.md), systemd or any other supervisor
 - **Automation with guard rails:** scoped API keys and an MCP server, with your

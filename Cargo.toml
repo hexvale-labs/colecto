@@ -1,5 +1,4 @@
 [workspace]
-exclude = ["docs/extensions/examples/oneko"]
 members = ["crates/*"]
 # The Tauri app needs WebView system libraries; build it with `just build native`.
 default-members = ["crates/cargo-colecto", "crates/colecto-core", "crates/colecto-extension", "crates/colecto-extension-api", "crates/colecto-extension-sys", "crates/colecto-host", "crates/colecto-package"]

@@ -110,7 +110,14 @@ async fn authenticate(
     let session_request = request.uri().path() == "/api/v1/session";
     let headers = request.headers();
     let bearer = headers.get(header::AUTHORIZATION);
-    let principal = if let Some(bearer) = bearer {
+    let extension_token = bearer
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Colecto-Extension "))
+        .filter(|token| crate::credentials::plausible(token));
+    let principal = if let Some(token) = extension_token {
+        // Resolved per call by the handler (or by the daemon this Host forwards to).
+        Some(Principal::Extension(token.to_owned()))
+    } else if let Some(bearer) = bearer {
         let supplied = bearer
             .to_str()
             .ok()
@@ -139,6 +146,9 @@ async fn authenticate(
         )
             .into_response();
     };
+    if matches!(principal, Principal::Extension(_)) && !extension_route(request.uri().path()) {
+        return crate::forbidden().into_response();
+    }
     if matches!(principal, Principal::ApiKey(_)) {
         let path = request.uri().path();
         if !matches!(
@@ -167,6 +177,26 @@ async fn authenticate(
 
     request.extensions_mut().insert(principal);
     next.run(request).await
+}
+
+/// What a client part's credential can reach: mail routes (each checks the extension's
+/// capabilities), the bus, and its own settings. Owner controls stay out of reach.
+fn extension_route(path: &str) -> bool {
+    matches!(
+        path,
+        "/api/v1/account"
+            | "/api/v1/messages"
+            | "/api/v1/folders"
+            | "/api/v1/drafts"
+            | "/api/v1/labels"
+            | "/api/v1/send"
+    ) || ["/api/v1/messages/", "/api/v1/drafts/", "/api/v1/bus/"]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+        || path
+            .strip_prefix("/api/v1/extensions/")
+            .and_then(|rest| rest.strip_suffix("/settings"))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
 #[derive(Clone)]
@@ -238,6 +268,7 @@ impl MailService {
             execution: Arc::new(tokio::sync::Semaphore::new(2)),
             ai,
             sync: Arc::default(),
+            credentials: Arc::default(),
         };
         let stream_events = events.clone();
         let (closing, stopped) = tokio::sync::watch::channel(false);

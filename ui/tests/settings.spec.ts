@@ -101,15 +101,15 @@ test('a .colectoext dropped on the Extensions page opens the install review', as
   // A rejected file is not taken as the package.
   await expect(settings.getByRole('button', { name: 'Install', exact: true })).toBeDisabled();
   // Dropped anywhere on the page, not only on the drop zone.
-  await drop('oneko.colectoext', [...readFileSync('../docs/extensions/examples/oneko.colectoext')]);
+  await drop('hello-pane.colectoext', [...readFileSync('../target/extensions/hello-pane.colectoext')]);
   const warning = page.getByRole('dialog', { name: 'Only install extensions you trust' });
   await expect(warning).toBeVisible();
-  await expect(warning).toContainText('oneko.colectoext');
+  await expect(warning).toContainText('hello-pane.colectoext');
   await expect(warning.getByRole('button', { name: /Install/ })).toBeDisabled();
   await warning.getByRole('button', { name: 'Cancel' }).click();
   await expect(warning).toHaveCount(0);
-  await expect(settings.getByRole('group', { name: 'Oneko', exact: true })).toHaveCount(0);
-  await expect(settings.getByText('oneko.colectoext ·')).toBeVisible();
+  await expect(settings.getByRole('group', { name: 'Hello pane', exact: true })).toHaveCount(0);
+  await expect(settings.getByText('hello-pane.colectoext ·')).toBeVisible();
 });
 
 test('the message list has three densities and optional date headings', async ({ page }) => {

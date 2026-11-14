@@ -9,6 +9,9 @@ use subtle::ConstantTimeEq;
 pub enum Principal {
     Owner,
     ApiKey(String),
+    /// A client part's credential (`Authorization: Colecto-Extension <token>`), resolved per
+    /// call so a revoked one fails at once. See `crate::credentials`.
+    Extension(String),
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

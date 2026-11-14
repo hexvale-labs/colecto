@@ -1,4 +1,4 @@
-//! Raw bridge to the Colecto guest ABI (API 1).
+//! Raw bridge to the Colecto service-part ABI (API 1).
 //!
 //! This is the only SDK crate that contains `unsafe` code. It wraps the three
 //! `colecto` imports in safe byte-level functions and provides [`export_run!`], which
@@ -63,8 +63,8 @@ macro_rules! export_run {
 
 /// Records one registered handler in the module's `colecto.handlers.v1` custom section,
 /// so `cargo colecto` can compare the code with the manifest. Each record is
-/// [`record`]`(kind, bus, name)`; the linker concatenates them. Kinds: `b'p'` panel,
-/// `b'o'` overlay, `b'r'` bus request, `b'e'` bus event. Nothing is emitted off Wasm.
+/// [`record`]`(kind, bus, name)`; the linker concatenates them. Kinds: `b'r'` bus
+/// request, `b'e'` bus event. Nothing is emitted off Wasm.
 #[macro_export]
 macro_rules! handler_record {
     ($kind:literal, $bus:expr, $name:expr) => {
@@ -209,8 +209,8 @@ pub mod mock {
         #[test]
         fn mirrors_host_bridge_rules() {
             assert_eq!(crate::action(), None, "no invocation running");
-            super::begin(b"open", Box::new(|input| Some([b"echo:", input].concat())));
-            assert_eq!(crate::action().as_deref(), Some(&b"open"[..]));
+            super::begin(b"{}", Box::new(|input| Some([b"echo:", input].concat())));
+            assert_eq!(crate::action().as_deref(), Some(&b"{}"[..]));
             assert_eq!(crate::request(b"x").as_deref(), Some(&b"echo:x"[..]));
             assert!(crate::emit(b"first"));
             assert!(!crate::emit(b"second"), "only the first emit counts");

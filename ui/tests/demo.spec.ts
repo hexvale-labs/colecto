@@ -235,16 +235,16 @@ test('extension controls expose TOML metadata, and the workspace itself is not a
 test('install consent enables all capabilities and settings keep them read-only', async ({ page }) => {
   await page.goto('/');
   await openExtensions(page);
-  await page.getByLabel('Extension package', { exact: true }).setInputFiles('../target/extensions/connection-panel.colectoext');
+  await page.getByLabel('Extension package', { exact: true }).setInputFiles('../target/extensions/hello-pane.colectoext');
   await page.getByRole('button', { name: 'Install', exact: true }).click();
   const warning = page.getByRole('dialog', { name: 'Only install extensions you trust' });
   await expect(warning.getByText('Read account connection status')).toBeVisible();
   await expect(warning.getByRole('button', { name: 'Install (5)' })).toBeDisabled();
   await warning.getByRole('button', { name: 'Cancel' }).click();
-  await expect(page.getByRole('group', { name: 'Connection panel', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Hello pane', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Install', exact: true }).click();
   await warning.getByRole('button', { name: 'Install anyway' }).click({ timeout: 8000 });
-  const panel = page.getByRole('group', { name: 'Connection panel', exact: true });
+  const panel = page.getByRole('group', { name: 'Hello pane', exact: true });
   await expect(panel.getByRole('checkbox', { name: 'Enabled for all accounts' })).toBeChecked();
   await expect(panel.getByText('Read account connection status')).toBeVisible();
   await expect(panel.getByRole('checkbox')).toHaveCount(2);
@@ -274,59 +274,12 @@ test('extensions on a discontinued API version explain why and never run', async
   await expect(card.getByRole('checkbox', { name: 'Enabled for all accounts' })).toBeDisabled();
   await expect(card.getByText('stopped supporting in v9.0.0')).toBeVisible();
   // Review reports it, and no consent dialog follows.
-  await page.getByLabel('Extension package', { exact: true }).setInputFiles('../target/extensions/connection-panel.colectoext');
+  await page.getByLabel('Extension package', { exact: true }).setInputFiles('../target/extensions/hello-pane.colectoext');
   await page.getByRole('button', { name: 'Install', exact: true }).click();
   const review = page.getByRole('dialog', { name: 'Another old panel can’t be loaded' });
   await expect(review.getByText('Nothing was installed.')).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Only install extensions you trust' })).toHaveCount(0);
   await review.getByRole('button', { name: 'Close' }).click();
-});
-
-test('Oneko follows the pointer and hops aside when touched', async ({ page }) => {
-  await page.goto('/');
-  await openExtensions(page);
-  await page.getByLabel('Extension package', { exact: true }).setInputFiles('../docs/extensions/examples/oneko.colectoext');
-  await page.getByRole('button', { name: 'Install', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Install anyway' }).click({ timeout: 8000 });
-  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-  const cat = page.locator('.sprite');
-  await expect(cat).toBeVisible();
-  await expect.poll(() => cat.locator('image').evaluate(node => (node as SVGGraphicsElement).getBBox().width)).toBeGreaterThan(0);
-  await page.mouse.move(700, 400);
-  await expect.poll(async () => { const box = await cat.boundingBox(); return box ? Math.max(Math.abs(box.x + 16 - 700), Math.abs(box.y + 16 - 400)) : 999; }, { timeout: 12000 }).toBeLessThan(46);
-  const box = (await cat.boundingBox())!;
-  await page.mouse.move(box.x + 16, box.y + 16);
-  await expect.poll(async () => { const moved = (await cat.boundingBox())!; return moved.x > box.x + 32 || moved.x + 32 < box.x + 16 || moved.y > box.y + 32 || moved.y + 32 < box.y + 16; }).toBe(true);
-  await openExtensions(page);
-  page.on('dialog', dialog => dialog.accept());
-  await page.getByRole('group', { name: 'Oneko', exact: true }).getByRole('button', { name: 'Remove extension' }).click();
-});
-
-// Regression: updating the daemon's systemd unit restarts it, and requests meanwhile fail
-// with "No such file or directory". Oneko used to stop at the first failed frame for good.
-test('Oneko keeps running after the mail service restarts', async ({ page }) => {
-  await page.goto('/');
-  await openExtensions(page);
-  await page.getByLabel('Extension package', { exact: true }).setInputFiles('../docs/extensions/examples/oneko.colectoext');
-  await page.getByRole('button', { name: 'Install', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Install anyway' }).click({ timeout: 8000 });
-  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-  const cat = page.locator('.sprite');
-  await expect(cat).toBeVisible();
-  let failed = 0;
-  await page.route('**/api/v1/extensions/oneko/run', route => {
-    if (failed >= 3) return route.continue();
-    failed += 1;
-    return route.fulfill({ status: 502, json: { error: 'No such file or directory (os error 2)' } });
-  });
-  await expect.poll(() => failed).toBe(3);
-  const before = (await cat.boundingBox())!;
-  await page.mouse.move(before.x > 600 ? 200 : 1000, 500);
-  await expect.poll(async () => { const now = (await cat.boundingBox())!; return Math.abs(now.x - before.x) + Math.abs(now.y - before.y); }, { timeout: 12000 }).toBeGreaterThan(8);
-  await expect(page.getByRole('alert').filter({ hasText: 'oneko' })).toHaveCount(0);
-  await openExtensions(page);
-  page.on('dialog', dialog => dialog.accept());
-  await page.getByRole('group', { name: 'Oneko', exact: true }).getByRole('button', { name: 'Remove extension' }).click();
 });
 
 test('owner generates a scoped key, sees its secret once, and revokes it on a phone', async ({ page }) => {

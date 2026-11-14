@@ -50,7 +50,9 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Sequential extension API versions; refuse extensions on a discontinued version with a link to why | Done |
 | Rebuild extensions as client-side Workers with a declarative component UI, reset to API 1 ([design](extensions/ui-model.md)) | In progress |
 | Move core UI (app frame, docking, account switcher, Settings, command runner, toasts) out of `ui/src/extensions/` | Done |
-| Worker runtime, per-extension credentials, renderer, theme tokens and `frame` | In progress |
+| Worker runtime, per-extension credentials, renderer, theme tokens and `frame`; reset to API 1 | Done |
+| Shared TypeScript client library and bundled client parts | Next |
+| Rust SDK support for client parts (Wasm client ABI) and building them with `cargo colecto` | Later |
 | Notifications, AI, inbox, reader and composer on the new model, one at a time | Next |
 | Oneko rewritten on `canvas` | Later |
 

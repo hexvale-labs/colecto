@@ -4,22 +4,14 @@ use colecto_extension_api::{
     ApiSupport, Capability, ExtensionManifest, api_support, capability_since, latest_api_version,
 };
 
-/// The API version that first allows `.` in bus names, as in `v0.1.2/add_button`.
-pub const DOTTED_BUS_NAMES_SINCE: u32 = 3;
-
 /// A bus request or event name: 1–64 bytes of lowercase ASCII, digits, `-`, `_`, `.` and
-/// `/`. Names with `.` also need [`DOTTED_BUS_NAMES_SINCE`]; see [`bus_name_allowed`].
+/// `/`.
 pub fn valid_bus_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-_./".contains(&b))
-}
-
-/// [`valid_bus_name`] for an extension that targets `api_version`.
-pub fn bus_name_allowed(name: &str, api_version: u32) -> bool {
-    valid_bus_name(name) && (api_version >= DOTTED_BUS_NAMES_SINCE || !name.contains('.'))
 }
 
 /// Why this build cannot run an extension that targets `api_version`, or `None` if it can.
@@ -75,22 +67,47 @@ pub fn parse_any_version(source: &str) -> Result<ExtensionManifest, String> {
     {
         return Err("Extension metadata cannot be empty".into());
     }
-    if ![
-        "shell", "mailbox", "reader", "composer", "accounts", "panel", "overlay",
-    ]
-    .contains(&manifest.slot.as_str())
+    if let Some(client) = &manifest.client
+        && !(crate::safe_client_path(client)
+            && (client.ends_with(".js") || client.ends_with(".wasm")))
     {
-        return Err("Unknown extension slot".into());
+        return Err("client must name a .js or .wasm file under client/".into());
+    }
+    if let Some(service) = &manifest.service
+        && !crate::safe_service_name(service)
+    {
+        return Err("service must name a .wasm module at the package root".into());
+    }
+    if let Some(pane) = &manifest.pane
+        && !valid_icon(&pane.icon)
+    {
+        return Err("Unknown pane icon".into());
+    }
+    if let Some(page) = &manifest.settings_page {
+        if page.title.trim().is_empty() || page.title.len() > 32 {
+            return Err("settings_page.title must be 1–32 bytes".into());
+        }
+        if CORE_SETTINGS_TITLES
+            .iter()
+            .any(|core| core.eq_ignore_ascii_case(page.title.trim()))
+        {
+            return Err("settings_page.title must not match a core Settings section".into());
+        }
+        if !valid_icon(&page.icon) {
+            return Err("Unknown settings_page icon".into());
+        }
+    }
+    for (index, target) in manifest.navigation.iter().enumerate() {
+        if !NAVIGATION_OWNED.contains(&target.as_str())
+            || manifest.navigation[..index].contains(target)
+        {
+            return Err(
+                "navigation lists destinations from inbox, drafts, sent and compose".into(),
+            );
+        }
     }
     if manifest.capabilities.contains(&Capability::AppNavigate) {
         return Err("app.navigate is reserved for API keys".into());
-    }
-    if manifest.capabilities.contains(&Capability::WindowOverlay) {
-        if !manifest.z_index.is_some_and(|z| (1..=10000).contains(&z)) {
-            return Err("window.overlay requires z_index between 1 and 10000".into());
-        }
-    } else if manifest.z_index.is_some() {
-        return Err("z_index requires window.overlay".into());
     }
     for (index, &capability) in manifest.capabilities.iter().enumerate() {
         if manifest.capabilities[..index].contains(&capability) {
@@ -118,7 +135,7 @@ pub fn parse_any_version(source: &str) -> Result<ExtensionManifest, String> {
                         || !bus
                             .bytes()
                             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-                        || !bus_name_allowed(name, version)
+                        || !valid_bus_name(name)
                 })
             })
         {
@@ -128,16 +145,107 @@ pub fn parse_any_version(source: &str) -> Result<ExtensionManifest, String> {
     Ok(manifest)
 }
 
-/// The extra rules for third-party (Wasm) packages.
-/// Like [`parse_any_version`], it accepts discontinued API versions.
+/// The extra rules for third-party packages. Like [`parse_any_version`], it accepts
+/// discontinued API versions.
 pub fn validate(manifest: &ExtensionManifest) -> Result<(), String> {
-    parse_any_version(&toml::to_string(manifest).map_err(|e| e.to_string())?)?;
-    // Guests can only emit declarative panels or sprites.
-    if !["panel", "overlay"].contains(&manifest.slot.as_str()) {
-        return Err("Wasm extensions require slot = panel or overlay".into());
+    let source = toml::to_string(manifest).map_err(|e| e.to_string())?;
+    parse_any_version(&source)?;
+    if manifest.client.is_none() {
+        return Err("Extensions need a client part: set client = \"client/main.js\"".into());
     }
-    if toml::to_string(manifest).map_err(|e| e.to_string())?.len() > MAX_MANIFEST {
+    if source.len() > MAX_MANIFEST {
         return Err("Manifest too large".into());
     }
     Ok(())
+}
+
+/// Core Settings section titles an extension's own section may not copy.
+pub const CORE_SETTINGS_TITLES: &[&str] = &[
+    "Accounts",
+    "Connection",
+    "Extensions",
+    "API keys",
+    "Send approvals",
+    "Appearance",
+];
+
+/// Destinations an extension can own with `navigation`; Settings pages stay core.
+pub const NAVIGATION_OWNED: &[&str] = &["inbox", "drafts", "sent", "compose"];
+
+/// Icon names extensions may use, the closed set in `ui/src/Icon.svelte` (API 1).
+pub const ICONS: &[&str] = &[
+    "account",
+    "alert",
+    "attach",
+    "back",
+    "bell",
+    "check",
+    "close",
+    "compose",
+    "copy",
+    "cpu",
+    "download",
+    "drafts",
+    "extension",
+    "forward",
+    "image",
+    "inbox",
+    "info",
+    "key",
+    "layout",
+    "mail",
+    "next",
+    "palette",
+    "pencil",
+    "plus",
+    "refresh",
+    "reply",
+    "replyAll",
+    "search",
+    "sent",
+    "server",
+    "settings",
+    "shield",
+    "sidebar",
+    "sort",
+    "text",
+    "trash",
+];
+
+pub fn valid_icon(name: &str) -> bool {
+    ICONS.contains(&name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn icons_match_the_ui() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/src");
+        let svelte = std::fs::read_to_string(root.join("Icon.svelte")).unwrap();
+        let renderer = std::fs::read_to_string(root.join("runtime/protocol.ts")).unwrap();
+        for icon in ICONS {
+            assert!(
+                svelte.contains(&format!("    {icon}: '")),
+                "Icon.svelte has no {icon}"
+            );
+            assert!(
+                renderer.contains(&format!("'{icon}'")),
+                "protocol.ts does not list {icon}"
+            );
+        }
+        let listed = renderer
+            .split_once("export const ICONS = [")
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .unwrap()
+            .0
+            .matches('\'')
+            .count()
+            / 2;
+        assert_eq!(
+            listed,
+            ICONS.len(),
+            "protocol.ts and manifest.rs list the same icons"
+        );
+    }
 }

@@ -408,6 +408,7 @@ mod tests {
             origin: "http://127.0.0.1:4173".into(),
             execution: Arc::new(tokio::sync::Semaphore::new(2)),
             sync: Arc::default(),
+            credentials: Arc::default(),
         }
     }
 

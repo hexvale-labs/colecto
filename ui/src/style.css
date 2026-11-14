@@ -858,3 +858,7 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
   .service-row { flex-wrap: wrap; }
   .service-controls { width: 100%; padding-left: 50px; }
 }
+
+/* Extension panes and pages: the shell's chrome around what an extension draws. */
+.extension-pane { height: 100%; padding: 16px; overflow: auto; }
+.extension-from { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }

@@ -16,8 +16,6 @@ pub struct Module {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    Panel,
-    Overlay,
     Request,
     Event,
 }
@@ -90,8 +88,6 @@ pub fn decode_handlers(mut bytes: &[u8]) -> Result<Vec<Handler>, String> {
     let mut handlers = Vec::new();
     while let Some((&kind, rest)) = bytes.split_first() {
         let kind = match kind {
-            b'p' => Kind::Panel,
-            b'o' => Kind::Overlay,
             b'r' => Kind::Request,
             b'e' => Kind::Event,
             _ => return Err(invalid()),
@@ -170,8 +166,8 @@ mod tests {
     fn decodes_what_the_sdk_encodes() {
         let event: [u8; 3 + 6 + 17] =
             colecto_extension_sys::record(b'e', "reader", "v1/message_opened");
-        let panel: [u8; 3] = colecto_extension_sys::record(b'p', "", "");
-        let handlers = decode_handlers(&[&event[..], &panel[..]].concat()).unwrap();
+        let request: [u8; 3 + 7 + 8] = colecto_extension_sys::record(b'r', "counter", "v1/count");
+        let handlers = decode_handlers(&[&event[..], &request[..]].concat()).unwrap();
         assert_eq!(
             handlers,
             [
@@ -181,9 +177,9 @@ mod tests {
                     name: "v1/message_opened".into()
                 },
                 Handler {
-                    kind: Kind::Panel,
-                    bus: String::new(),
-                    name: String::new()
+                    kind: Kind::Request,
+                    bus: "counter".into(),
+                    name: "v1/count".into()
                 },
             ]
         );
@@ -200,7 +196,7 @@ mod tests {
                 (import "env" "glob" (global i32))
                 (memory (export "memory") 1)
                 (func (export "run"))
-                (@custom "colecto.handlers.v1" "p\00\00")
+                (@custom "colecto.handlers.v1" "e\06reader\05v1/go")
                 (@custom "colecto.handlers.v1" "r\03abc\05v1/go"))"#,
         )
         .unwrap();
@@ -218,7 +214,7 @@ mod tests {
                 && module.exports.contains(&("memory".into(), 2))
         );
         let kinds: Vec<_> = module.handlers.unwrap().iter().map(|h| h.kind).collect();
-        assert_eq!(kinds, [Kind::Panel, Kind::Request]);
+        assert_eq!(kinds, [Kind::Event, Kind::Request]);
         assert!(
             parse(b"\0asm\x01\0\0\0\x07\x05").is_err(),
             "truncated section"

@@ -9,4 +9,5 @@ import AiActions from './ai/AiActions.svelte';
 import AiSummary from './ai/AiSummary.svelte';
 import AiSettings from './ai/AiSettings.svelte';
 export const aiExtension = { actions: AiActions, summary: AiSummary, settings: AiSettings };
+// Headless: decides what to notify about and shows it on the shell's toast surface.
 export const overlayExtensions = { notifications: Notifications };

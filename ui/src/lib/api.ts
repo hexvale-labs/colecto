@@ -164,9 +164,14 @@ export const hostService = {
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 
-export type Capability = 'extensions.bus' | 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate' | 'window.overlay';
+export type Capability = 'extensions.bus' | 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate'
+  | 'ui.frame' | 'ui.frame.remote' | 'ui.commands' | 'ui.app_actions' | 'ui.toasts' | 'ui.contribute' | 'approvals.notify' | 'releases.read' | 'ai.text' | 'ai.decide' | 'ai.configure';
 export interface ExtensionState {
-  manifest: { settings?: ExtensionSetting[]; id: string; name: string; description: string; author: string; api_version: number; slot: string; z_index?: number; capabilities: Capability[] };
+  manifest: {
+    settings?: ExtensionSetting[]; id: string; name: string; description: string; author: string; api_version: number; capabilities: Capability[];
+    /** The client part's entry; bundled extensions not yet on the runtime have none. */
+    client?: string; service?: string; pane?: { icon: string }; settings_page?: { title: string; icon: string }; navigation?: string[];
+  };
   bundled: boolean;
   enabled: boolean;
   /** The release that discontinued this extension's API version; it never runs. */
@@ -176,7 +181,6 @@ export interface ExtensionState {
 export interface ExtensionReview { manifest: ExtensionState['manifest']; discontinued?: string }
 /** The release notes section that explains why a release dropped an extension API version. */
 export const breakingApiNotes = (release: string) => `https://github.com/hexvale-labs/colecto/releases/tag/${encodeURIComponent(release)}#breaking-api-changes`;
-export interface ExtensionView { title: string; text: string; actions: string[] }
 async function uploadExtension<T>(path: string, pkg: Uint8Array): Promise<T> {
   let response: Response;
   try { response = await fetch(`/api/v1/extensions${path}`, { method: 'POST', credentials: 'omit', headers: { ...headers('host','demo'), 'content-type': 'application/octet-stream' }, body: new Blob([pkg as BlobPart]) }); }
@@ -189,13 +193,21 @@ async function uploadExtension<T>(path: string, pkg: Uint8Array): Promise<T> {
 export const extensionHost = {
   settings: (id: string) => request<ExtensionSettings>("host", "demo", `/extensions/${encodeURIComponent(id)}/settings`),
   saveSettings: (id: string, values: ExtensionSettings["values"]) => request<ExtensionSettings>("host", "demo", `/extensions/${encodeURIComponent(id)}/settings`, values, "PUT"),
-  /** `pkg` is a .colectoext file: a zip with manifest.toml and module.wasm. */
+  /** `pkg` is a .colectoext file: a zip with manifest.toml, client/ and an optional service module. */
   install: (pkg: Uint8Array) => uploadExtension<boolean>('', pkg),
   review: (pkg: Uint8Array) => uploadExtension<ExtensionReview>('/review', pkg),
   asset: (id: string, name: string) => download('host', 'demo', `/extensions/${encodeURIComponent(id)}/assets/${encodeURIComponent(name)}`),
-  frame: (account: string, id: string, action: string) => request<OverlayOutput>('host', account, `/extensions/${encodeURIComponent(id)}/run`, { action }),
   remove: (id: string) => request<boolean>('host', 'demo', `/extensions/${encodeURIComponent(id)}`, {}, 'DELETE'),
-  run: (account: string, id: string, action: string) => request<ExtensionView>('host', account, `/extensions/${encodeURIComponent(id)}/run`, { action }),
+  /** A credential for the extension's client part; only the shell's runtime holds it. */
+  credential: async (id: string) => (await request<{ token: string }>('host', 'demo', `/extensions/${encodeURIComponent(id)}/credential`, {})).token,
+  revokeCredential: (id: string, token: string) => request<boolean>('host', 'demo', `/extensions/${encodeURIComponent(id)}/credential`, { token }, 'DELETE'),
+  /** Every file under a third-party extension's `client/`, by its path in the package. */
+  clientFiles: async (id: string) => {
+    const paths = await request<string[]>('host', 'demo', `/extensions/${encodeURIComponent(id)}/client`);
+    const files: Record<string, ArrayBuffer> = {};
+    await Promise.all(paths.map(async path => { files[path] = await (await download('host', 'demo', `/extensions/${encodeURIComponent(id)}/client/${path.slice('client/'.length)}`)).arrayBuffer(); }));
+    return files;
+  },
   list: (account: string) => request<ExtensionState[]>('host', account, '/extensions'),
   update: (account: string, id: string, enabled: boolean) =>
     request<boolean>('host', account, `/extensions/${encodeURIComponent(id)}`, { enabled }),
@@ -210,13 +222,16 @@ export interface PendingSend { id: string; requester: string; account: string; f
  * Follow the Host's server-sent events (`mail`, `approval`, `navigate`, `sync`), reconnecting with backoff.
  * Uses fetch rather than EventSource so the owner token can travel in a header. Returns a stop function.
  */
-function openEvents(onevent: (name: string, data: unknown) => void): () => void {
+export function openEvents(onevent: (name: string, data: unknown) => void, path = '/events', body?: unknown): () => void {
   const controller = new AbortController();
   let delay = 1000;
   void (async () => {
     while (!controller.signal.aborted) {
       try {
-        const response = await fetch('/api/v1/events', { credentials: 'omit', headers: headers('host', 'demo'), signal: controller.signal });
+        const response = await fetch(`/api/v1${path}`, {
+          credentials: 'omit', signal: controller.signal,
+          ...(body === undefined ? { headers: headers('host', 'demo') } : { method: 'POST', headers: { ...headers('host', 'demo'), 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+        });
         if (!response.ok || !response.body) throw new Error();
         delay = 1000;
         const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -259,8 +274,6 @@ export function subscribeEvents(onevent: EventListener): () => void {
     if (!eventListeners.size) { closeEvents?.(); closeEvents = undefined; }
   };
 }
-
-export interface OverlayOutput { overlay: { items: { opacity?: number; image: string; x: number; y: number; width: number; height: number; frame: { x: number; y: number; width: number; height: number } }[] }; state: string }
 
 export interface ExtensionSetting { key: string; label: string; description?: string; type: "toggle" | "range" | "choice" | "text"; default: boolean | number | string; min?: number; max?: number; step?: number; unit?: string; options?: {value: string; label: string}[] }
 export interface ExtensionSettings { schema: ExtensionSetting[]; values: Record<string, boolean | number | string> }

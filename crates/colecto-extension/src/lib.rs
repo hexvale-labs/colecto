@@ -1,5 +1,6 @@
-//! Typed SDK for Colecto extensions written in Rust and compiled to
-//! `wasm32-unknown-unknown`.
+//! Typed SDK for the service part of Colecto extensions, written in Rust and compiled to
+//! `wasm32-unknown-unknown`. The service part runs in the Host, without a window: it
+//! answers requests on the extension's own bus and reacts to bus events.
 //!
 //! You write plain functions and register them with [`export!`]; the SDK reads the
 //! action, calls the matching function and emits its result. Service calls, settings
@@ -10,12 +11,15 @@
 //! ```ignore
 //! use colecto_extension::prelude::*;
 //!
-//! fn panel(event: PanelEvent, cx: &mut Context) -> Result<View> {
-//!     let count = cx.messages()?.len();
-//!     Ok(View::new("Inbox", format!("{count} messages")).action("Refresh"))
+//! #[derive(Serialize, Deserialize)]
+//! struct Count {}
+//! colecto_extension::bus_request!(Count => usize, bus = "counter", version = 1, name = "count");
+//!
+//! fn count(_: Count, cx: &mut Context) -> Result<usize> {
+//!     Ok(cx.messages()?.len())
 //! }
 //!
-//! colecto_extension::export! { panel: panel }
+//! colecto_extension::export! { requests: [count] }
 //! ```
 //!
 //! This crate forbids `unsafe` code; the raw imports live in `colecto-extension-sys`.
@@ -37,10 +41,7 @@ pub use {serde, serde_json};
 
 /// Everything a typical extension needs, plus serde's derive traits.
 pub mod prelude {
-    pub use crate::{
-        BusEvent, BusRequest, Context, Error, Frame, Overlay, PanelEvent, Rect, Result, Sprite,
-        View,
-    };
+    pub use crate::{BusEvent, BusRequest, Context, Error, Result};
     pub use serde::{Deserialize, Serialize};
 }
 
@@ -88,13 +89,10 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Defines the module's `run` export and routes each invocation to your functions.
 ///
-/// Entries may come in any order, each at most once; an extension has either a
-/// `panel` or an `overlay`, matching its manifest `slot`:
+/// Entries may come in any order, each at most once:
 ///
 /// ```ignore
 /// colecto_extension::export! {
-///     panel: my_panel,             // fn(PanelEvent, &mut Context) -> Result<View>
-///     overlay: my_overlay,         // fn(Frame<S>, &mut Context) -> Result<Overlay<S>>
 ///     requests: [word_count],      // fn(R: BusRequest, &mut Context) -> Result<R::Response>
 ///     events: [on_message_opened], // fn(E: BusEvent, &mut Context) -> Result<()>
 /// }
@@ -121,16 +119,6 @@ macro_rules! export {
 #[macro_export]
 macro_rules! __export_entries {
     ($d:ident) => {};
-    ($d:ident panel: $f:path $(, $($rest:tt)*)?) => {
-        $d.panel($f);
-        $crate::__private::handler_record!(b'p', "", "");
-        $crate::__export_entries!($d $($($rest)*)?);
-    };
-    ($d:ident overlay: $f:path $(, $($rest:tt)*)?) => {
-        $d.overlay($f);
-        $crate::__private::handler_record!(b'o', "", "");
-        $crate::__export_entries!($d $($($rest)*)?);
-    };
     ($d:ident requests: [$($f:path),* $(,)?] $(, $($rest:tt)*)?) => {
         $(
             $d.request($f);

@@ -4,11 +4,20 @@ The planned replacement for today's extension system: every extension, bundled o
 third-party, runs its client part in a Web Worker on the device and describes its
 interface as a component tree that trusted Colecto code renders.
 
-**Status: approved design, being built.** Step 2 ([Core UI out](#migration-order)) is
-done; nothing else on this page works yet. The
-current system is described in the [extension contract](README.md). This page becomes
-the contract, section by section, as each step in [Migration order](#migration-order)
-lands; until then, where the two disagree, the current contract describes what runs.
+**Status: approved design, being built.** Done: step 2 (core UI out) and step 3 except
+the shared client library, the bundled client parts' build and Rust client parts (see
+[Migration order](#migration-order)). The [extension contract](README.md) describes what
+works today; where the two disagree, the contract describes what runs.
+
+| Section | State |
+| --- | --- |
+| Packages, manifest, capabilities, credentials, event stream, bus, service part | Built |
+| Client runtime, Wasm client ABI in the runtime page, theme tokens | Built |
+| Components: containers, text and media, controls, static `list`, states, `frame` without scripts | Built |
+| Shared client library, bundled client parts | With notifications |
+| `state`, `focus`, `dialog`, toasts, commands, app actions, contribution slots, `virtual` lists, `message_row`, `tabs`, script frames, storage | With the bundled extension that first needs each |
+| Rust SDK for client parts, `cargo colecto` client builds | Later |
+| `canvas` | With Oneko |
 
 ## Goals
 
@@ -770,7 +779,7 @@ There are no adapters, detection or migration for old packages.
 Each step is its own pull request against `develop`, shippable alone: `just verify`,
 `just test browser`, `just perf-check`, docs updated in the same change.
 
-1. **This design.** Wait for the maintainer's approval.
+1. **This design.** Approved (pull request #77).
 2. **Core UI out.** Move the [core parts](#core-ui) to `ui/src/shell/`; remove
    `accounts` and `mail-shell`. Not-yet-migrated bundled extensions keep running as
    trusted Svelte inside the shell until their own step; this interim path is internal

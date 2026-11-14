@@ -3,6 +3,4 @@ name = "Notifications"
 author = "Colecto"
 description = "New mail and delivery approval notifications."
 api_version = 1
-slot = "overlay"
-capabilities = ["extensions.bus", "window.overlay"]
-z_index = 1250
+capabilities = ["extensions.bus"]
