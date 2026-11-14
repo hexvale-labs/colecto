@@ -30,7 +30,19 @@ Start with [docs/README.md](docs/README.md) (index, technologies, where files li
   shared mutable stores, no reading another extension's state. When one extension
   should be usable by others, expose a versioned interface on its bus (the
   `extensions.bus` capability, see [docs/extensions/README.md](docs/extensions/README.md)),
-  for example the request `v1/add_button` rather than `add_button`.
+  for example the request `v1/add_button` rather than `add_button`. Bundled bus names
+  use whole-number versions only, listed in
+  [docs/extensions/bundled-bus.md](docs/extensions/bundled-bus.md).
+
+## Extension API versions
+
+- Every change to what extensions can rely on adds one sequential API version (1, 2,
+  3, …) in `crates/colecto-extension-api/api-versions.json`. Follow
+  [docs/extensions/api-versions/README.md](docs/extensions/api-versions/README.md).
+- Raise `api_version` only in the extensions that need the new feature, never in every
+  bundled extension and example.
+- Change existing signatures in a new version rather than adding a `request2`. Ask the
+  maintainer before adding a parallel variant.
 
 ## How to work
 

@@ -1,7 +1,9 @@
-//! Version 1 contracts shared by core services and the local Host.
+//! Contracts shared by core services and the local Host. Extension API versions live in
+//! `versions.rs`.
 use serde::{Deserialize, Serialize};
 
-pub const API_VERSION: u32 = 1;
+mod versions;
+pub use versions::*;
 pub const DEMO_ACCOUNT: &str = "demo";
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -282,6 +284,20 @@ pub struct ExtensionState {
     pub manifest: ExtensionManifest,
     pub bundled: bool,
     pub enabled: bool,
+    /// The release that discontinued this extension's API version. Such an extension
+    /// stays installed but never runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discontinued: Option<String>,
+}
+
+/// What `POST /api/v1/extensions/review` reports about a package before installation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionReview {
+    pub manifest: ExtensionManifest,
+    /// Set when this build discontinued the package's API version; it cannot be installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discontinued: Option<String>,
 }
 
 #[derive(Deserialize)]

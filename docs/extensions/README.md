@@ -1,7 +1,8 @@
-# Extension contract (API 1)
+# Extension contract
 
 The exact rules for extension packages, capabilities, the Wasm ABI and overlays.
-For a walkthrough, start with [Make your own extension](guide.md).
+For a walkthrough, start with [Make your own extension](guide.md). What each API
+version adds is in [API versions](api-versions/README.md).
 
 Every package has an `extension.toml` manifest:
 
@@ -17,7 +18,9 @@ capabilities = ["account.read"]
 
 All fields above are required. Unknown fields, unknown or duplicate capabilities,
 invalid identifiers, empty metadata, unsupported slots and API versions are
-rejected. Identifiers use lowercase ASCII letters, digits and hyphens. Author
+rejected. `api_version` is any version this Colecto supports (see
+[API versions](api-versions/README.md#how-the-host-uses-them)); capabilities newer than
+it are rejected. Identifiers use lowercase ASCII letters, digits and hyphens. Author
 names are self-reported metadata, not verified publisher identities.
 
 ## Install and run a third-party extension
@@ -232,8 +235,11 @@ route authentication and Host identity, and refuses disabled extensions. It retu
 the matching image content type with `x-content-type-options: nosniff` and
 `content-security-policy: sandbox; default-src 'none'`. The UI downloads with auth headers
 and creates local image blob URLs; scripts cannot use blob URLs.
-`POST /api/v1/extensions/review` validates a package and returns its manifest without
-installing it, allowing the consent dialog to list capabilities.
+`POST /api/v1/extensions/review` validates a package and returns `{manifest}` without
+installing it, allowing the consent dialog to list capabilities. For a package whose
+API version this build discontinued it returns `{manifest, discontinued: "<release tag>"}`
+instead, and the UI shows why it cannot be installed. `GET /api/v1/extensions` sets the
+same `discontinued` field on installed packages that can no longer run.
 
 See [Make your own extension](guide.md) for a walkthrough and API policy.
 
@@ -303,8 +309,14 @@ capabilities = ["extensions.bus"]
 subscribe = ["reader/v1/message_opened"]
 ```
 
-Bundled extensions version every event and request name, e.g. `v1/add_button`, never
-`add_button`; a breaking change adds `v2/...` alongside the old version.
+Bus names are each extension's own business: the Host accepts any valid name (see the
+limits below) and does not interpret versions in it. These bus versions are separate
+from [API versions](api-versions/README.md), which cover how extensions talk to Colecto.
+
+Bundled extensions start every name with a whole-number version: `v1/add_button`,
+`v2/add_button`, never `v1.5/add_button` or a bare `add_button`. Third-party extensions
+are **strongly encouraged** to follow the same convention, so callers can tell versions
+apart at a glance. See [Bundled bus surfaces](bundled-bus.md) for the full rules.
 
 Guests call `colecto.request` with these JSON operations:
 
@@ -343,7 +355,7 @@ answering them act on that account. All listeners share one event-stream connect
 | Limit | Value |
 | --- | --- |
 | Subscriptions per manifest | 32 |
-| Request/event name | 1–64 bytes: lowercase ASCII, digits, `-`, `_`, `/` |
+| Request/event name | 1–64 bytes: lowercase ASCII, digits, `-`, `_`, `/`; also `.` from [API 3](api-versions/API-3.md) |
 | Payload | 32 KiB serialized JSON |
 | Bus action envelope | 64 KiB (room for a 32 KiB payload) |
 | Nested guest requests | 4; deeper requests return null |
@@ -353,21 +365,8 @@ answering them act on that account. All listeners share one event-stream connect
 
 ### Bundled bus surfaces
 
-| Bus | Requests | Events |
-| --- | --- | --- |
-| `composer` | `v1/add_button` `{id,label,request}`; `v1/remove_button` `{id}`; `v1/get_draft`; `v1/set_draft` `{recipient?,subject?,body?}` | `v1/opened` `{}`; `v1/sending` `{}` (informational) |
-| `reader` | `v1/get_html` `{message_id}`; `v1/set_html` `{message_id,html}`; `v1/add_banner` `{message_id,text,tone:"info"\|"warning"}` | `v1/message_opened` `{message_id,subject,from,html,text}` |
-| `inbox` | — | `v1/selected` `{message_id}` |
-| `notifications` | `v1/notify` `{title,body}` | — |
-
-Composer buttons belong to their caller (four per caller, labels at most 32
-characters, rendered as text). Clicking requests the caller's named operation with
-`{draft:{recipient,subject,body}}`; returned `{draft:{...}}` fields update the editor.
-Draft requests return null when the composer is closed. Reader awaits event delivery
-before displaying the body. HTML replacements stay in its sandboxed iframe and show
-“<extension name> changed how this message is shown”; banners are text only (at most
-280 characters, the latest three kept). Notifications label the calling
-extension. Mail shell and accounts have no bus exposure.
+The requests and events bundled extensions offer, with their versions and behaviour,
+are listed in [Bundled bus surfaces](bundled-bus.md).
 
 ### Reader slots
 

@@ -414,6 +414,7 @@ async fn update_extension(
         .update(&id, input.enabled)
         .map_err(|error| {
             if error == "Unknown extension" { forbidden() }
+            else if error.starts_with("This extension") { Failure(StatusCode::BAD_REQUEST, error) }
             else { Failure(StatusCode::INTERNAL_SERVER_ERROR, "Could not confirm extension policy persistence. Reload permissions before retrying.".into()) }
         })?;
     Ok(Json(true))
@@ -463,10 +464,22 @@ async fn install_extension(
 async fn review_extension(
     headers: HeaderMap,
     body: axum::body::Bytes,
-) -> Result<Json<colecto_extension_api::ExtensionManifest>, Failure> {
+) -> Result<Json<colecto_extension_api::ExtensionReview>, Failure> {
     host_grant(&headers)?;
     let bytes = extension_upload(&headers, body)?;
     tokio::task::spawn_blocking(move || {
+        let bad = |e| Failure(StatusCode::BAD_REQUEST, e);
+        // A discontinued API version is reported, not refused, so the UI can explain why.
+        let (source, _, _) = package::read_with_assets(&bytes).map_err(bad)?;
+        let manifest = package::manifest::parse_any_version(&source).map_err(bad)?;
+        if let colecto_extension_api::ApiSupport::Discontinued(release) =
+            colecto_extension_api::api_support(manifest.api_version)
+        {
+            return Ok(Json(colecto_extension_api::ExtensionReview {
+                manifest,
+                discontinued: Some(release.into()),
+            }));
+        }
         let mut extensions = extensions::Extensions::bundled();
         extensions
             .install_package(&bytes)
@@ -476,8 +489,11 @@ async fn review_extension(
                 .list("")
                 .into_iter()
                 .find(|e| !e.bundled)
-                .ok_or_else(forbidden)?
-                .manifest,
+                .map(|e| colecto_extension_api::ExtensionReview {
+                    manifest: e.manifest,
+                    discontinued: None,
+                })
+                .ok_or_else(forbidden)?,
         ))
     })
     .await

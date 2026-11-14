@@ -258,6 +258,36 @@ test('install consent enables all capabilities and settings keep them read-only'
   await panel.getByRole('button', { name: 'Remove extension', exact: true }).click();
 });
 
+test('extensions on a discontinued API version explain why and never run', async ({ page }) => {
+  const old = { manifest: { id: 'old-panel', name: 'Old panel', description: 'Built for API 1.', author: 'Someone', api_version: 1, slot: 'panel', capabilities: [] }, bundled: false, enabled: false, discontinued: 'v9.0.0' };
+  await page.route('**/api/v1/extensions', async route => route.request().method() !== 'GET' ? route.continue() : route.fulfill({ json: [...await (await route.fetch()).json(), old] }));
+  await page.route('**/api/v1/extensions/review', route => route.fulfill({ json: { manifest: { ...old.manifest, id: 'new-old', name: 'Another old panel' }, discontinued: 'v9.0.0' } }));
+  const opened: string[] = [];
+  await page.exposeFunction('recordOpen', (url: string) => opened.push(url));
+  await page.addInitScript(() => { window.open = (url?: string | URL) => { void (window as unknown as { recordOpen: (u: string) => void }).recordOpen(String(url)); return null; }; });
+  await page.goto('/');
+  // Shown once at startup, then remembered.
+  const startup = page.getByRole('dialog', { name: 'Old panel can’t be loaded' });
+  await expect(startup.getByText('uses API 1, dropped in Colecto v9.0.0')).toBeVisible();
+  await startup.getByRole('button', { name: 'Read why' }).click();
+  expect(opened).toEqual(['https://github.com/hexvale-labs/colecto/releases/tag/v9.0.0#breaking-api-changes']);
+  await startup.getByRole('button', { name: 'Close' }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
+  await expect(startup).toHaveCount(0);
+  await openExtensions(page);
+  const card = page.getByRole('group', { name: 'Old panel', exact: true });
+  await expect(card.getByRole('checkbox', { name: 'Enabled for all accounts' })).toBeDisabled();
+  await expect(card.getByText('stopped supporting in v9.0.0')).toBeVisible();
+  // Review reports it, and no consent dialog follows.
+  await page.getByLabel('Extension package', { exact: true }).setInputFiles('../target/extensions/connection-panel.colectoext');
+  await page.getByRole('button', { name: 'Install', exact: true }).click();
+  const review = page.getByRole('dialog', { name: 'Another old panel can’t be loaded' });
+  await expect(review.getByText('Nothing was installed.')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Only install extensions you trust' })).toHaveCount(0);
+  await review.getByRole('button', { name: 'Close' }).click();
+});
+
 test('Oneko follows the pointer and hops aside when touched', async ({ page }) => {
   await page.goto('/');
   await openExtensions(page);

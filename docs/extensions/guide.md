@@ -98,13 +98,14 @@ is available. Use the test suites to check trust boundaries before sharing a pac
 
 ## API version policy
 
-Every extension targets one `api_version`. During alpha the version stays 1 and
-things may break. After release it increases with every major update so old
-extensions keep working on the version they target.
+Every extension targets one `api_version`. Versions count 1, 2, 3, …, and every change
+to the extension API adds one, so an extension keeps working on the version it targets.
+Move to a newer version only when you need something it adds; each version's page in
+[API versions](api-versions/README.md) says what you need to change, if anything.
 
-If a later change, such as tighter security, means an older API version can no
-longer work fully, the app will warn that the extension might not function
-correctly. That warning is planned, not implemented.
+If a release can no longer serve an old version, for example after a security fix, it
+discontinues it. Colecto then refuses to install or run extensions that target it, and
+links to that release's `Breaking API changes` notes, which explain why.
 
 Legacy notification preferences did not record whether bottom right was chosen or
 merely the default. Unmarked bottom-right positions reset to top center once;
@@ -159,7 +160,10 @@ when you need message-open events. A guest can ask the composer for its current 
 Read `data` from the service response; null also means no answer. To answer a request
 on your own bus, inspect the `bus.request` action and emit
 `{"bus":{"response":{"example":true}}}`. Each delivery starts a fresh instance,
-so keep needed context in the payload. Use versioned names such as `v1/example`.
+so keep needed context in the payload. You may name requests and events however you
+like, but you are strongly encouraged to follow the bundled convention: a whole-number
+version first, such as `v1/example` or `v2/example`, never `v1.5/example` or a bare
+`example`.
 See the [bus contract](README.md#extension-bus) for limits and bundled surfaces. In
 Rust, the [SDK's bus types](rust-sdk.md#bus-messages) build these requests and answers
 for you.
