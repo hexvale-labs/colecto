@@ -234,16 +234,28 @@ function edgeSwipe() {
 }
 
 // Every modal dialog claims back while it is open, so back closes the top one, the same way
-// Escape does (its `cancel` handler decides, and may keep it open).
+// Escape does (its `cancel` handler decides, and may keep it open). A click on the backdrop
+// does the same. Backdrop clicks target the dialog itself but land outside its box; the press
+// must start there too, so a text selection dragged out of the dialog does not close it.
 function dialogs() {
   const showModal = HTMLDialogElement.prototype.showModal;
+  const outside = (dialog: HTMLDialogElement, event: MouseEvent) => {
+    if (event.target !== dialog) return false;
+    const box = dialog.getBoundingClientRect();
+    return event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom;
+  };
   HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
     showModal.call(this);
-    const release = claimBack({
-      close: () => { if (this.open && this.dispatchEvent(new Event('cancel', { cancelable: true }))) this.close(); },
-      isOpen: () => this.open,
-    });
-    this.addEventListener('close', release, { once: true });
+    const dismiss = () => { if (this.open && this.dispatchEvent(new Event('cancel', { cancelable: true }))) this.close(); };
+    const release = claimBack({ close: dismiss, isOpen: () => this.open });
+    let pressed = false;
+    const press = (event: PointerEvent) => { pressed = outside(this, event); };
+    const click = (event: MouseEvent) => { if (pressed && outside(this, event)) dismiss(); pressed = false; };
+    this.addEventListener('pointerdown', press);
+    this.addEventListener('click', click);
+    this.addEventListener('close', () => {
+      release(); this.removeEventListener('pointerdown', press); this.removeEventListener('click', click);
+    }, { once: true });
   };
 }
 

@@ -85,6 +85,17 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
             .initialization_script(initialization)
             .on_navigation(move |destination| {
                 colecto_host::runtime::native_navigation_allowed(&navigation_authority, destination)
+            })
+            // Without a handler WebKitGTK denies every permission request, so
+            // `Notification.requestPermission()` failed before anyone was asked and Settings
+            // reported notifications as blocked. The page is Colecto's own UI, and it only
+            // asks when the owner turns desktop notifications on, so allow that one.
+            // Everything else keeps the webview's default (denied).
+            .on_permission_request(|_, kind| match kind {
+                tauri::webview::PermissionKind::Notifications => {
+                    tauri::webview::PermissionResponse::Allow
+                }
+                _ => tauri::webview::PermissionResponse::Default,
             });
             #[cfg(desktop)]
             let window = window
