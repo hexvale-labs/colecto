@@ -272,7 +272,9 @@ test('extensions on a discontinued API version explain why and never run', async
   await startup.getByRole('button', { name: 'Read why' }).click();
   expect(opened).toEqual(['https://github.com/hexvale-labs/colecto/releases/tag/v9.0.0#breaking-api-changes']);
   await startup.getByRole('button', { name: 'Close' }).click();
-  await page.reload();
+  // A new navigation, not reload(): reload waits for the load event, which the intercepted
+  // extension list can hold up while its previous fetch is torn down.
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
   await expect(startup).toHaveCount(0);
   await openExtensions(page);
