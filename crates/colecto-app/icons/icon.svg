@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120" role="img" aria-labelledby="title desc"><title id="title">Colecto — Current C icon</title><desc id="desc">A fluid C with an incoming message node</desc>
-  <rect x="6" y="6" width="108" height="108" rx="28" fill="#1C211E"/>
-  <circle cx="60" cy="60" r="43" fill="none" stroke="#344B3A" stroke-width="2"/>
-  <!-- Open, energetic C for custom workflows; node is a received message -->
-  <path d="M83 37C76 30 67 27 57 28C39 29 27 42 27 60C27 78 40 92 58 92C68 92 77 88 84 82" fill="none" stroke="#A2D6B1" stroke-width="12" stroke-linecap="round"/>
-  <path d="M76 48L65 59L76 70" fill="none" stroke="#E7EDE8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="91" cy="60" r="6.5" fill="#CBF0D2"/>
- </svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Colecto"><rect x="6" y="6" width="108" height="108" rx="28" fill="#1C211E"/><g fill="none" stroke-linecap="round"><path d="M84 36A34 34 0 0 0 36 36" stroke="#A2D6B1" stroke-width="10"/><g stroke-linejoin="round"><path d="M100 30L26.4 54.5L54.8 63.8L55.8 93.7Z" fill="#1C211E" stroke="#1C211E" stroke-width="6.8"/><path d="M100 30L26.4 54.5L54.8 63.8Z" fill="#E7EDE8" stroke="#E7EDE8" stroke-width="2.4"/><path d="M100 30L55.8 93.7L54.8 63.8Z" fill="#B7C6BB" stroke="#B7C6BB" stroke-width="2.4"/></g><path d="M40.5 32.1A34 34 0 1 0 84 84" stroke="#1C211E" stroke-width="14.4"/><path d="M46.7 28.7A34 34 0 1 0 84 84" stroke="#A2D6B1" stroke-width="10"/></g></svg>
