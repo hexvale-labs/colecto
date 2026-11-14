@@ -48,6 +48,11 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Install the daemon as a Windows logon task | Next |
 | Stress testing with thousands of messages and very long HTML mail | Next |
 | Sequential extension API versions; refuse extensions on a discontinued version with a link to why | Done |
+| Rebuild extensions as client-side Workers with a declarative component UI, reset to API 1 ([design](extensions/ui-model.md)) | In progress: design under review |
+| Move core UI (app frame, docking, account switcher, Settings, command runner, toasts) out of `ui/src/extensions/` | Next |
+| Worker runtime, per-extension credentials, renderer, theme tokens and `frame` | Next |
+| Notifications, AI, inbox, reader and composer on the new model, one at a time | Next |
+| Oneko rewritten on `canvas` | Later |
 
 ## Platforms and hosting
 

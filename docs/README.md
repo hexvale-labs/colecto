@@ -20,6 +20,7 @@ Start with the page that matches what you want to do:
 | Write an extension in Rust | [Rust extension SDK](extensions/rust-sdk.md) |
 | Change the extension API, or see what each version adds | [API versions](extensions/api-versions/README.md) |
 | Use or change a bundled extension's bus requests and events | [Bundled bus surfaces](extensions/bundled-bus.md) |
+| See the planned client-side extension model (design, not built yet) | [Extension UI model](extensions/ui-model.md) |
 | Change how data is stored | [Storage](storage.md) |
 | Work on the interface | [Design](DESIGN.md) and [product principles](PRODUCT.md) |
 | Measure resource use | [Performance](performance/README.md) |
