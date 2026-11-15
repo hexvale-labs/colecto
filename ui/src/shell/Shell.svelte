@@ -26,7 +26,7 @@
   import type { Workspace } from '../App.svelte';
   import ToastSettings from '../ToastSettings.svelte';
   import AppearanceSettings from '../AppearanceSettings.svelte';
-  import { notify, notificationPosition } from './toasts.svelte';
+  import { notify, notificationPosition } from './toast-store.svelte';
   import { destinations, isDestination, resolve, settingsPages, type Destination, type SettingsPage } from '../lib/navigation';
   let { extensionStates, extensionSettings, onsettings }: { extensionSettings: import('svelte').Snippet<[Workspace?]>; onsettings: () => void; extensionStates: ExtensionState[] } = $props();
 
