@@ -131,6 +131,7 @@ test('approval requests arrive as notifications with decisions, a close button a
   await expect(toasts).toHaveAttribute('data-position', 'top-left');
   await settings.getByRole('button', { name: 'Notifications', exact: true }).click();
   await settings.getByRole('checkbox', { name: 'Send approvals' }).uncheck();
+  await expect(settings.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
   // Both choices are kept by the Host.
   await page.unroute('**/api/v1/events');
   await page.unroute('**/api/v1/extensions/events');

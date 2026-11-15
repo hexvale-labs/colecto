@@ -336,9 +336,10 @@ test('command runner closes on Escape and outside clicks, finds mail, sorts and 
   await page.keyboard.press('Control+k');
   await page.keyboard.type('sort sender');
   await page.keyboard.press('Enter');
+  // The inbox sorts in its Worker; read the order once it says so.
+  await expect(page.getByText('Sorted sender a–z')).toBeVisible();
   const senders = await page.locator('.mail-item .item-sender').allTextContents();
   expect(senders).toEqual([...senders].sort((a, b) => a.toLocaleLowerCase().localeCompare(b.toLocaleLowerCase())));
-  await expect(page.getByText('Sorted sender a–z')).toBeVisible();
   await page.getByRole('button', { name: 'Clear sorting' }).click();
   await expect(page.getByText('Sorted sender a–z')).toHaveCount(0);
   // The last result hands the words to the provider's search.
