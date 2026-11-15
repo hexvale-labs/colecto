@@ -1,0 +1,37 @@
+- /children: deep-equal
+- dialog "Settings":
+  - navigation "Settings sections":
+    - heading "Settings" [level=1]
+    - button "Collapse the section list" [expanded]
+    - group "Built-in":
+      - text: ""
+      - button "Accounts"
+      - button "Mail"
+      - button "Appearance"
+      - button "Notifications"
+      - button "Privacy"
+      - button "Connection"
+      - button "Extensions"
+      - button "AI"
+      - button "API keys"
+      - button "Send approvals"
+  - banner:
+    - paragraph:
+      - text: Settings
+      - strong: Notifications
+    - button "Close settings"
+  - region "Notifications":
+    - heading "Notifications" [level=2]
+    - paragraph: From Notifications
+    - paragraph: Tells you about new mail, automation waiting for your approval and new Colecto releases.
+    - heading "New mail" [level=3]
+    - paragraph: When a message arrives in any connected account.
+    - checkbox "New mail" [checked]
+    - heading "Send approvals" [level=3]
+    - paragraph: When automation asks to send a message. Reject it from the notification, or open it to review.
+    - checkbox "Send approvals" [checked]
+    - heading "New updates" [level=3]
+    - paragraph: When a newer Colecto release is published. Off means Colecto never checks.
+    - checkbox "New updates" [checked]
+    - button "Reset to defaults" [disabled]
+    - status

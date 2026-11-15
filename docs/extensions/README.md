@@ -1,273 +1,348 @@
 # Extension contract
 
-The exact rules for extension packages, capabilities, the Wasm ABI and overlays.
-For a walkthrough, start with [Make your own extension](guide.md). What each API
-version adds is in [API versions](api-versions/README.md).
+The exact rules for extension packages, manifests, capabilities, credentials, the client
+runtime, the service part and the bus, as they work today (API 1). For a walkthrough,
+start with [Make your own extension](guide.md). The [extension UI model](ui-model.md)
+is the full design, including the parts still being built; what each API version adds is
+in [API versions](api-versions/README.md).
 
-Every package has an `extension.toml` manifest:
+## How an extension runs
+
+| Part | Where it runs | Written in | Talks through |
+| --- | --- | --- | --- |
+| Client part (`client`, required) | A Web Worker on the device, inside an opaque-origin sandboxed frame | JavaScript, Wasm, or both | One `MessagePort` to the shell: the [protocol](ui-model.md#protocol) |
+| Service part (`service`, optional) | The Host (`colecto-host`, `colecto-daemon` or the app's built-in service), without a window | Wasm only | The [service ABI](#service-part) |
+
+Extensions never write HTML. A client part sends component trees that trusted Colecto
+code renders (see [Components](#components)); everything around them, such as pane tabs
+and settings pages, is shell chrome that names the extension.
+
+Bundled extensions (`ui/src/extensions/<id>/`) run on the same runtime: each has an
+`extension.toml` and a TypeScript client part under `client/`, built into
+`dist/extensions/<id>/client/` with the app, and the AI extension also a Rust service
+part under `service/`. They cannot be installed or removed, only turned off. The app frame, docking workspace, account switcher,
+Settings, command runner, toast surface and recovery screens are core UI in
+`ui/src/shell/` and cannot be turned off.
+
+## Manifest
 
 ```toml
-id = "connection-panel"
-name = "Connection panel"
-description = "Check the selected account connection."
+id = "hello-pane"
+name = "Hello pane"
+description = "Shows which account is selected and counts presses of a button."
 author = "Your name"
 api_version = 1
-slot = "panel"
+client = "client/main.js"
 capabilities = ["account.read"]
+
+[pane]
+icon = "extension"
 ```
 
-All fields above are required. Unknown fields, unknown or duplicate capabilities,
-invalid identifiers, empty metadata, unsupported slots and API versions are
-rejected. `api_version` is any version this Colecto supports (see
-[API versions](api-versions/README.md#how-the-host-uses-them)); capabilities newer than
-it are rejected. Identifiers use lowercase ASCII letters, digits and hyphens. Author
-names are self-reported metadata, not verified publisher identities.
+| Field | Required | Rules |
+| --- | --- | --- |
+| `id` | Yes | Lowercase ASCII letters, digits and hyphens; also the extension's bus name |
+| `name`, `description`, `author` | Yes | Not empty. Author names are self-reported, not verified |
+| `api_version` | Yes | A version this Colecto supports (see [API versions](api-versions/README.md#how-the-host-uses-them)) |
+| `client` | Yes (third-party) | A `.js` or `.wasm` file under `client/` in the package |
+| `service` | No | A `[a-z0-9-]+.wasm` module at the package root |
+| `capabilities` | Yes | See [Capabilities](#capabilities); unknown or duplicate entries are rejected |
+| `[pane]` | No | `icon` from the [icon set](#icons). One workspace pane; its tab shows `name` |
+| `[settings_page]` | No | `title` (1–32 bytes, not a core section title such as Accounts or Extensions, ignoring case) and `icon`. A Settings section the extension draws |
+| `navigation` | No | Destinations it opens: `inbox`, `drafts`, `sent`, `compose` |
+| `[overlay]` | No | `z_index` (1–10,000), needs `ui.canvas`. A [canvas overlay](#canvas-overlay) over the whole window |
+| `[bus]` | No | `subscribe = ["<bus>/<name>", …]`, needs `extensions.bus`; see [Extension bus](#extension-bus) |
+| `[[settings]]` | No | Declarative owner settings; see [Extension settings](#extension-settings) |
 
-## Install and run a third-party extension
+Unknown fields are rejected. The old top-level `slot`, `z_index` and `window.overlay`
+fields belonged to the alpha's panel system and are gone.
 
-Third-party extensions ship as one `.colectoext` file: a zip archive holding
-`manifest.toml` (the manifest above, at most 8 KiB) and `module.wasm` (at most 16 MiB),
-with Stored or Deflate entries and at most 16 MiB in all. Up to 256 optional raster image assets are allowed under `assets/`. Anything else, including unsafe
-paths, or entries that decompress past their limit, is rejected before the
-manifest is parsed. `colecto_package::write` builds one (also reachable as `colecto_host::package::write`); `cargo colecto build` builds,
-checks and packages a Rust extension. The package and manifest rules live in
-`crates/colecto-package/`, shared by the Host and the tool.
+## Packages
 
-Run `just build extension` to compile the example's readable WAT source and package it
-as `target/extensions/connection-panel.colectoext`. Start `just run`, open **Settings →
-Extensions**, pick that package and press **Install**. A warning explains that the
-permission system cannot stop an extension from lying about its purpose or misusing data
-it is allowed to read, and recommends open-source extensions from known authors; its
-Install button unlocks after five seconds. Installation enables the extension with every requested capability on all accounts.
-Dropping a `.colectoext` file anywhere on Settings → Extensions opens the same warning
-directly; any other file gets a short message instead. Disable or remove it through
-Settings → Extensions. Saved mail is never removed.
+A `.colectoext` is a zip archive with Stored or Deflate entries, read by
+`crates/colecto-package/` (shared by the Host and `cargo colecto`).
 
-The runtime accepts binary Wasm, not JavaScript, Svelte, HTML, arbitrary URLs or
-WASI applications. Third-party UI currently contributes **panels and overlays**; replacing the
-bundled mailbox, reader, composer or shell with a Wasm package is not supported.
-Those bundled components remain explicitly registered trusted Svelte code, with
-TOML manifests in `ui/src/extensions/<id>/extension.toml`. They initially receive their
-manifest permissions. Account and credential protection, extension consent and
-failure recovery remain trusted Host controls.
+| Entry | Required | Limit |
+| --- | --- | --- |
+| `manifest.toml` | Yes | 8 KiB |
+| `client/**` | Yes; must contain the `client` entry | 256 files, each at most 16 MiB; paths of up to eight `[A-Za-z0-9_.-]` segments not starting with `.`, ending in `.js`, `.wasm`, `.json`, `.bin`, `.html` or `.css` |
+| The `service` module | Only when declared | 16 MiB; must be valid Wasm with only the [service imports](#service-part) |
+| `assets/*.png|jpg|jpeg|webp|gif` | No | 256 flat names `[a-z0-9-]+`, 8 MiB each, magic bytes must match; SVG is rejected |
 
-## Capabilities and persistence
+The whole archive is at most 16 MiB, 48 MiB uncompressed, with no entry above 100:1
+compression; sizes are checked before and while inflating. At most 32 third-party
+packages are installed. Anything else in the archive, a missing client entry, or a
+service module the manifest does not declare (or one it declares but lacks) rejects
+the package.
 
-Enabled extensions have every capability declared by their manifest on every account.
-Disabled extensions have none. Capabilities cannot be granted individually. The Host
-checks enabled state, manifest declarations and invocation generation at each service
-call. Bundled extensions obey the same rule. Obsolete stored account grants are ignored.
-Installing enables the extension; the five-second warning lists all capabilities in
-plain words and is the only consent step. Cancel installs nothing.
+Run `just build extension` to package the JavaScript example in
+`docs/extensions/examples/hello-pane/` as `target/extensions/hello-pane.colectoext`.
 
-Policy and installed packages persist in the Host database. Disable and remove invalidate
-existing invocations at their next service call. Already authorized operations may finish.
-Account creation, credentials and policy changes remain Host-only operations.
+## Install, enable and remove
 
+Settings → Extensions installs a package (pick it, or drop it anywhere on the page).
+`POST /api/v1/extensions/review` validates it and returns `{manifest}` first, so a
+five-second warning can list every capability in plain words; it says that the
+permission system cannot stop an extension from lying about its purpose or misusing
+data it may read. Installing enables the extension with every capability it declares,
+on every account. Disabling turns all of them off; there are no individual grants.
+Removing deletes the package and its settings; saved mail is never removed.
 
-## Wasm ABI
+Installing an ID that already exists, including a bundled one, is refused. Policy and
+packages live in the Host database (policy version 2). On startup, packages from the
+old extension system (policy version 1) and packages that no longer load are dropped
+with their settings and a log line, instead of keeping Colecto from starting.
 
-Export a linear memory named `memory` and a function `run: () -> ()`. Each action
-creates a fresh instance from the cached compiled module: no retained guest state. The
-Host passes `open` on initial display and a clicked action's exact text on later
-invocations. Modules may import only these functions from module `colecto`:
+## Capabilities
 
-- `action(output: i32, capacity: i32) -> i32`: copy the current action's UTF-8
-  bytes into guest memory; return bytes written or `-1`.
-- `request(input: i32, length: i32, output: i32, capacity: i32) -> i32`: read a
-  UTF-8 JSON service request and write a JSON response; return bytes written or
-  `-1`. Example input: `{"operation":"messages.read","id":"1"}`. Draft write
-  and send use `{"operation":"drafts.write","draft":{"recipient":"...",
-  "subject":"...","body":"..."}}`. Unknown request fields are rejected.
-  Responses are `{"ok":true,"data":...}` or `{"ok":false,"error":"..."}`.
-- `emit(input: i32, length: i32) -> i32`: emit one UTF-8 JSON view of shape
-  `{"title":"...","text":"...","actions":["Refresh"]}`. Return `0` on success
-  or `-1` on invalid output. A completed invocation must emit a valid view.
+An enabled extension holds every capability it declares, on every account; a disabled
+one holds none. The Host checks enabled state, generation and declared capability on
+every call.
 
-Only text and buttons are rendered, through Svelte's escaping. Strings never
-become HTML, script, CSS, URLs or Tauri commands. Actions are untrusted labels;
-the Host owns actual buttons and invocation. See the WAT example for a complete
-module, or compile your language to this minimal ABI without WASI. Rust extensions can
-use the [Rust SDK](rust-sdk.md), which implements this ABI.
+| Capability | Grants |
+| --- | --- |
+| `account.read` | Account connection status |
+| `messages.list`, `messages.read` | List messages; read them and their attachments |
+| `messages.label`, `messages.organize` | Change local labels; flag, move, archive, delete |
+| `drafts.list`, `drafts.read`, `drafts.write` | Drafts |
+| `messages.send` | Send mail (with `forward_of`, also `messages.read`) |
+| `extensions.bus` | Talk to other extensions by name |
+| `ui.frame`, `ui.frame.remote` | `frame` components; frames that may load `https:` images |
+| `ui.commands`, `ui.app_actions`, `ui.toasts`, `ui.contribute` | Command-runner entries and search, top-bar buttons, toasts, content in other extensions' slots |
+| `ui.canvas` | A [canvas overlay](#canvas-overlay) declared by `[overlay]` |
+| `approvals.notify`, `releases.read` | Send-approval events; the newest Colecto release |
+| `ai.text`, `ai.decide`, `ai.configure` | The owner's AI models and settings |
 
-## Resource and trust boundaries
+`app.navigate` is reserved for API keys. Settings and an extension's own values need no
+capability.
 
-Wasmi 2 runs guests without WASI or filesystem, networking, process, clock,
-credential, database or native IPC imports. Limits per invocation: 10,000,000
-fuel, one memory of at most 32 MiB, one table of at most 1,024 elements, eight
-service requests, 32 KiB per bridge input/output, 16 KiB view text, 256-byte
-title, sixteen actions of at most 128 bytes each. Traps and exhausted limits
-return an extension error without removing Host controls or saved mail. At most
-two invocations execute concurrently; each module is at most 16 MiB, each
-manifest at most 8 KiB, and at most 32 third-party packages are installed.
+## Credentials
 
-This is an in-process Wasm language/runtime sandbox, not OS process isolation or
-a claim of a security audit. Keep runtime security updates current. Native mail
-operations authorized by a guest still run in Core services and can take their
-normal transport timeout; fuel does not meter native service work. Pure guest
-CPU and memory are bounded. The Host serves a single owner; it is not a
-multi-user service.
+The shell mints one credential per running client part with the owner bearer:
+`POST /api/v1/extensions/{id}/credential` returns `{token}` (32 random bytes, hex). The
+Host keeps only a SHA-256 verifier, in memory, bound to the extension and its current
+generation; the shell keeps the token in its runtime object and never puts it in
+storage, the DOM, a URL, the frame or the Worker.
 
-Trusted bundled code shares the application origin. Header identities on its
-HTTP path are routing labels, not authentication against compromised same-origin
-scripts. Wasm guests never receive that path, browser execution or headers; the
-Host rejects third-party IDs on direct mail HTTP routes. Do not import untrusted
-JavaScript into the app origin.
+The shell forwards a client part's API calls with `Authorization: Colecto-Extension
+<token>` and `x-colecto-account`, and without the owner bearer. That principal reaches
+only these routes; each still checks the extension's capabilities:
 
-## Tauri desktop
+| Route | Notes |
+| --- | --- |
+| `/api/v1/account`, `/messages`, `/messages/*`, `/folders`, `/drafts`, `/drafts/*`, `/labels`, `/send` | Mail, as for API keys |
+| `/api/v1/bus/*` | The [bus](#extension-bus), speaking as this extension |
+| `/api/v1/extensions/{own id}/settings` | Its own settings only |
 
-Install the official [platform prerequisites](https://v2.tauri.app/start/prerequisites/),
-then run `just run native`. `just check native` compiles the optional adapter. `just test native` builds
-and smoke-tests the Linux/X11 window and loopback registry under Xvfb (requires
-`xvfb` and `xwininfo`). The
-Tauri window loads the same loopback Host and confines navigation to that origin.
-It registers no custom Tauri commands, plugins or capability grants. Wasm guests
-execute server-side and cannot access a webview or native IPC. Tauri's native
-[capabilities](https://v2.tauri.app/security/capabilities/) are distinct from the
-extension service capabilities above; neither is used as a substitute for
-Wasm isolation. Mobile builds and other desktop platforms require separate
-platform testing; this runner does not claim mobile parity.
+Everything else, including accounts, credentials, preferences, policy, API keys, send
+decisions and the credential route itself, answers 403. An unknown or revoked token
+answers 401.
 
+| Event | Effect on credentials |
+| --- | --- |
+| Disable, remove or reinstall | The generation changes; every token of that extension fails at its next call |
+| Host restart | All tokens are gone; the shell mints new ones |
+| Window closes | `DELETE /api/v1/extensions/{id}/credential` with `{token}` (best effort) |
+| A ninth token for one extension | The oldest is dropped |
 
-## Workspace panes
+When the local Host forwards to a daemon (`upstream.json`), the credential route goes
+to the daemon like any owner route, and calls carrying `Colecto-Extension` pass through
+unchanged, so the daemon that holds the policy issues and checks them.
 
-Bundled `inbox`, `reader` and `accounts` extensions and every enabled third-party
-`panel` each get a pane in the workspace. Settings → Extensions turns an extension on
-or off and, for those with a pane, chooses whether it shows in the workspace. A newly
-installed panel joins the reader's group once enabled; drag its tab anywhere from
-there. The layout and hidden panes are owner preferences stored by the Host. Panes
-are never told where they are placed, so they must work at any size.
+## Client runtime
 
-## Local labels
+For each enabled extension with a client part, the shell:
 
-`GET /api/v1/labels` requires `messages.list`; `POST /api/v1/labels` requires
-`messages.label`. The writer accepts `{ "name": "Work", "message_id": null,
-"remove": false }`: omit the message ID to create a label, provide a currently
-known message ID to assign it, and set `remove` to unassign or delete. Guest
-service requests use `{"operation":"messages.label","label":{...}}` with the same
-input. All operations bind to the invocation account and require an enabled extension
-that declares the capability.
+1. Mints a credential and fetches `client/` (owner only:
+   `GET /api/v1/extensions/{id}/client` lists the paths, `…/client/{path}` returns one as
+   `application/octet-stream`).
+2. Creates a hidden `<iframe sandbox="allow-scripts">` (no `allow-same-origin`, so its
+   origin is opaque) for `/extension-runtime.html`. The Host serves that page from
+   `ui/src/runtime/frame.html` with
+   `default-src 'none'; script-src 'sha256-<its script>' blob: 'wasm-unsafe-eval'; worker-src blob:; connect-src 'none'; …; frame-ancestors 'self'`.
+3. Posts the files and one end of a `MessageChannel` into the frame, which starts a
+   dedicated Worker from a blob holding Colecto's prelude and the entry, and hands it
+   the port. The frame relays nothing after that.
 
-Labels persist in the data directory's `colecto.db`, scoped to each account.
-Names are trimmed, case-sensitive, 1–80 UTF-8 bytes, without control characters;
-each account permits 50 labels and 1000 message IDs per label, with a 2 MB file
-limit. Writes are atomic; invalid or unreadable stores are never silently reset.
-Labels are local service metadata, unencrypted, and do not sync with providers.
-Filtering applies to the current bounded Inbox/Sent search result, not full
-provider history. Drafts are searchable locally but do not accept message labels.
+| Inside the Worker | Status |
+| --- | --- |
+| DOM | None |
+| `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` | Blocked: the blob Worker inherits `connect-src 'none'` |
+| App storage, cookies, IndexedDB | Unreachable: the origin is opaque |
+| Owner token, its own credential | Never sent |
+| Wasm, nested blob Workers | Allowed |
 
-## HTTP principal authentication
+These are checked by `ui/tests/extension-runtime.spec.ts` in Chromium and WebKit.
 
-Bundled UI account/module headers route operations only after owner bearer
-authentication. Every local and remote owner request explicitly supplies
-`Authorization: Bearer <owner-token>`; cookies never establish owner authority.
-Local mode uses a private OS-user-owned `owner-token` file; loopback headers alone
-cannot establish ownership. Remote mode uses the configured owner bearer. The
-native shell injects the local token only at its exact local origin, never into
-a remote server page. The browser keeps the bearer in origin-scoped sessionStorage
-and does not automatically send it to another port. `POST /api/v1/session` only
-validates an owner bearer with exact Host/Origin; it creates no cookie or session.
-API keys use explicit account/capability grants independent of extension headers
-and cannot invoke Host controls or directly send mail. Wasm service calls retain
-their Host-bound enabled state and manifest capabilities.
-See [daemon authentication](../self-hosting.md#owner-bearers-and-scoped-api-keys).
+The prelude defines one global, `colecto`: `colecto.onmessage = (message) => {}`
+receives shell messages, `colecto.send(message, transfer?)` sends one, and
+`colecto.file(path)` resolves to an `ArrayBuffer` of a file under `client/`. A `.wasm`
+entry instead uses the [Wasm client ABI](ui-model.md#wasm-client-abi). Messages are JSON;
+transferred buffers are referenced as `{"$buffer": index}`.
 
-### Cached folders and error categories
+| Lifecycle | What happens |
+| --- | --- |
+| App start, or the extension is enabled or installed | Frame and Worker start; the shell sends `start` |
+| Disabled or removed | The Worker and frame are removed and the credential revoked |
+| An uncaught error in the Worker, or an invalid or oversized message | It stops; its surfaces show "*name* stopped" with **Restart** |
+| No `pong` to two `ping`s (sent every 5 s) | It stops: "*name* stopped responding" |
+| Page closes | Credentials are revoked (best effort) |
 
-`GET /api/v1/messages` retains its provider-query behavior.
-`POST /api/v1/messages/refresh?folder=inbox|sent&q=...` explicitly queries the
-provider; an empty search updates that folder's bounded snapshot.
-`GET /api/v1/messages/cache?folder=inbox|sent` reads without provider access and
-returns `{folder, messages, fetched_at}`; `fetched_at` is Unix seconds or null
-for unknown freshness. Cached searches are rejected rather than mistaken for
-complete provider search results. Failed refreshes preserve prior snapshots.
-Network outages keep cached readers available. Explicit owner Disconnect and
-vault Lock clear active snapshots; on-disk snapshots remain for identity-checked
-reconnect. They do not make cached messages accessible while locked/disconnected.
-MCP exposes `messages.cached` and `messages.refresh` alongside compatible
-`messages.list`. All require `messages.list`.
+### Messages
 
-For API keys, message-list bodies require the same account's `messages.read`;
-draft-list bodies require `drafts.read`. Without the read grant, bodies are empty
-strings and metadata remains available. Owner, bundled, and existing Wasm grant
-semantics remain unchanged. HTTP and MCP errors include a stable `category` plus
-a readable `error`. Known provider status codes are safe bounded details; raw
-server descriptions, URLs and credentials are never copied into errors.
-`delivery_uncertain` means check Sent and request status before sending again.
+| Shell to extension | Payload |
+| --- | --- |
+| `start` | `{api: 1, id, theme, account, settings, surfaces}` |
+| `account` | `{id, name, address, connected, configured}` when the selected account changes |
+| `theme` | [Theme tokens](ui-model.md#theme-tokens) when Appearance changes |
+| `settings` | `{settings}` after its settings changed (here or in another window) |
+| `event` | `{surface, node, kind, value?}`, for example `kind: "press"` |
+| `host` | `{name, data}`: a Host event it may see (see below) |
+| `bus.request`, `bus.event` | Bus deliveries to its client part |
+| `reply` | `{id, ok, data}` or `{id, ok: false, error, status}` for a `call` |
+| `ping` | `{n}`; answer `{t: "pong", n}` |
+| `navigate` | `{target}`: a destination it declared under `navigation` was opened |
+| `back` | `{surface}`: the owner pressed Back on a surface that reported `back: true` |
+| `command`, `app_action`, `toast_action` | `{id}` (and `toast` for a toast action): the owner picked one of its entries |
+| `command_query`, `command_submit` | `{seq, query}` / `{query}`: the owner typed in, or submitted, a search scope it claimed |
+| `slot` | `{slot, owner, context}`: another extension's slot opened, changed or closed (`context: null`) |
+| `canvas`, `resize`, `pointer` | Its overlay: see [Canvas overlay](#canvas-overlay) |
 
-## Overlay extensions
+| Extension to shell | Payload |
+| --- | --- |
+| `render` | `{surface, tree}` replaces a surface (`null` clears it) |
+| `patch` | `{surface, ops}`: `set` (merge props, `null` removes one), `replace`, `insert`, `remove`; all or nothing |
+| `call` | `{id, method, path, query?, body?, bytes?}`: an API call with its credential; at most 64 pending. `bytes: true` returns the body as an `ArrayBuffer` |
+| `pong` | `{n}` |
+| `state` | `{surface, dirty?, busy?, back?}`: unsaved work, work in progress, whether Back means something |
+| `show`, `leave`, `focus` | Bring its surface forward, leave it, or focus node `node` in it |
+| `dialog` | `{tree}` opens a modal named by the tree's root `label`; `null` closes it |
+| `toast`, `toast_dismiss` | `{id, title, body?, icon?, duration?, system?, actions?}` (`ui.toasts`), at most three actions |
+| `commands` | `{items: [{id, name, disabled?}]}`, at most 64 (`ui.commands`) |
+| `command_search`, `command_hits` | Claim a search scope; answer a `command_query` with up to six `{id, title, hint?}` |
+| `app_actions` | Up to two top-bar buttons `{id, label, icon?, shortcut?}` (`ui.app_actions`) |
+| `contribute` | `{slot, tree}`: content in another extension's slot (`ui.contribute`) |
+| `download` | `{name, data: {$buffer}}`: offer a file to save |
+| `frame` | `{bitmap: {$buffer}, x?, y?}`: one finished overlay frame, when the overlay runs in frames mode |
 
-Declare `window.overlay`, `slot = "overlay"` and `z_index = 10` (a good default).
-`z_index` is required with this capability, forbidden without it, and must be an
-integer from 1 through 10000. Settings uses 1000; menus use 1100, the command
-runner 1200, bundled notifications 1250, and the install dialog 1300. Native
-modal dialogs and the notification region also use the browser top layer. Oneko uses 10000 intentionally.
+Surfaces are `pane` (declared by `[pane]`), `settings` (declared by `[settings_page]`,
+shown under the page title with "From *name*") and the dialog. The full protocol is in
+[the design](ui-model.md#protocol).
 
-The Host renders each enabled overlay in a fixed viewport container with
-`pointer-events: none`. Guests remain fresh Wasmi instances with the same fuel,
-memory and service-call limits as panels. While visible, the UI calls the existing
-run route approximately every 100 ms, with at most one call in flight per overlay.
-Errors stop the loop and appear as extension errors. State round-trips explicitly.
+### Event stream
 
-The action is JSON (at most 32768 UTF-8 bytes):
+The shell opens one stream for all running client parts: `POST
+/api/v1/extensions/events` with the owner bearer and `{tokens: [...]}` (at most 64).
+Each event is `{"to": [extension ids], "data": ...}`; the Host picks recipients by the
+same manifest rules as the API, and a revoked token drops out at the next event.
 
-```json
-{"event":"frame","time_ms":123,"pointer":{"x":100,"y":200,"inside":true},"viewport":{"width":1280,"height":720},"state":""}
-```
+| Host event | Delivered to extensions with |
+| --- | --- |
+| `mail` | `messages.list` |
+| `sync`, `ready`, `resync` | `account.read` |
+| `approval` | `approvals.notify` |
+| `navigate` | That destination under `navigation` |
+| `extension.settings` | Only the extension whose settings changed |
+| `bus.request` | The target bus |
+| `bus.event` | Its own bus, or subscribers listed under `[bus] subscribe` |
 
-Emit through the existing `colecto.emit` import:
+### Components
 
-```json
-{"overlay":{"items":[{"image":"cat.png","x":30,"y":40,"width":32,"height":32,"frame":{"x":0,"y":0,"width":32,"height":32}}]},"state":"next"}
-```
+The renderer (`ui/src/renderer/`) checks every tree against the vocabulary in
+`ui/src/runtime/protocol.ts` and draws it with the app's own components and styles.
+Unknown types, props or values reject the message. Strings are always text.
 
-Unknown output fields are rejected at every level. At most 16 items are allowed.
-All coordinates must be finite; frame origins must be nonnegative. Every width and
-height must be positive and at most 512. State is at most 4096 UTF-8 bytes. Images
-must name assets from the emitting package. `frame` crops the sprite sheet; output
-width and height scale that crop. Panels keep their text view ABI unchanged.
+| Available now | Components |
+| --- | --- |
+| Containers | `stack`, `section`, `group`, `toolbar`, `form` |
+| Text and media | `heading`, `text`, `badge`, `banner`, `icon` |
+| Controls | `button` (`press`), `input`, `textarea` (`change`, or `input` after `debounce_ms`), `toggle` (`toggle`), `select` (`change`); a `form` sends `submit` with `{values}` |
+| Collections and states | `list` (static rows), `empty_state`, `loading` |
+| Embeds | `frame` without scripts: `title`, `doc` (at most 8 MiB), `height`, `designed` |
+| More | `list` with virtual rows, `menu_button`, `segmented`, `range`, `secret_field`, `file_picker`, `message_row`, `tabs`, `slot`, `action_ref` and the rest of the [vocabulary](ui-model.md#component-vocabulary) |
 
-Assets use flat safe names `[a-z0-9-]+\.(png|jpg|jpeg|webp|gif)`, at most 8 MiB each,
-with magic bytes verified against the suffix. SVG and nested paths are rejected. Packages accept at most 256 assets, 16 MiB compressed total, 8 KiB
-manifest and 16 MiB module. No extra paths, duplicate entries or other compression
-methods are accepted. `GET /api/v1/extensions/{id}/assets/{name}` requires owner
-route authentication and Host identity, and refuses disabled extensions. It returns
-the matching image content type with `x-content-type-options: nosniff` and
-`content-security-policy: sandbox; default-src 'none'`. The UI downloads with auth headers
-and creates local image blob URLs; scripts cannot use blob URLs.
-`POST /api/v1/extensions/review` validates a package and returns `{manifest}` without
-installing it, allowing the consent dialog to list capabilities. For a package whose
-API version this build discontinued it returns `{manifest, discontinued: "<release tag>"}`
-instead, and the UI shows why it cannot be installed. `GET /api/v1/extensions` sets the
-same `discontinued` field on installed packages that can no longer run.
+Props are listed in the [design](ui-model.md#component-vocabulary). Text fields keep
+their value in the renderer. A new `value` replaces it, except a value the field itself
+sent moments ago, which a slow render echoing older typing would otherwise rewind.
 
-See [Make your own extension](guide.md) for a walkthrough and API policy.
+A `frame` renders `doc` in `<iframe sandbox="allow-popups allow-popups-to-escape-sandbox">`
+(no scripts, forms or same-origin access) with
+`default-src 'none'; style-src 'unsafe-inline'; img-src data:` and `<base target="_blank">`.
 
-## Large packages and compiled modules
+### Icons
 
-Limits are defined once in `crates/colecto-package/src/lib.rs`: compressed archive
-16 MiB; total uncompressed content 48 MiB; module 16 MiB; manifest 8 KiB; up to
-256 flat raster assets of 8 MiB each; at most 32 installed third-party packages.
-The Host checks every declared entry size and total before inflation, caps actual
-inflation by per-entry and aggregate budgets, and rejects any entry above 100:1
-compression. Raster magic must match PNG, JPEG, WebP or GIF suffixes; SVG is forbidden.
+`icon` props take one of: `account`, `alert`, `attach`, `back`, `bell`, `check`, `close`,
+`compose`, `copy`, `cpu`, `download`, `drafts`, `extension`, `forward`, `image`, `inbox`,
+`info`, `key`, `layout`, `mail`, `next`, `palette`, `pencil`, `plus`, `refresh`, `reply`,
+`replyAll`, `search`, `sent`, `server`, `settings`, `shield`, `sidebar`, `sort`, `text`,
+`trash`. A test keeps this list equal in `manifest.rs`, `protocol.ts` and `Icon.svelte`.
 
-The Host compiles enabled modules once on installation, startup or re-enabling.
-The cache associates each package ID with its generation. Every invocation creates
-a fresh instance with 32 MiB memory, 10,000,000 fuel, and the existing two-invocation
-concurrency cap. Disable and removal drop the compiled entry; reinstall gets a new
-generation. Policy contains metadata only; compressed package bytes live in separate
-database records. Listing extensions never reads module bodies or recompiles them.
-The UI uploads binary bodies; legacy JSON byte-array uploads are still accepted.
+### Limits
 
-Guest `messages.send` requests with `forward_of` also require `messages.read` for
-the selected account, because forwarding reads the original and its attachments.
+| Limit | Value |
+| --- | --- |
+| Message from a Worker | 4 MiB of JSON, plus 32 MiB of transferred buffers |
+| Nodes per surface | 5,000, depth 32 |
+| Patch ops per message | 2,000 |
+| Text | 16 KiB; labels, titles and options 128 bytes |
+| Pending calls | 64 |
+| Frame document | 8 MiB |
+| Watchdog | Ping every 5 s; stop after two unanswered |
+| Commands, app actions, command hits | 64, 2, 6 |
+
+Browsers cannot cap a Worker's CPU or memory. A client part can slow down or crash the
+window; see [what this does not protect against](ui-model.md#what-this-does-not-protect-against).
+
+### Canvas overlay
+
+An extension with `ui.canvas` and `[overlay] z_index` draws on one `<canvas>` that
+covers the window above the app, at that `z-index`. It takes no clicks
+(`pointer-events: none`) and is hidden from assistive technology. The example is
+`docs/extensions/examples/oneko/`.
+
+| Message | Payload |
+| --- | --- |
+| `canvas` (shell to extension) | `{surface: "overlay", width, height, ratio}` plus `canvas` (an `OffscreenCanvas`, as `{$buffer: 0}`) in Chromium engines, or `mode: "frames"` elsewhere: WebKit accepts a transferred canvas but never shows what a Worker draws on it |
+| `resize` | `{surface: "overlay", width, height, ratio}` when the window changes size |
+| `pointer` | `{x, y, inside}` in CSS pixels, at most once per animation frame |
+| `frame` (extension to shell) | In frames mode, `{bitmap, x?, y?}`: an `ImageBitmap` the shell draws at `x`, `y` (CSS pixels, default 0) in place of the last one, so a small bitmap can stand for the window |
+
+The canvas goes away when the extension stops, is disabled or is removed.
+
+## Service part
+
+The optional `service` module runs in the Host whether or not a window is open. It is
+pure Wasm run by `wasmi` without WASI. It exports `memory` and `run`, and may import
+only these, from module `colecto`:
+
+| Import | Does |
+| --- | --- |
+| `action(output, capacity) -> i32` | Copies the invocation's action JSON into memory; bytes written or `-1` |
+| `request(input, len, output, capacity) -> i32` | One service request, such as `{"operation":"messages.read","id":"1"}`; writes `{"ok":true,"data":…}` or `{"ok":false,"error":"…"}` |
+| `emit(input, len) -> i32` | Its answer to a bus request: `{"bus":{"response":…}}`; `0` or `-1` |
+
+| Action | When |
+| --- | --- |
+| `{"event":"bus.request","from","name","payload"}` | A request on its own bus |
+| `{"event":"bus.event","bus","name","payload"}` | An event it subscribes to |
+| `{"event":"mail","account","ids"}` | New mail arrived on `account`; needs `messages.list` |
+
+Service requests use the capability names as operations, plus `settings.read`,
+`bus.request`, `bus.emit`, `labels.list` (`messages.list`), `storage.get` and
+`storage.set` (its own key-value storage, no capability; the same values as
+`/extensions/{id}/storage/{key}`, 64 KiB each), and `ai.settings` and `ai.decide`
+(`ai.decide`: one decision against the owner's hourly budget). Identity and account come from the Host invocation, never
+from guest input. Each invocation gets a fresh instance: 32 MiB memory, 1,024 table
+elements, 10,000,000 fuel, 64 service requests, 64 KiB per bridge input or output,
+32 KiB of output, two invocations at once. Disable, removal and reinstall invalidate
+running invocations at their next request. This is an in-process Wasm sandbox, not OS
+isolation, and not a security audit; native mail work it asks for still takes its
+normal time. Rust service parts can use the [Rust SDK](rust-sdk.md).
 
 ## Extension settings
 
-Bundled and third-party manifests can declare up to 16 `[[settings]]` tables.
-No capability is required. Keys are unique `[a-z0-9_]{1,32}` identifiers.
-Unknown fields, wrong types and invalid defaults reject the manifest.
+Manifests can declare up to 16 `[[settings]]` tables. Unknown fields, wrong types and
+invalid defaults reject the manifest.
 
 | Field | Limit or meaning |
 | --- | --- |
@@ -281,107 +356,93 @@ Unknown fields, wrong types and invalid defaults reject the manifest.
 | `unit` | Optional range suffix, at most 8 UTF-8 bytes |
 | `options` | Choice only: 2–8 distinct string `value` and nonempty `label` pairs |
 
-Owner-authenticated `GET /api/v1/extensions/{id}/settings` returns `{schema, values}`.
-`PUT` at the same route accepts a partial `{key: value}` object; unknown keys and
-invalid values reject the entire update. Values persist per extension ID in Turso,
-merge over defaults, and are deleted on uninstall. Updates emit the SSE event
-`extension.settings` with `{id}`. Enabled extensions with settings appear in Settings;
-bundled entries follow built-in pages and installed entries have their own group.
+`GET /api/v1/extensions/{id}/settings` returns `{schema, values}`; `PUT` takes a partial
+`{key: value}` object, and unknown keys or invalid values reject the whole update. The
+owner and the extension itself (with its credential) may use them. Values persist per
+extension, merge over defaults, are deleted on removal, and each change emits
+`extension.settings` with `{id}`; the client part then receives `settings`. Service
+parts read them with `{"operation":"settings.read"}`.
 
-Guests call `colecto.request` with `{"operation":"settings.read"}` and receive
-`{"ok":true,"data":{"key":"value"}}`. The Host binds identity to the invocation;
-guests cannot select another extension. Disabled or stale invocations are rejected.
+Without `[settings_page]`, an extension with settings gets a generated page in Settings:
+bundled ones in the Built-in group, installed ones under Extensions.
 
-Overlay items additionally accept optional `opacity`, a finite number from 0 through
-1, defaulting to 1. It affects only the emitted sprite.
 ## Extension bus
 
 `extensions.bus` lets enabled extensions talk by name. Each extension owns the bus
-matching its ID; disabled extensions have no bus. There is no discovery operation
-for buses, subscribers, events or request names. Installing an ID already present,
-including a bundled ID, is refused; remove a package before installing a replacement.
+matching its ID; disabled extensions have no bus. There is no discovery of buses,
+subscribers or names.
 
-Declare event subscriptions only with this capability:
+| Call | Client part (`call` through the shell) | Service part (`colecto.request`) |
+| --- | --- | --- |
+| Ask another extension | `POST /bus/{bus}/request` `{name, payload}` → `{data}` | `{"operation":"bus.request","bus","name","payload"}` |
+| Publish on its own bus | `POST /bus/events` `{name, payload}` → `{}` | `{"operation":"bus.emit","name","payload"}` |
+| Answer a request | `POST /bus/replies/{id}` `{data}` after a `bus.request` message | `emit` `{"bus":{"response":…}}` |
 
-```toml
-capabilities = ["extensions.bus"]
-[bus]
-subscribe = ["reader/v1/message_opened"]
-```
-
-Bus names are each extension's own business: the Host accepts any valid name (see the
-limits below) and does not interpret versions in it. These bus versions are separate
-from [API versions](api-versions/README.md), which cover how extensions talk to Colecto.
-
-Bundled extensions start every name with a whole-number version: `v1/add_button`,
-`v2/add_button`, never `v1.5/add_button` or a bare `add_button`. Third-party extensions
-are **strongly encouraged** to follow the same convention, so callers can tell versions
-apart at a glance. See [Bundled bus surfaces](bundled-bus.md) for the full rules.
-
-Guests call `colecto.request` with these JSON operations:
-
-```json
-{"operation":"bus.request","bus":"composer","name":"v1/get_draft","payload":null}
-{"operation":"bus.emit","name":"v1/finished","payload":{"done":true}}
-```
-
-Responses retain the ABI envelope `{ "ok": true, "data": ... }`. Missing buses,
-failed invocations and unanswered requests all return null, without distinguishing
-why. Emit publishes only on the caller's bus and returns null immediately; a Tokio
-task delivers events asynchronously to enabled manifest subscribers.
-
-Delivery creates a fresh fuel- and memory-limited guest invocation. Request actions
-are `{event:"bus.request",from,name,payload}`; answer through `colecto.emit` with
-`{"bus":{"response":...}}`. Other output means no answer. Event actions are
-`{event:"bus.event",bus,name,payload}` and their output is ignored. Nested requests
-run synchronously on the blocking guest thread without acquiring another execution
-permit. Ordinary panel and overlay output validation remains separate.
-
-Bundled UI callers use their authenticated extension header with
-`POST /api/v1/bus/{bus}/request` (`{name,payload}`, returns `{data}`),
-`POST /api/v1/bus/events` (`{name,payload}`, returns `{}`), and
-`POST /api/v1/bus/replies/{id}` (`{data}`, returns `{}`). Guest requests to bundled
-buses send SSE `bus.request` with `{id,bus,from,name,payload}`. Only the target bus
-may reply; the first reply wins. `extensionBus(id)` in `ui/src/lib/bus.ts` binds a
-bundled caller and supplies `request(bus,name,payload)`, `emit(name,payload)` and
-`handle(name,fn)`; handlers receive `(payload,from)` and return null if inapplicable.
-`listen("<bus>/<name>", fn)` receives another bus's events: a bundled extension lists
-the topic under `[bus] subscribe` in its `extension.toml` like a guest, and the Host
-then forwards the event over SSE as `bus.event` `{bus,name,payload}`. Unregister
-handlers and listeners on component destruction. Bundled calls carry the account the
-owner has selected (the mail shell keeps it current with `setBusAccount`), so guests
-answering them act on that account. All listeners share one event-stream connection.
+A request to an extension with a service part runs that service part; otherwise it goes
+to the extension's client part through the event stream and waits up to 2 seconds. Only the target may
+reply, and the first reply wins. Missing buses, failures and unanswered requests all
+return null. Events reach service parts directly and client parts through the event
+stream, if they subscribe.
 
 | Limit | Value |
 | --- | --- |
 | Subscriptions per manifest | 32 |
-| Request/event name | 1–64 bytes: lowercase ASCII, digits, `-`, `_`, `/`; also `.` from [API 3](api-versions/API-3.md) |
+| Request or event name | 1–64 bytes: lowercase ASCII, digits, `-`, `_`, `.`, `/` |
 | Payload | 32 KiB serialized JSON |
-| Bus action envelope | 64 KiB (room for a 32 KiB payload) |
-| Nested guest requests | 4; deeper requests return null |
-| Bundled request reply wait | 2 seconds; timeout returns null |
-| HTTP event delivery wait | All subscribers finish or 1.5 seconds; delivery may continue |
-| Guest memory / fuel | 32 MiB / 10,000,000 per invocation |
+| Nested service requests | 4; deeper requests return null |
+| Client reply wait | 2 seconds; then null |
+| HTTP event delivery wait | All service subscribers finish or 1.5 seconds |
 
-### Bundled bus surfaces
+Bundled extensions start every name with a whole-number version, `v1/add_button`, never
+`v1.5/add_button` or a bare `add_button`; third-party extensions are strongly
+encouraged to do the same. The bundled surfaces are listed in
+[Bundled bus surfaces](bundled-bus.md).
 
-The requests and events bundled extensions offer, with their versions and behaviour,
-are listed in [Bundled bus surfaces](bundled-bus.md).
+## Workspace panes
 
-### Reader slots
+Bundled `inbox` and `reader` and every enabled extension with `[pane]` get a pane in the
+workspace, next to the core Accounts pane (the account switcher), which is shell UI, not
+an extension: hide it from its tab's menu or Settings → Accounts → **Accounts pane**.
+Settings → Extensions turns an extension on or off and, for those with a pane, chooses
+whether it shows. A newly installed pane joins the reader's group; drag its tab anywhere.
+The layout and hidden panes are owner preferences stored by the Host. Panes are never
+told where they are placed, so they must work at any size.
 
-The reader offers two bundled-only slots that the mail shell fills with other bundled
-extensions' Svelte components, so the reader never imports them. They are props on
-`ui/src/extensions/reader/Reader.svelte`, each a snippet receiving a `ReaderSlot`
-(`ui/src/lib/reader-slots.ts`): `{id, message, content, reply?(body)}`. `reply` opens the
-normal reply composer with `body` above the quoted message and is absent while the
-composer is off.
+## Assets
 
-| Slot | Where | Filled by |
+`GET /api/v1/extensions/{id}/assets/{name}` (owner only, enabled extensions only) returns
+an image from `assets/` with its image type, `x-content-type-options: nosniff` and
+`content-security-policy: sandbox; default-src 'none'`.
+
+## Local labels
+
+`GET /api/v1/labels` requires `messages.list`; `POST /api/v1/labels` requires
+`messages.label`, with `{ "name": "Work", "message_id": null, "remove": false }`: omit
+the message ID to create a label, give one to assign it, set `remove` to unassign or
+delete. Service parts use `{"operation":"messages.label","label":{...}}`.
+
+Labels persist in `colecto.db`, per account. Names are trimmed, case-sensitive, 1–80
+UTF-8 bytes, without control characters; each account allows 50 labels and 1000 message
+IDs per label. Labels are local, unencrypted, and do not sync with providers. Drafts do
+not take labels.
+
+## HTTP principals
+
+| Principal | Authorization | Reaches |
 | --- | --- | --- |
-| `actions` | Reader toolbar, after Reply / Reply all / Forward | `ai` (the AI button), only while the `ai` extension is enabled |
-| `aboveBody` | Above the message body | `ai` (the saved summary) |
+| Owner | `Bearer <owner token>` | Everything; the shell names itself (`host`) in `x-colecto-extension` and the account in `x-colecto-account` (routing labels, not authentication) |
+| API key | `Bearer colecto_…` | Mail routes and MCP, within its account and capability grants; never Host controls or direct sending |
+| Extension | `Colecto-Extension <token>` | See [Credentials](#credentials) |
 
-Slots are trusted Svelte composition, not a bus surface: third-party Wasm extensions
-cannot use them and should keep using reader banners. See [AI features](../ai.md).
+Cookies never establish authority. See
+[daemon authentication](../self-hosting.md#owner-bearers-and-scoped-api-keys).
 
+### Cached folders and error categories
+
+`POST /api/v1/messages/refresh?folder=inbox|sent&q=...` queries the provider; an empty
+search updates that folder's bounded snapshot. `GET /api/v1/messages/cache?folder=inbox|sent`
+reads without provider access and returns `{folder, messages, fetched_at}`. Cached
+searches are rejected. Failed refreshes keep earlier snapshots; Disconnect and Lock clear
+active ones. For API keys, message bodies need `messages.read` and draft bodies
+`drafts.read`. Errors carry a stable `category` and a readable `error`;
+`delivery_uncertain` means check Sent before sending again.

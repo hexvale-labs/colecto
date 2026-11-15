@@ -1,22 +1,24 @@
 # Rust extension SDK
 
-`colecto-extension` lets you write a third-party extension as plain Rust functions:
-typed service calls, typed bus messages with versioned names checked at compile time,
-and a mock Host for `cargo test`. It compiles to the [Wasm ABI](README.md#wasm-abi);
-the manifest, packaging and limits are unchanged.
+`colecto-extension` lets you write an extension's [service part](README.md#service-part)
+as plain Rust functions: typed service calls, typed bus messages with versioned names
+checked at compile time, and a mock Host for `cargo test`. The service part runs in the
+Host without a window. The client part, which draws the interface, is JavaScript or Wasm
+in `client/` (see the [guide](guide.md#3-write-the-client-part)); `cargo colecto`
+packages both. Rust support for client parts (the [Wasm client
+ABI](ui-model.md#wasm-client-abi)) is not in the SDK yet.
 
 ## Crates
 
 | Crate | Path | Role |
 | --- | --- | --- |
 | `colecto-extension` | `crates/colecto-extension/` | The SDK you depend on. Forbids `unsafe` code. |
-| `colecto-extension-sys` | `crates/colecto-extension-sys/` | The three `colecto` imports, the `run` export, handler records and the native mock. The only SDK crate that contains `unsafe` code. |
+| `colecto-extension-sys` | `crates/colecto-extension-sys/` | The three `colecto` service imports, the `run` export, handler records and the native mock. The only SDK crate that contains `unsafe` code. |
 | `cargo-colecto` | `crates/cargo-colecto/` | The `cargo colecto` build and packaging tool. |
 
-Extensions themselves need no `unsafe` code: Oneko builds with `#![forbid(unsafe_code)]`.
-The SDK uses `std` and `serde_json`. A release build of Oneko is about 140 KB of Wasm.
-That is well within the 16 MiB module limit, but bigger than a hand-written `no_std`
-guest.
+Extensions themselves need no `unsafe` code; build with `#![forbid(unsafe_code)]`. The
+SDK uses `std` and `serde_json`, so a release build is a little over 100 KB of Wasm: well
+within the 16 MiB module limit, but bigger than a hand-written `no_std` module.
 
 ## Use it from your own project
 
@@ -58,16 +60,16 @@ the mail service.
 
 ## Build and package with `cargo colecto`
 
-`cargo-colecto` is a Cargo subcommand that builds the extension for
-`wasm32-unknown-unknown`, checks the module against its manifest and writes the
-`.colectoext`. Install it from the same tag as the SDK:
+`cargo-colecto` is a Cargo subcommand that builds the service part for
+`wasm32-unknown-unknown`, checks it against the manifest and writes the `.colectoext`
+with the client part. Install it from the same tag as the SDK:
 
 ```sh
 cargo install --git https://github.com/hexvale-labs/colecto --tag v0.3.0 cargo-colecto
 ```
 
 Inside this repository, `cargo run -p cargo-colecto -- <command>` runs it without
-installing; `just build oneko` does that for Oneko.
+installing.
 
 | Command | Does |
 | --- | --- |
@@ -80,25 +82,25 @@ installing; `just build oneko` does that for Oneko.
 | `--out <PATH>` | Package path for `build` |
 | `--locked` | Passed on to `cargo build` |
 
-The project layout it expects: `extension.toml` (the manifest) and an optional
-`assets/` folder of images, both next to `Cargo.toml`, and a library with
-`crate-type = ["cdylib"]`. The package is Deflate-compressed and read back with the
+The project layout it expects, next to `Cargo.toml`: `extension.toml` (the manifest,
+which must name the built module with `service = "service.wasm"` and the client entry with
+`client = "client/main.js"`), the `client/` folder, an optional `assets/` folder of
+images, and a library with `crate-type = ["cdylib"]`. The package is Deflate-compressed and read back with the
 Host's own package reader (`colecto-package`), so every package and manifest limit is
 checked before you install.
 
 `export!` records each registered function in a `colecto.handlers.v1` custom section
-of the Wasm module: the slot function, and the bus and name of each request and
-event. The section survives `lto` and `strip`, and costs a few bytes. The checks:
+of the Wasm module: the bus and name of each request and event. The section survives `lto` and `strip`, and costs a few bytes. The checks:
 
 | Check | Why |
 | --- | --- |
 | Imports are only `colecto.action`, `colecto.request`, `colecto.emit`; `run` and `memory` are exported | The Host refuses anything else, including WASI |
-| `panel:` or `overlay:` matches `slot` | The wrong one never runs |
+| `extension.toml` declares `service` | The built crate is the service part |
 | Bus handlers need `extensions.bus` in `capabilities` | Without it the Host delivers nothing |
 | Every `events` entry is in `[bus] subscribe`, and every subscription has a function | A missing subscription means the event never arrives; an extra one wakes the extension for nothing. The error suggests the exact `[bus]` table. |
 | Each request is declared on this extension's own bus (`id`) | Requests only arrive on the extension's own bus |
 
-Missing slot functions and requests registered twice are warnings. A module built
+Requests registered twice are warnings. A module built
 without `export!` gets a warning and only the import, export and package checks. The
 tool cannot see calls such as `cx.messages()`, so it does not check the other
 capabilities.
@@ -113,47 +115,37 @@ comes from its first parameter.
 #![forbid(unsafe_code)]
 use colecto_extension::prelude::*;
 
-fn panel(event: PanelEvent, cx: &mut Context) -> Result<View> {
-    let count = cx.messages()?.len();
-    Ok(View::new("Inbox", format!("{count} messages")).action("Refresh"))
+#[derive(Serialize, Deserialize)]
+struct Count {}
+colecto_extension::bus_request!(Count => usize, bus = "counter", version = 1, name = "count");
+
+fn count(_: Count, cx: &mut Context) -> Result<usize> {
+    Ok(cx.messages()?.len())
 }
 
-colecto_extension::export! { panel: panel }
+colecto_extension::export! { requests: [count] }
 ```
 
 | Entry | Function signature | Runs for |
 | --- | --- | --- |
-| `panel: f` | `fn(PanelEvent, &mut Context) -> Result<View>` | Panel display (`PanelEvent::Open`) and button presses (`PanelEvent::Action(label)`) |
-| `overlay: f` | `fn(Frame<S>, &mut Context) -> Result<Overlay<S>>` | Each overlay frame |
 | `requests: [f, …]` | `fn(R, &mut Context) -> Result<R::Response>` where `R: BusRequest` | Bus requests to your bus named `R::NAME` |
 | `events: [f, …]` | `fn(E, &mut Context) -> Result<()>` where `E: BusEvent` | Events from bus `E::BUS` named `E::NAME` |
+| `mail: f` | `fn(MailEvent, &mut Context) -> Result<()>` | New mail: `MailEvent {account, ids}`; needs `messages.list`. The bundled AI auto-labeller (`ui/src/extensions/ai/service/`) is an example |
 
-Use `panel` or `overlay` to match the manifest `slot`, not both. Entries may come in any
-order. When nothing matches, nothing is emitted, which the Host treats as no answer.
+Entries may come in any order. When nothing matches, nothing is emitted, which the Host treats as no answer.
 
 What happens on failure:
 
 | Situation | Result |
 | --- | --- |
-| Panel function returns `Err` | A view titled `Error` with the error text |
-| Panel view is over the limits | A view titled `Error` naming the limits |
-| Overlay function returns `Err` | Nothing emitted; the Host reports an error and stops the overlay |
 | Request payload does not parse, or the function returns `Err` | No answer; the caller gets null |
 | Event payload does not parse, or the function returns `Err` | Ignored (the Host ignores event output) |
 | Panic | The guest traps; the Host reports an extension error |
 
-### Overlay state
-
-The Host round-trips overlay state as a string. The SDK stores your state type `S` as
-JSON in that string. `S` needs `Serialize`, `Deserialize` and `Default`. The first
-frame gets `S::default()`, and so does any frame whose stored state no longer parses,
-for example after an update changed `S`. The JSON must fit in 4096 bytes. See
-`docs/extensions/examples/oneko/src/lib.rs`.
-
 ## Call the Host
 
 `Context` wraps the service operations. Each call needs the capability in parentheses,
-acts on the account the owner has selected, and counts toward the limit of eight calls
+acts on the account the owner has selected, and counts toward the limit of 64 calls
 per invocation. Errors the Host reports come back as `Error::Service`, and refused
 bridge calls as `Error::Bridge`.
 
@@ -168,6 +160,8 @@ bridge calls as `Error::Bridge`.
 | `save_draft(&DraftInput)` | `drafts.write` | `Draft` |
 | `send(&DraftInput)` | `messages.send` (plus `messages.read` with `forward_of`) | `()` |
 | `label(name, message_id, remove)` | `messages.label` | `Labels` (label name to message IDs) |
+| `labels()` | `labels.list` (`messages.list`) | `Labels` |
+| `stored::<T>(key)`, `store(key, &value)` | `storage.get`, `storage.set` (none) | `Option<T>`, `()` |
 | `request(&R)` | `bus.request` (`extensions.bus`) | `Option<R::Response>` |
 | `emit(&E)` | `bus.emit` (`extensions.bus`) | `()` |
 | `call::<T>(&request)` | Any raw request | The response `data` as `T` |
@@ -229,15 +223,16 @@ the emitted JSON. `with` hands one handler a `Context` directly.
 
 ```rust
 #[test]
-fn shows_message_count() {
+fn counts_messages() {
     let mut host = TestHost::new(|request| match request["operation"].as_str() {
         Some("messages.list") => Ok(json!([{"id": "1"}])),
         _ => Err("Capability not granted".into()),
     });
-    assert_eq!(host.run(crate::colecto_main, "open").unwrap()["text"], "1 messages");
+    let action = r#"{"event":"bus.request","from":"x","name":"v1/count","payload":{}}"#;
+    assert_eq!(host.run(crate::colecto_main, action).unwrap()["bus"]["response"], 1);
 }
 ```
 
 The mock follows the Host's bridge rules (only the first emit counts), but it does not
-enforce fuel, memory, call or size limits. Oneko is also run through the real sandbox
-in `crates/colecto-host/tests/http.rs`.
+enforce fuel, memory, call or size limits; `crates/colecto-host/src/sandbox.rs` tests
+those in the real sandbox.

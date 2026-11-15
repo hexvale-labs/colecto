@@ -22,6 +22,9 @@ const stack: BackEntry[] = [];
 let depth = 0; // History entries above the base that belong to the stack.
 let traversing = false; // Our own history.go() is on its way.
 let scheduled = false;
+// The page is being left (reload, navigation): things closing as it unloads must not move
+// history, or the traversal would cancel that navigation.
+let leaving = false;
 
 const levelOf = (state: unknown) => typeof (state as { colectoBack?: unknown } | null)?.colectoBack === 'number' ? (state as { colectoBack: number }).colectoBack : 0;
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -31,7 +34,7 @@ const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-r
 function schedule() { if (!scheduled) { scheduled = true; queueMicrotask(sync); } }
 function sync() {
   scheduled = false;
-  if (traversing) return;
+  if (traversing || leaving) return;
   const want = stack.length;
   if (want > depth) {
     for (let level = depth + 1; level <= want; level++) history.pushState({ colectoBack: level }, '');
@@ -263,6 +266,9 @@ export function installBack() {
   // A reload starts a fresh stack; history entries from before it only lead back to the base.
   if (levelOf(history.state)) history.replaceState(null, '');
   addEventListener('popstate', onPopState);
+  // Capture, so this runs before other pagehide listeners close things (runtimes stop then).
+  addEventListener('pagehide', () => { leaving = true; }, { capture: true });
+  addEventListener('pageshow', () => { leaving = false; });
   addEventListener('colecto:back', onNativeBack);
   if (platform === 'ios') edgeSwipe();
   dialogs();

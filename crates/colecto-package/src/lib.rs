@@ -1,15 +1,20 @@
-//! Bounded `.colectoext` ZIP packages with a manifest, Wasm module and optional PNG assets.
+//! Bounded `.colectoext` ZIP packages: a manifest, the client part's files under `client/`,
+//! an optional Wasm service module and optional raster assets.
 //!
 //! Shared by the Host (installation) and `cargo colecto` (packaging), so both apply the
 //! same limits and manifest rules.
+use colecto_extension_api::ExtensionManifest;
+use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
 
 pub mod manifest;
 
 pub const MANIFEST: &str = "manifest.toml";
-pub const MODULE: &str = "module.wasm";
+pub const CLIENT_DIR: &str = "client/";
 pub const MAX_MANIFEST: usize = 8 * 1024;
+/// The service module, and each file under `client/`.
 pub const MAX_MODULE: usize = 16 * 1024 * 1024;
+pub const MAX_CLIENT_FILES: usize = 256;
 pub const MAX_PACKAGE: usize = 16 * 1024 * 1024;
 pub const MAX_UNCOMPRESSED: usize = 48 * 1024 * 1024;
 pub const MAX_ASSET: usize = 8 * 1024 * 1024;
@@ -19,32 +24,73 @@ pub const MAX_RATIO: u64 = 100;
 /// JSON encodes each upload byte as at most three digits and a comma.
 pub const MAX_UPLOAD_BODY: usize = MAX_PACKAGE * 4 + 1024;
 
-/// Read a package's manifest source and Wasm module, bounding sizes before and while decompressing.
-pub fn read(bytes: &[u8]) -> Result<(String, Vec<u8>), String> {
-    let (manifest, module, _) = read_with_assets(bytes)?;
-    Ok((manifest, module))
+/// Files by their full path in the package, such as `client/main.js`.
+pub type Files = BTreeMap<String, Vec<u8>>;
+pub type Assets = BTreeMap<String, Vec<u8>>;
+
+/// A package's contents. Whether they match the manifest is [`check`]'s job.
+#[derive(Clone, Debug, Default)]
+pub struct Package {
+    pub manifest: String,
+    pub client: Files,
+    /// The service module's name at the package root, and its bytes.
+    pub service: Option<(String, Vec<u8>)>,
+    pub assets: Assets,
 }
-pub type Assets = std::collections::BTreeMap<String, Vec<u8>>;
-pub fn read_with_assets(bytes: &[u8]) -> Result<(String, Vec<u8>, Assets), String> {
+
+/// A path under `client/` the runtime may load: up to eight segments of `[A-Za-z0-9_.-]`, none
+/// starting with `.`, ending in a type the client part can use.
+pub fn safe_client_path(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix(CLIENT_DIR) else {
+        return false;
+    };
+    let segments: Vec<&str> = rest.split('/').collect();
+    segments.len() <= 8
+        && segments.iter().all(|segment| {
+            !segment.is_empty()
+                && segment.len() <= 64
+                && !segment.starts_with('.')
+                && segment
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+        })
+        && rest.rsplit_once('.').is_some_and(|(_, extension)| {
+            matches!(extension, "js" | "wasm" | "json" | "bin" | "html" | "css")
+        })
+}
+
+/// A service module name at the package root: `[a-z0-9-]+.wasm`.
+pub fn safe_service_name(name: &str) -> bool {
+    name.strip_suffix(".wasm").is_some_and(|stem| {
+        !stem.is_empty()
+            && stem.len() <= 64
+            && stem
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    })
+}
+
+/// Read a package, bounding sizes before and while decompressing.
+pub fn read(bytes: &[u8]) -> Result<Package, String> {
     let invalid = || {
         format!(
-            "Choose a .colectoext package containing {MANIFEST}, {MODULE} and optional raster images under assets/"
+            "Choose a .colectoext package containing {MANIFEST}, the client part under {CLIENT_DIR}, an optional service .wasm module and optional raster images under assets/"
         )
     };
     if bytes.len() > MAX_PACKAGE {
         return Err("Extension package must be at most 16 MiB".into());
     }
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| invalid())?;
-    if !(2..=MAX_ASSETS + 2).contains(&archive.len()) {
+    if !(1..=MAX_ASSETS + MAX_CLIENT_FILES + 2).contains(&archive.len()) {
         return Err(invalid());
     }
     let mut names = std::collections::HashSet::new();
-    let mut asset_names = Vec::new();
+    let (mut client_names, mut asset_names, mut service_name) = (Vec::new(), Vec::new(), None);
     let mut declared_total = 0u64;
     for i in 0..archive.len() {
         let file = archive.by_index(i).map_err(|_| invalid())?;
-        let name = file.name().map_err(|_| invalid())?;
-        if !names.insert(name.to_string())
+        let name = file.name().map_err(|_| invalid())?.to_string();
+        if !names.insert(name.clone())
             || !file.is_file()
             || !matches!(
                 file.compression(),
@@ -53,17 +99,22 @@ pub fn read_with_assets(bytes: &[u8]) -> Result<(String, Vec<u8>, Assets), Strin
         {
             return Err(invalid());
         }
-        let limit = match name.as_ref() {
-            MANIFEST => MAX_MANIFEST,
-            MODULE => MAX_MODULE,
-            _ => {
-                let asset = name.strip_prefix("assets/").ok_or_else(invalid)?;
-                if !safe_asset_name(asset) {
-                    return Err(invalid());
-                }
-                asset_names.push(asset.to_owned());
-                MAX_ASSET
+        let limit = if name == MANIFEST {
+            MAX_MANIFEST
+        } else if safe_client_path(&name) {
+            client_names.push(name.clone());
+            MAX_MODULE
+        } else if let Some(asset) = name.strip_prefix("assets/") {
+            if !safe_asset_name(asset) {
+                return Err(invalid());
             }
+            asset_names.push(asset.to_owned());
+            MAX_ASSET
+        } else if safe_service_name(&name) && service_name.is_none() {
+            service_name = Some(name.clone());
+            MAX_MODULE
+        } else {
+            return Err(invalid());
         };
         declared_total = declared_total
             .checked_add(file.size())
@@ -74,6 +125,9 @@ pub fn read_with_assets(bytes: &[u8]) -> Result<(String, Vec<u8>, Assets), Strin
         if file.size() > file.compressed_size().saturating_mul(MAX_RATIO) {
             return Err("Extension compression ratio exceeds 100:1".into());
         }
+    }
+    if client_names.len() > MAX_CLIENT_FILES || asset_names.len() > MAX_ASSETS {
+        return Err(invalid());
     }
     let mut actual_total = 0usize;
     let mut entry = |name: &str, limit: usize| -> Result<Vec<u8>, String> {
@@ -101,15 +155,44 @@ pub fn read_with_assets(bytes: &[u8]) -> Result<(String, Vec<u8>, Assets), Strin
     };
     let manifest = String::from_utf8(entry(MANIFEST, MAX_MANIFEST)?)
         .map_err(|_| format!("{MANIFEST} must be UTF-8 text"))?;
-    let module = entry(MODULE, MAX_MODULE)?;
-    let mut assets = Assets::new();
+    let mut package = Package {
+        manifest,
+        ..Package::default()
+    };
+    for name in client_names {
+        let data = entry(&name, MAX_MODULE)?;
+        package.client.insert(name, data);
+    }
+    if let Some(name) = service_name {
+        let data = entry(&name, MAX_MODULE)?;
+        package.service = Some((name, data));
+    }
     for name in asset_names {
         let data = entry(&format!("assets/{name}"), MAX_ASSET)?;
         asset_content_type(&name, &data).ok_or("Asset type does not match its name")?;
-        assets.insert(name, data);
+        package.assets.insert(name, data);
     }
-    Ok((manifest, module, assets))
+    Ok(package)
 }
+
+/// Whether a package holds exactly what its manifest names: the client entry, and a service
+/// module only when `service` is declared.
+pub fn check(manifest: &ExtensionManifest, package: &Package) -> Result<(), String> {
+    let client = manifest
+        .client
+        .as_deref()
+        .ok_or("Extensions need a client part: set client = \"client/main.js\"")?;
+    if !package.client.contains_key(client) {
+        return Err(format!("The package has no {client}"));
+    }
+    match (&manifest.service, &package.service) {
+        (None, None) => Ok(()),
+        (Some(declared), Some((name, _))) if declared == name => Ok(()),
+        (Some(declared), _) => Err(format!("The package has no {declared}")),
+        (None, Some((name, _))) => Err(format!("{name} is not declared as service")),
+    }
+}
+
 pub fn safe_asset_name(name: &str) -> bool {
     name.rsplit_once('.').is_some_and(|(stem, extension)| {
         !stem.is_empty()
@@ -134,33 +217,38 @@ pub fn asset_content_type(name: &str, data: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// Build a package, for the example extension and tests.
-pub fn write(manifest: &str, module: &[u8]) -> Vec<u8> {
-    write_with_assets(manifest, module, &Assets::new())
+/// Build an uncompressed package, for examples and tests.
+pub fn write(package: &Package) -> Vec<u8> {
+    write_with(package, zip::CompressionMethod::Stored)
 }
-pub fn write_with_assets(manifest: &str, module: &[u8], assets: &Assets) -> Vec<u8> {
-    write_with(manifest, module, assets, zip::CompressionMethod::Stored)
+/// Like [`write`], but Deflate-compressed, for packages people download.
+pub fn write_deflated(package: &Package) -> Vec<u8> {
+    write_with(package, zip::CompressionMethod::Deflated)
 }
-/// Like [`write_with_assets`], but Deflate-compressed, for packages people download.
-pub fn write_deflated(manifest: &str, module: &[u8], assets: &Assets) -> Vec<u8> {
-    write_with(manifest, module, assets, zip::CompressionMethod::Deflated)
-}
-fn write_with(
-    manifest: &str,
-    module: &[u8],
-    assets: &Assets,
-    method: zip::CompressionMethod,
-) -> Vec<u8> {
+fn write_with(package: &Package, method: zip::CompressionMethod) -> Vec<u8> {
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default().compression_method(method);
-    for (name, data) in [(MANIFEST, manifest.as_bytes()), (MODULE, module)] {
+    let mut entries: Vec<(String, &[u8])> = vec![(MANIFEST.into(), package.manifest.as_bytes())];
+    entries.extend(
+        package
+            .client
+            .iter()
+            .map(|(n, d)| (n.clone(), d.as_slice())),
+    );
+    entries.extend(
+        package
+            .service
+            .iter()
+            .map(|(n, d)| (n.clone(), d.as_slice())),
+    );
+    entries.extend(
+        package
+            .assets
+            .iter()
+            .map(|(n, d)| (format!("assets/{n}"), d.as_slice())),
+    );
+    for (name, data) in entries {
         writer.start_file(name, options).expect("in-memory zip");
-        writer.write_all(data).expect("in-memory zip");
-    }
-    for (name, data) in assets {
-        writer
-            .start_file(format!("assets/{name}"), options)
-            .expect("in-memory zip");
         writer.write_all(data).expect("in-memory zip");
     }
     writer.finish().expect("in-memory zip").into_inner()
@@ -169,6 +257,8 @@ fn write_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Size and ratio rules are the same for every client file and the service module.
+    const MODULE: &str = "client/main.js";
     fn zip_with(files: &[(&str, &[u8])], method: zip::CompressionMethod) -> Vec<u8> {
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
         for (name, data) in files {
@@ -303,6 +393,11 @@ mod tests {
             }
         }
         for name in [
+            "client/../x.js",
+            "client/.hidden.js",
+            "client/main.exe",
+            "Client/main.js",
+            "other/main.js",
             "assets/cat.svg",
             "assets/Cat.png",
             "assets/../cat.png",
@@ -367,5 +462,76 @@ mod tests {
             zip::CompressionMethod::Deflated,
         );
         assert!(read(&bomb).is_err());
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    fn manifest(client: &str, service: Option<&str>) -> ExtensionManifest {
+        manifest::parse(&format!(
+            "id = \"x\"\nname = \"X\"\ndescription = \"d\"\nauthor = \"a\"\napi_version = 1\nclient = \"{client}\"\n{}capabilities = []\n",
+            service.map(|s| format!("service = \"{s}\"\n")).unwrap_or_default()
+        ))
+        .unwrap()
+    }
+    #[test]
+    fn packages_round_trip_and_must_match_their_manifest() {
+        let mut package = Package {
+            manifest: "x".into(),
+            ..Package::default()
+        };
+        package
+            .client
+            .insert("client/main.js".into(), b"1".to_vec());
+        package
+            .client
+            .insert("client/lib/parser.wasm".into(), b"\0asm".to_vec());
+        let read_back = read(&write(&package)).unwrap();
+        assert_eq!(read_back.client, package.client);
+        assert!(check(&manifest("client/main.js", None), &read_back).is_ok());
+        assert!(check(&manifest("client/other.js", None), &read_back).is_err());
+        assert!(
+            check(
+                &manifest("client/main.js", Some("service.wasm")),
+                &read_back
+            )
+            .is_err()
+        );
+        package.service = Some(("service.wasm".into(), b"\0asm".to_vec()));
+        let read_back = read(&write_deflated(&package)).unwrap();
+        assert!(
+            check(
+                &manifest("client/main.js", Some("service.wasm")),
+                &read_back
+            )
+            .is_ok()
+        );
+        assert!(check(&manifest("client/main.js", None), &read_back).is_err());
+        // Two service modules are one too many.
+        package.client.clear();
+        let two = {
+            let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+            for name in [MANIFEST, "a.wasm", "b.wasm"] {
+                writer
+                    .start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(b"x").unwrap();
+            }
+            writer.finish().unwrap().into_inner()
+        };
+        assert!(read(&two).is_err());
+    }
+    #[test]
+    fn client_file_count_is_bounded() {
+        for count in [MAX_CLIENT_FILES, MAX_CLIENT_FILES + 1] {
+            let mut package = Package::default();
+            for i in 0..count {
+                package
+                    .client
+                    .insert(format!("client/f{i}.json"), b"{}".to_vec());
+            }
+            assert_eq!(read(&write(&package)).is_ok(), count <= MAX_CLIENT_FILES);
+        }
     }
 }

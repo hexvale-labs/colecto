@@ -1,169 +1,138 @@
 # Make your own extension
 
+A walkthrough from an empty folder to an installed pane. The exact rules are in the
+[extension contract](README.md); the complete example is
+`docs/extensions/examples/hello-pane/`.
+
 ## 1. Choose capabilities
 
-Start with the smallest useful operation. `account.read` reads connection status;
-`messages.list` and `messages.read` expose mail; `drafts.list`, `drafts.read` and
-`drafts.write` handle drafts; `messages.send` delivers mail; `messages.label`
-manages labels. `window.overlay` draws sprites over the app.
+Start with the smallest set that does the job: `account.read` for connection status,
+`messages.list` and `messages.read` for mail, `drafts.*` for drafts, `messages.send`
+to deliver, `messages.label` for labels, `extensions.bus` to talk to other extensions.
+The [capability table](README.md#capabilities) lists them all.
 
-Users consent once during installation. Enabled means all declared capabilities
-on every account. Disabled means none. There are no individual permission grants.
+The owner consents once, when installing: an enabled extension has every capability it
+declares on every account, a disabled one has none.
 
 ## 2. Write a manifest
 
-Create `extension.toml` next to your source:
+Create `manifest.toml`:
 
 ```toml
-id = "my-panel"
-name = "My panel"
+id = "hello-pane"
+name = "Hello pane"
+description = "Shows which account is selected and counts presses of a button."
 author = "Your name"
-description = "Show the account connection status."
 api_version = 1
-slot = "panel"
+client = "client/main.js"
 capabilities = ["account.read"]
+
+[pane]
+icon = "extension"
 ```
 
-All these fields are required. IDs contain lowercase ASCII letters, digits and
-hyphens. Unknown fields, duplicate capabilities and unsupported APIs are rejected.
-For an overlay, use `slot = "overlay"`, declare `window.overlay` and add `z_index`.
-The integer must be between 1 and 10000 and is forbidden without that capability.
+IDs use lowercase ASCII letters, digits and hyphens. `[pane]` gives the extension one
+workspace pane, whose tab shows its `name`. Use `[settings_page]` instead (or as well)
+for a section in Settings. Unknown fields are rejected.
 
-## 3. Write the module
+## 3. Write the client part
 
-For Rust, use the [Rust SDK](rust-sdk.md): you write plain functions, register them
-with `colecto_extension::export!`, and the SDK handles the imports, JSON and dispatch.
-`examples/oneko` is a complete overlay built with it.
+The client part is one classic script (bundle it if you use modules, for example
+`esbuild --bundle --format=iife`). It runs in a Web Worker with no DOM and no network.
+One global, `colecto`, connects it to Colecto:
 
-For other languages, use the readable WAT in `examples/connection-panel/module.wat` as a panel starting
-point. Export `memory` and `run`. Only three imports are available, all in the
-`colecto` namespace: `action(ptr, capacity)`, `emit(ptr, len)` and
-`request(ptr, len, output, capacity)`. Return values are byte lengths (action and
-request), zero for successful emit, or -1 on failure. Strings are UTF-8 JSON.
+```js
+let presses = 0;
+function render() {
+  colecto.send({ t: 'render', surface: 'pane', tree: {
+    type: 'stack', gap: 8, children: [
+      { type: 'heading', level: 2, text: 'Hello' },
+      { type: 'button', id: 'press', label: `Pressed ${presses} times` },
+    ],
+  } });
+}
+colecto.onmessage = (message) => {
+  if (message.t === 'start') render();
+  if (message.t === 'event' && message.node === 'press') { presses += 1; render(); }
+  if (message.t === 'ping') colecto.send({ t: 'pong', n: message.n });
+};
+```
 
-A panel emits `{"title":"Hello","text":"Plain text","actions":["Refresh"]}`.
-The selected action is passed back on the next invocation. Service requests use
-an `operation` capability and operation-specific arguments. Identity and account
-come from the Host and cannot be supplied by the guest.
+- **Draw** with component trees: `render` replaces a surface, `patch` changes parts of it.
+  The [components](README.md#components) are drawn by Colecto with its own styles; you
+  never write HTML.
+- **React** to `event` messages: a button press, a submitted form, a changed field.
+  Hover, focus, scrolling and typing stay in the renderer.
+- **Fetch data** with `call`: `{t: 'call', id, method: 'GET', path: '/account'}` comes back
+  as `{t: 'reply', id, ok, data}`. Colecto adds your credential and the selected account;
+  the Host checks your capabilities.
+- **Answer `ping`** with `pong`, or the watchdog stops you after about 10 seconds.
+- **Follow the owner**: `start` carries the selected account, the [theme
+  tokens](ui-model.md#theme-tokens) and your settings; `account`, `theme` and `settings`
+  arrive when they change.
 
-Build for `wasm32-unknown-unknown`, without WASI. Keep the module below 16 MiB. Every invocation starts fresh; overlays store
-state in the emitted string and receive it back in the next frame action.
-See [the contract](README.md#overlay-extensions) for exact frame JSON and limits.
+An uncaught error or an invalid message stops the extension; its pane then shows
+"*name* stopped" with **Restart**.
 
-## 4. Pick an overlay layer
+For heavy work, ship a Wasm module under `client/` and instantiate it from your script
+with `colecto.file('client/parser.wasm')`, or make a `.wasm` file the entry itself (the
+[Wasm client ABI](ui-model.md#wasm-client-abi)).
 
-| Surface | Layer |
-| --- | ---: |
-| Workspace | 0 |
-| Third-party overlay, a good default | 10 |
-| Settings card | 1000 |
-| Menus and popovers, including Settings controls | 1100 |
-| Command runner | 1200 |
-| Bundled notifications (also in the top layer) | 1250 |
-| Install dialog | 1300 |
-| Oneko, an example of “always on top” | 10000 |
+## 4. Package and install
 
-The registry is `ui/src/lib/layers.ts`. Modal dialogs additionally occupy the
-browser's top layer, and so does the notification region, which shows above Settings.
-Overlay containers never intercept pointer events.
+A package is a zip of `manifest.toml`, `client/` and optional `assets/` images. In this
+repository, `just build extension` packages the example as
+`target/extensions/hello-pane.colectoext`; elsewhere, any zip tool works.
 
-## 5. Package and build
+Start Colecto (`just run`), open **Settings → Extensions**, pick the package (or drop it
+on the page) and press **Install**. The warning lists what it asks for and unlocks after
+five seconds. The pane joins the reader's group; drag its tab anywhere.
 
-A `.colectoext` file is a ZIP containing `manifest.toml`, `module.wasm`, and optional
-`assets/*.(png|jpg|jpeg|webp|gif)`. Rename your source manifest inside the archive. Use Stored or
-Deflate compression. Assets need safe lowercase flat names, verified PNG/JPEG/WebP/GIF magic bytes, at most
-8 MiB each and at most 256 files. Total compressed package size is 16 MiB.
+To debug, open the browser's developer tools: the Worker appears under its own frame,
+`<name> runtime`, where `console.log` output shows.
 
-For Rust extensions, `cargo colecto build` builds, checks and packages in one step;
-see [the SDK page](rust-sdk.md#build-and-package-with-cargo-colecto). `just build
-oneko` uses it to write `docs/extensions/examples/oneko.colectoext`; the example is not
-bundled. `just build extension` packages the WAT example with
-`colecto_host::package::write` (re-exported from `colecto-package`). For other toolchains, any ZIP tool works. Never include
-source files or directory entries.
+## 5. Add owner settings
 
-## 6. Install and debug
+Declare settings in the manifest and Colecto draws the page for you:
 
-Open Settings → Extensions and choose your package, or drop the file anywhere on that page. Read the warning and capability
-list. After five seconds, Install enables it. Cancel leaves the app unchanged.
-Settings shows read-only capabilities, an enable switch, workspace visibility for
-panels, and Remove for third-party packages.
+```toml
+[[settings]]
+key = "greeting"
+label = "Greeting"
+type = "text"
+default = "Hello"
+```
 
-If installation fails, check the manifest, ZIP entries and size limits first.
-If execution fails, check imports, exported memory/run, JSON shape and fuel usage.
-Panels have a Retry control. Overlay errors stop frame calls; toggle the extension
-off and on to retry. Service errors are returned as `{"ok":false,"error":"…"}`.
-Never assume the selected account is connected. Guest text is never interpreted
-as HTML. No filesystem, network, credentials, native IPC or retained guest memory
-is available. Use the test suites to check trust boundaries before sharing a package.
+The values arrive in `start` as `message.settings`, and again as a `settings` message
+whenever the owner changes them. The [contract](README.md#extension-settings) lists the
+types and limits.
+
+## 6. Run something without a window
+
+Background work that must happen with no window open, such as answering bus requests,
+belongs in a Wasm service part declared with `service = "service.wasm"`. It runs in the
+Host with a fresh sandboxed instance per call. Write it in Rust with the
+[Rust SDK](rust-sdk.md), which also packages your `client/` folder.
+
+## 7. Talk to another extension
+
+Declare `extensions.bus`. Ask another extension with a `call` to
+`POST /bus/<bus>/request` and `{name, payload}`; the answer is `{data}`, or `null` when
+nobody answered. Requests to your own bus arrive as `bus.request` messages; answer with
+a `call` to `POST /bus/replies/<id>` and `{data}`. Events you subscribe to under
+`[bus] subscribe` arrive as `bus.event`.
+
+Name requests and events with a whole-number version first, such as `v1/example`. See
+the [bus contract](README.md#extension-bus) and the
+[bundled surfaces](bundled-bus.md).
 
 ## API version policy
 
 Every extension targets one `api_version`. Versions count 1, 2, 3, …, and every change
 to the extension API adds one, so an extension keeps working on the version it targets.
 Move to a newer version only when you need something it adds; each version's page in
-[API versions](api-versions/README.md) says what you need to change, if anything.
+[API versions](api-versions/README.md) says what changes.
 
 If a release can no longer serve an old version, for example after a security fix, it
 discontinues it. Colecto then refuses to install or run extensions that target it, and
 links to that release's `Breaking API changes` notes, which explain why.
-
-Legacy notification preferences did not record whether bottom right was chosen or
-merely the default. Unmarked bottom-right positions reset to top center once;
-other saved positions remain. New position choices are recorded explicitly.
-
-## Large packages and compiled modules
-
-Limits are defined once in `crates/colecto-package/src/lib.rs`: compressed archive
-16 MiB; total uncompressed content 48 MiB; module 16 MiB; manifest 8 KiB; up to
-256 flat raster assets of 8 MiB each; at most 32 installed third-party packages.
-The Host checks every declared entry size and total before inflation, caps actual
-inflation by per-entry and aggregate budgets, and rejects any entry above 100:1
-compression. Raster magic must match PNG, JPEG, WebP or GIF suffixes; SVG is forbidden.
-
-The Host compiles enabled modules once on installation, startup or re-enabling.
-The cache associates each package ID with its generation. Every invocation creates
-a fresh instance with 32 MiB memory, 10,000,000 fuel, and the existing two-invocation
-concurrency cap. Disable and removal drop the compiled entry; reinstall gets a new
-generation. Policy contains metadata only; compressed package bytes live in separate
-database records. Listing extensions never reads module bodies or recompiles them.
-The UI uploads binary bodies; legacy JSON byte-array uploads are still accepted.
-
-### Add owner settings
-
-Add a table to `extension.toml`, then read it through `settings.read` at runtime:
-
-```toml
-[[settings]]
-key = "speed"
-label = "Running speed"
-type = "range"
-default = 10
-min = 2
-max = 30
-step = 1
-unit = "px"
-```
-
-The owner edits this in Settings. With the Rust SDK, read the values into your own
-struct with `cx.settings::<Settings>()`; Oneko's `src/lib.rs` reads speed, opacity and
-stopping distance that way once per frame. The [contract](README.md#extension-settings) lists validation and routes.
-
-## Talk to another extension
-
-Declare `extensions.bus` and subscribe to `reader/v1/message_opened` under `[bus]`
-when you need message-open events. A guest can ask the composer for its current draft:
-
-```json
-{"operation":"bus.request","bus":"composer","name":"v1/get_draft","payload":null}
-```
-
-Read `data` from the service response; null also means no answer. To answer a request
-on your own bus, inspect the `bus.request` action and emit
-`{"bus":{"response":{"example":true}}}`. Each delivery starts a fresh instance,
-so keep needed context in the payload. You may name requests and events however you
-like, but you are strongly encouraged to follow the bundled convention: a whole-number
-version first, such as `v1/example` or `v2/example`, never `v1.5/example` or a bare
-`example`.
-See the [bus contract](README.md#extension-bus) for limits and bundled surfaces. In
-Rust, the [SDK's bus types](rust-sdk.md#bus-messages) build these requests and answers
-for you.

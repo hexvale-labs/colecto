@@ -1,12 +1,12 @@
 <script lang="ts" module>
   /** Lets Settings show or hide an extension's pane in the dockable workspace. */
   export interface Workspace { shown: (pane: string) => boolean; toggle: (pane: string, on: boolean) => void }
-  const bundledPanes: Record<string, string> = { inbox: 'mailbox', reader: 'reader', accounts: 'accounts' };
+  const bundledPanes: Record<string, string> = { inbox: 'mailbox', reader: 'reader' };
 </script>
 <script lang="ts">
   import { onMount } from 'svelte';
-  import MailShell from './extensions/mail-shell/MailShell.svelte';
-  import OverlayLayer from './OverlayLayer.svelte';
+  import Shell from './shell/Shell.svelte';
+  import Toasts from './shell/Toasts.svelte';
   import { capabilityLabel } from './lib/capabilities';
   import FilePick from './FilePick.svelte';
   import InstallWarning from './InstallWarning.svelte';
@@ -52,7 +52,7 @@
   }
   async function update(extension: ExtensionState, enabled: boolean) {
     busy = true; error = '';
-    try { await extensionHost.update(account, extension.manifest.id, enabled); await reload(); if (extension.manifest.id === 'mail-shell' && !enabled) managing = true; }
+    try { await extensionHost.update(account, extension.manifest.id, enabled); await reload(); }
     catch (e) { const message = (e as Error).message; await reload(); error ||= message; }
     finally { busy = false; }
   }
@@ -147,12 +147,12 @@
       <h3 class="group-label">Installed</h3>
       <div class="settings-list">
         {#each extensions as extension (extension.manifest.id)}
-          {@const pane = extension.bundled ? bundledPanes[extension.manifest.id] : extension.manifest.slot === 'panel' && !extension.manifest.capabilities.includes('window.overlay') ? `ext:${extension.manifest.id}` : undefined}
+          {@const pane = extension.bundled ? bundledPanes[extension.manifest.id] : extension.manifest.pane ? `ext:${extension.manifest.id}` : undefined}
           <fieldset class="extension-card" class:off={!extension.enabled} disabled={busy || loading}>
             <legend class="sr-only">{extension.manifest.name}</legend>
             <div class="extension-top">
               <span class="extension-badge" aria-hidden="true">{extension.manifest.name.slice(0, 1)}</span>
-              <div class="extension-title"><strong class="extension-name" aria-hidden="true">{extension.manifest.name}</strong><p class="meta"><span class="tag" class:trusted={extension.bundled}>{extension.bundled ? 'Bundled' : 'Third-party · Wasm'}</span>By {extension.manifest.author} · API {extension.manifest.api_version}</p></div>
+              <div class="extension-title"><strong class="extension-name" aria-hidden="true">{extension.manifest.name}</strong><p class="meta"><span class="tag" class:trusted={extension.bundled}>{extension.bundled ? 'Bundled' : 'Third-party'}</span>By {extension.manifest.author} · API {extension.manifest.api_version}</p></div>
               <label class="switch"><input type="checkbox" checked={extension.enabled} disabled={!!extension.discontinued} onchange={(event) => void update(extension, event.currentTarget.checked)} /><span class="sr-only">Enabled for all accounts</span></label>
             </div>
             <p class="extension-description">{extension.manifest.description}</p>
@@ -177,20 +177,17 @@
   <p class="boot" role="status">Loading extensions…</p>
 {:else if onboarding}
   <Onboarding ondone={() => onboarding = false} />
-{:else if extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}
+{:else if !extensions.length}
+  <!-- Nothing loaded: the service is down, or the connect dialog above asks for a token. -->
+  {#if !authRequired}<ServiceUnavailable message={error} onretry={reload} />{/if}
+{:else}
   <svelte:boundary onerror={(failure) => console.error('Mail workspace failed', failure)}>
-    <MailShell extensionStates={extensions} {extensionSettings} onsettings={() => void reload()} />
+    <Shell extensionStates={extensions} {extensionSettings} onsettings={() => void reload()} />
     {#snippet failed(failure, reset)}<div class="error-box" role="alert">Mail workspace failed. Your saved mail remains in Core services.<button class="secondary" onclick={reset}>Retry workspace</button><button class="secondary" onclick={manage}>Extensions</button></div>{/snippet}
   </svelte:boundary>
-{:else if error && !extensions.length && !authRequired}
-  <!-- Nothing loaded: the service is down, not the workspace disabled. -->
-  <ServiceUnavailable message={error} onretry={reload} />
-{:else}
-  <p class="error-box boot">Mail workspace disabled. Open Extensions to restore it.</p>
 {/if}
 {#if error && extensions.length}<p class="error-box" role="alert">{error}<button class="secondary" disabled={busy} onclick={() => void reload()}>Retry</button></p>{/if}
-{#if !authRequired && !managing && extensions.length && !extensions.find(e => e.manifest.id === 'mail-shell')?.enabled}<button class="secondary" onclick={manage}>Extensions</button>{/if}
 {#if unsupported}<ApiVersionError items={unsupported.items} installing={unsupported.installing} onclose={() => unsupported = null} />{/if}
 {#if warning}{@const file = warning}<InstallWarning capabilities={requested} name={file.name} oncancel={() => warning = null} onconfirm={() => void install(file)} />{/if}
 
-<OverlayLayer {extensions} {account} />
+<Toasts />

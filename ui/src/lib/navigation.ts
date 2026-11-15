@@ -4,25 +4,34 @@ import type { IconName } from '../Icon.svelte';
 
 export const settingsPages = [
   { id: 'accounts', name: 'Accounts', icon: 'account' },
-  { id: 'mail', name: 'Mail', icon: 'inbox' },
   { id: 'appearance', name: 'Appearance', icon: 'palette' },
-  { id: 'notifications', name: 'Notifications', icon: 'bell' },
-  { id: 'privacy', name: 'Privacy', icon: 'image' },
   { id: 'servers', name: 'Connection', icon: 'server' },
   { id: 'extensions', name: 'Extensions', icon: 'extension' },
-  { id: 'ai', name: 'AI', icon: 'cpu' },
   { id: 'api-keys', name: 'API keys', icon: 'key' },
   { id: 'send-approvals', name: 'Send approvals', icon: 'shield' },
 ] as const satisfies readonly { id: string; name: string; icon: IconName }[];
 export type SettingsPage = typeof settingsPages[number]['id'] | `extension:${string}`;
 
 export type Folder = 'Inbox' | 'Drafts' | 'Sent';
-export type Destination = 'inbox' | 'drafts' | 'sent' | 'compose' | `settings/${SettingsPage}`;
+
+/** Settings sections that bundled extensions draw, by their old page name. */
+const extensionPages = {
+  mail: { extension: 'inbox', name: 'Mail' },
+  notifications: { extension: 'notifications', name: 'Notifications' },
+  privacy: { extension: 'reader', name: 'Privacy' },
+  ai: { extension: 'ai', name: 'AI' },
+} as const;
+/** The Settings sidebar's order for core and bundled sections. */
+const settingsOrder = ['accounts', 'mail', 'appearance', 'notifications', 'privacy', 'servers', 'extensions', 'ai', 'api-keys', 'send-approvals'];
+export type Destination = 'inbox' | 'drafts' | 'sent' | 'compose' | `settings/${SettingsPage}` | `settings/${keyof typeof extensionPages}`;
 
 export const destinations: { target: Destination; name: string }[] = [
   { target: 'compose', name: 'Compose a new message' },
   ...(['Inbox', 'Drafts', 'Sent'] as const).map(folder => ({ target: folder.toLowerCase() as Destination, name: `Go to ${folder}` })),
-  ...settingsPages.map(page => ({ target: `settings/${page.id}` as Destination, name: `Settings: ${page.name}` })),
+  // Sections bundled extensions own keep their old destinations; all follow the sidebar's order.
+  ...[...settingsPages.map(page => ({ page: page.id as string, name: page.name })), ...Object.entries(extensionPages).map(([page, { name }]) => ({ page, name }))]
+    .sort((a, b) => settingsOrder.indexOf(a.page) - settingsOrder.indexOf(b.page))
+    .map(({ page, name }) => ({ target: `settings/${page}` as Destination, name: `Settings: ${name}` })),
 ];
 
 export function isDestination(value: unknown): value is Destination {
@@ -32,6 +41,8 @@ export function isDestination(value: unknown): value is Destination {
 /** What a destination opens: a folder, the composer, or a Settings page. */
 export function resolve(target: Destination): { folder: Folder } | { compose: true } | { settings: SettingsPage } {
   if (target === 'compose') return { compose: true };
+  const page = target.slice('settings/'.length);
+  if (page in extensionPages) return { settings: `extension:${extensionPages[page as keyof typeof extensionPages].extension}` };
   if (target.startsWith('settings/')) return { settings: target.slice('settings/'.length) as SettingsPage };
   return { folder: (target[0].toUpperCase() + target.slice(1)) as Folder };
 }

@@ -1,0 +1,13 @@
+- /children: deep-equal
+- dialog "Settings":
+  - banner:
+    - button "Back to Settings"
+  - region "Privacy":
+    - heading "Privacy" [level=2]
+    - paragraph: From Reader
+    - paragraph: Read messages, including sandboxed HTML and attachments, in tabs.
+    - heading "Load remote images" [level=3]
+    - paragraph: Messages show images from the internet without asking. Senders can then learn when, and possibly where, you opened their mail.
+    - checkbox "Load remote images"
+    - button "Reset to defaults" [disabled]
+    - status

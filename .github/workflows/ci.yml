@@ -33,6 +33,8 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
+          # The AI extension's service part is built for wasm32 and shipped with the UI.
+          targets: wasm32-unknown-unknown
 
       # Only main and develop write the Rust cache; pull requests restore from their base
       # branch or main instead of each saving a near-identical ~800 MB copy that evicts the

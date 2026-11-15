@@ -109,7 +109,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target }},wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -121,8 +121,10 @@ jobs:
           bun-version-file: ui/package.json
 
       - name: Build the UI
-        working-directory: ui
         run: |
+          # The AI extension's service part ships with the UI assets.
+          cargo build --release --locked --target wasm32-unknown-unknown -p colecto-ai-service
+          cd ui
           bun install --frozen-lockfile
           bun run --bun build
 
@@ -186,7 +188,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
-          targets: ${{ matrix.triple }}
+          targets: ${{ matrix.triple }},wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -211,8 +213,10 @@ jobs:
           bun-version-file: ui/package.json
 
       - name: Build the UI
-        working-directory: ui
         run: |
+          # The AI extension's service part ships with the UI assets.
+          cargo build --release --locked --target wasm32-unknown-unknown -p colecto-ai-service
+          cd ui
           bun install --frozen-lockfile
           bun run --bun build
 

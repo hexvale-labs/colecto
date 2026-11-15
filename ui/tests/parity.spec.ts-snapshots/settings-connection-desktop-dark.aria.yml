@@ -1,0 +1,51 @@
+- /children: deep-equal
+- dialog "Settings":
+  - navigation "Settings sections":
+    - heading "Settings" [level=1]
+    - button "Collapse the section list" [expanded]
+    - group "Built-in":
+      - text: ""
+      - button "Accounts"
+      - button "Mail"
+      - button "Appearance"
+      - button "Notifications"
+      - button "Privacy"
+      - button "Connection"
+      - button "Extensions"
+      - button "AI"
+      - button "API keys"
+      - button "Send approvals"
+  - banner:
+    - paragraph:
+      - text: Settings
+      - strong: Connection
+    - button "Close settings"
+  - region "Connection":
+    - heading "Connection" [level=2]
+    - paragraph: Accounts and drafts belong to the mail service you are connected to.
+    - region "Current service":
+      - heading "Current service" [level=2]
+      - strong: This app
+      - text: /Connected http:\/\/\d+\.\d+\.0\.1:\d+/
+    - region "Background services":
+      - heading "Background services" [level=2]
+      - paragraph: Run Colecto as systemd user services, whichever way you installed it.
+      - list:
+        - listitem:
+          - strong: Mail service
+          - text: Not installed Keeps syncing mail when the app is closed. The app connects to it through a private local socket. Start on login
+          - switch "Start Mail service on login" [checked]
+          - button "Install"
+        - listitem:
+          - strong: Desktop notifications
+          - text: Not installed Shows a desktop notification for new mail from the background service. Start on login
+          - switch "Start Desktop notifications on login" [checked]
+          - button "Install"
+    - region "Use another server":
+      - heading "Use another server" [level=2]
+      - paragraph: Connect to a daemon by its HTTPS address and access token. Mail you open is kept on this computer too, so it stays quick on a slow connection. A local mail service is reached through its socket, as unix:/path/to/mail.sock.
+      - text: Server address
+      - textbox "Server address":
+        - /placeholder: https://mail.example.com or unix:/…
+      - button "Open"
+      - button "Forget this session’s access token"

@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, setExtensionSettings } from './fixtures';
 import type { Page } from '@playwright/test';
 import { templates } from './fixtures/html-mail';
 
@@ -109,11 +109,8 @@ for (const template of templates) {
 test('mail shows straight away while allowed remote images are still loading', async ({ page }) => {
   // The frame used to stay invisible until its load event, which waits for every image.
   // A slow or dead image server then hid the whole mail.
-  await page.route('**/api/v1/preferences', async route => {
-    if (route.request().method() !== 'GET') return route.fallback();
-    const response = await route.fetch();
-    return route.fulfill({ response, json: { ...await response.json(), remote_images: true } });
-  });
+  // Settings → Privacy belongs to the reader.
+  await setExtensionSettings(page, 'reader', { remote_images: true });
   let requested = 0;
   await page.route('https://remote.test/**', () => { requested++; });
   const template = templates[0];

@@ -1,7 +1,51 @@
 id = "inbox"
-name = "Mailbox"
+name = "Mail"
 api_version = 1
-slot = "mailbox"
-capabilities = ["extensions.bus", "account.read", "messages.organize", "messages.list", "drafts.list"]
-description = "Browse messages and saved drafts for the selected account."
+client = "client/main.js"
+navigation = ["inbox", "drafts", "sent"]
+capabilities = ["extensions.bus", "account.read", "messages.organize", "messages.list", "messages.label", "drafts.list", "ui.commands"]
+description = "Browse, search and filter the messages and drafts of the selected account."
 author = "Colecto"
+
+[pane]
+icon = "inbox"
+
+[bus]
+subscribe = ["reader/v1/viewing", "reader/v1/labels", "composer/v1/editing", "composer/v1/saved"]
+
+# Names the generated page in Settings; this extension draws nothing there itself.
+[settings_page]
+title = "Mail"
+icon = "inbox"
+
+[[settings]]
+key = "density"
+label = "List density"
+description = "Full rows show a preview line, medium rows drop it, compact rows take one line."
+type = "choice"
+default = "full"
+options = [{ value = "full", label = "Full" }, { value = "medium", label = "Medium" }, { value = "compact", label = "Compact" }]
+
+[[settings]]
+key = "date_groups"
+label = "Date headings"
+description = "Group messages under headings such as Today and November."
+type = "toggle"
+default = true
+
+[[settings]]
+key = "prefetch"
+label = "Download recent mail ahead of time"
+description = "After each refresh, the newest messages are saved so they open instantly, even offline. This never marks them as read."
+type = "toggle"
+default = true
+
+[[settings]]
+key = "prefetch_count"
+label = "Messages to keep ready"
+description = "The newest messages in your Inbox. More uses more storage and bandwidth; messages over 10 MB still open on demand."
+type = "range"
+default = 50
+min = 0
+max = 100
+step = 5

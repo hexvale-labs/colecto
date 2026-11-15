@@ -235,8 +235,30 @@ pub enum Capability {
     MessagesLabel,
     #[serde(rename = "messages.organize")]
     MessagesOrganize,
-    #[serde(rename = "window.overlay")]
-    WindowOverlay,
+    #[serde(rename = "ui.frame")]
+    UiFrame,
+    #[serde(rename = "ui.frame.remote")]
+    UiFrameRemote,
+    #[serde(rename = "ui.commands")]
+    UiCommands,
+    #[serde(rename = "ui.app_actions")]
+    UiAppActions,
+    #[serde(rename = "ui.toasts")]
+    UiToasts,
+    #[serde(rename = "ui.contribute")]
+    UiContribute,
+    #[serde(rename = "ui.canvas")]
+    UiCanvas,
+    #[serde(rename = "approvals.notify")]
+    ApprovalsNotify,
+    #[serde(rename = "releases.read")]
+    ReleasesRead,
+    #[serde(rename = "ai.text")]
+    AiText,
+    #[serde(rename = "ai.decide")]
+    AiDecide,
+    #[serde(rename = "ai.configure")]
+    AiConfigure,
     /// Lets an API key move the owner's open Colecto windows to a page. Never granted to extensions.
     #[serde(rename = "app.navigate")]
     AppNavigate,
@@ -272,10 +294,46 @@ pub struct ExtensionManifest {
     pub id: String,
     pub name: String,
     pub api_version: u32,
-    pub slot: String,
+    /// The client part's entry under `client/`, a `.js` or `.wasm` file. Bundled extensions
+    /// that still run as trusted Svelte have none until they move to the runtime.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub z_index: Option<u16>,
+    pub client: Option<String>,
+    /// The service part: a Wasm module at the package root, run by the Host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    /// One workspace pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<PaneDeclaration>,
+    /// A drawing surface over the whole window (needs `ui.canvas`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<OverlayDeclaration>,
+    /// A section in Settings drawn by the extension.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings_page: Option<SettingsPageDeclaration>,
+    /// Destinations from [`NAVIGATION_TARGETS`] this extension opens.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub navigation: Vec<String>,
     pub capabilities: Vec<Capability>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PaneDeclaration {
+    pub icon: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OverlayDeclaration {
+    /// 1–10000; see the layers in `ui/src/lib/layers.ts`.
+    pub z_index: u16,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingsPageDeclaration {
+    pub title: String,
+    pub icon: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -309,23 +367,8 @@ pub struct ExtensionPolicyInput {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtensionInstallInput {
-    /// A `.colectoext` package: a zip holding `manifest.toml` and `module.wasm`.
+    /// A `.colectoext` package: a zip holding `manifest.toml`, `client/` and an optional service module.
     pub package: Vec<u8>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExtensionRunInput {
-    pub action: String,
-}
-
-/// Declarative UI: all strings are rendered as text, never markup.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExtensionView {
-    pub title: String,
-    pub text: String,
-    pub actions: Vec<String>,
 }
 
 #[derive(Deserialize)]

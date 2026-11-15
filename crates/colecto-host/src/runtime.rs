@@ -298,7 +298,7 @@ pub fn local_owner_token(directory: &Path) -> Result<String, Box<dyn std::error:
 
 pub fn owner_initialization_script(origin: &str, token: &str) -> String {
     format!(
-        "if (window.location.origin === {}) {{ window.sessionStorage.setItem('colecto.token', {}); }}",
+        "if (window.origin === {}) {{ window.sessionStorage.setItem('colecto.token', {}); }}",
         serde_json::to_string(origin).expect("serialize origin"),
         serde_json::to_string(token).expect("serialize owner credential")
     )

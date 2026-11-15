@@ -1,5 +1,5 @@
-//! Pure Wasm guests have no WASI, filesystem, network, process or native IPC imports.
-use colecto_extension_api::ExtensionView;
+//! Service parts: pure Wasm with no WASI, filesystem, network, process or native IPC imports.
+//! Each invocation gets a fresh instance (docs/extensions/ui-model.md, "Service part").
 use serde_json::Value;
 use wasmi::{
     Caller, Config, Engine, Extern, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
@@ -8,6 +8,8 @@ use wasmi::{
 use crate::package::MAX_MODULE;
 use std::sync::Arc;
 const MAX_OUTPUT: usize = 32 * 1024;
+/// Service requests per invocation: enough for a pass over a burst of new mail.
+pub const MAX_REQUESTS: u8 = 64;
 pub const FUEL: u64 = 10_000_000;
 pub const MAX_MEMORY: usize = 32 * 1024 * 1024;
 type Service = Box<dyn FnMut(Value) -> Result<Value, String> + Send>;
@@ -15,10 +17,8 @@ struct Context {
     limits: StoreLimits,
     service: Service,
     action: Vec<u8>,
-    view: Option<serde_json::Value>,
-    assets: Option<Arc<crate::package::Assets>>,
+    output: Option<serde_json::Value>,
     calls: u8,
-    bus: bool,
 }
 fn engine() -> Engine {
     let mut config = Config::default();
@@ -80,30 +80,10 @@ fn write(caller: &mut Caller<'_, Context>, ptr: i32, capacity: i32, bytes: &[u8]
     }
     bytes.len() as i32
 }
-#[cfg(test)]
-pub fn run(bytes: &[u8], action: &str, service: Service) -> Result<ExtensionView, String> {
-    let compiled = compile(bytes)?;
-    let value = run_output(&compiled, action, service, None)?;
-    serde_json::from_value(value).map_err(|e| e.to_string())
-}
-pub fn run_output(
-    compiled: &Compiled,
-    action: &str,
-    service: Service,
-    assets: Option<Arc<crate::package::Assets>>,
-) -> Result<Value, String> {
-    let bus = serde_json::from_str::<Value>(action)
-        .ok()
-        .is_some_and(|v| matches!(v["event"].as_str(), Some("bus.request" | "bus.event")));
-    if action.len()
-        > if bus {
-            64 * 1024
-        } else if assets.is_some() {
-            MAX_OUTPUT
-        } else {
-            128
-        }
-    {
+/// Run one invocation: `action` is the JSON the guest reads with `colecto.action`, such as
+/// `{"event":"bus.request",...}`. Returns what it emitted, or null.
+pub fn invoke(compiled: &Compiled, action: &str, service: Service) -> Result<Value, String> {
+    if action.len() > 64 * 1024 {
         return Err("Extension action too long".into());
     }
     let engine = &compiled.engine;
@@ -122,10 +102,8 @@ pub fn run_output(
             limits,
             service,
             action: action.as_bytes().to_vec(),
-            view: None,
-            assets,
+            output: None,
             calls: 0,
-            bus,
         },
     );
     store.limiter(|data| &mut data.limits);
@@ -146,7 +124,7 @@ pub fn run_output(
             "colecto",
             "emit",
             |mut caller: Caller<'_, Context>, ptr: i32, len: i32| -> i32 {
-                if caller.data().view.is_some() {
+                if caller.data().output.is_some() {
                     return -1;
                 }
                 let Some(bytes) = read(&caller, ptr, len) else {
@@ -155,39 +133,18 @@ pub fn run_output(
                 if bytes.len() > MAX_OUTPUT {
                     return -1;
                 }
-                let view = if caller.data().bus {
-                    let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
-                        return -1;
-                    };
-                    if v.as_object().is_none_or(|o| o.len() != 1)
-                        || v["bus"]
-                            .as_object()
-                            .is_none_or(|o| o.len() != 1 || !o.contains_key("response"))
-                    {
-                        return -1;
-                    }
-                    v
-                } else if let Some(assets) = &caller.data().assets {
-                    match crate::overlay::validate(&bytes, assets)
-                        .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
-                    {
-                        Ok(v) => v,
-                        Err(_) => return -1,
-                    }
-                } else {
-                    let Ok(view) = serde_json::from_slice::<ExtensionView>(&bytes) else {
-                        return -1;
-                    };
-                    if view.title.len() > 256
-                        || view.text.len() > 16384
-                        || view.actions.len() > 16
-                        || view.actions.iter().any(|s| s.is_empty() || s.len() > 128)
-                    {
-                        return -1;
-                    }
-                    serde_json::to_value(view).expect("serializable view")
+                // The only output is a bus answer: {"bus":{"response":...}}.
+                let Ok(output) = serde_json::from_slice::<Value>(&bytes) else {
+                    return -1;
                 };
-                caller.data_mut().view = Some(view);
+                if output.as_object().is_none_or(|o| o.len() != 1)
+                    || output["bus"]
+                        .as_object()
+                        .is_none_or(|o| o.len() != 1 || !o.contains_key("response"))
+                {
+                    return -1;
+                }
+                caller.data_mut().output = Some(output);
                 0
             },
         )
@@ -202,7 +159,7 @@ pub fn run_output(
              output: i32,
              capacity: i32|
              -> i32 {
-                if caller.data().calls >= 8 {
+                if caller.data().calls >= MAX_REQUESTS {
                     return -1;
                 }
                 caller.data_mut().calls += 1;
@@ -230,24 +187,27 @@ pub fn run_output(
         .get_typed_func::<(), ()>(&store, "run")
         .map_err(|e| e.to_string())?;
     function.call(&mut store, ()).map_err(|e| e.to_string())?;
-    if bus {
-        return Ok(store.data_mut().view.take().unwrap_or(Value::Null));
-    }
-    store
-        .data_mut()
-        .view
-        .take()
-        .ok_or_else(|| "Extension did not emit a valid view".into())
+    Ok(store.data_mut().output.take().unwrap_or(Value::Null))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn execute(wat: &str) -> Result<ExtensionView, String> {
-        run(
-            &wat::parse_str(wat).unwrap(),
-            "open",
+    fn execute(wat: &str) -> Result<Value, String> {
+        invoke(
+            &*compile(&wat::parse_str(wat).unwrap())?,
+            r#"{"event":"bus.request","from":"x","name":"v1/a","payload":null}"#,
             Box::new(|_| Err("Denied".into())),
+        )
+    }
+    fn emitting(output: &str) -> String {
+        let escaped: String = output.bytes().map(|b| format!("\\{b:02x}")).collect();
+        format!(
+            r#"(module
+            (import "colecto" "emit" (func $emit (param i32 i32) (result i32)))
+            (memory (export "memory") 1) (data (i32.const 0) "{escaped}")
+            (func (export "run") i32.const 0 i32.const {} call $emit drop))"#,
+            output.len()
         )
     }
     #[test]
@@ -263,27 +223,21 @@ mod tests {
             "(module (func (export \"run\") (loop br 0)))",
             "(module (memory (export \"memory\") 513) (func (export \"run\")))",
             "(module (memory (export \"memory\") 1) (func (export \"run\") unreachable))",
-            "(module (memory (export \"memory\") 1) (func (export \"run\")))",
         ] {
             assert!(execute(source).is_err());
         }
     }
     #[test]
-    fn only_emits_bounded_declarative_text() {
-        let view = r#"{"title":"Example","text":"<script>evil()</script>","actions":["Refresh"]}"#;
-        let escaped: String = view.bytes().map(|b| format!("\\{b:02x}")).collect();
-        let source = format!(
-            r#"(module
-            (import "colecto" "emit" (func $emit (param i32 i32) (result i32)))
-            (memory (export "memory") 1) (data (i32.const 0) "{escaped}")
-            (func (export "run") i32.const 0 i32.const {} call $emit drop))"#,
-            view.len()
-        );
-        assert_eq!(execute(&source).unwrap().text, "<script>evil()</script>");
-        assert!(
-            execute(&source.replace("i32.const 0 i32.const", "i32.const -1 i32.const")).is_err()
-        );
-        // Emit first, so missing output cannot hide a failure to enforce limits.
+    fn only_bus_answers_are_accepted_as_output() {
+        let source = emitting(r#"{"bus":{"response":"<b>hi</b>"}}"#);
+        assert_eq!(execute(&source).unwrap()["bus"]["response"], "<b>hi</b>");
+        for other in [
+            r#"{"title":"Old panel","text":"","actions":[]}"#,
+            r#"{"bus":{}}"#,
+            "nope",
+        ] {
+            assert_eq!(execute(&emitting(other)).unwrap(), Value::Null);
+        }
         let grow = source.replace(
             "call $emit drop",
             "call $emit drop i32.const 513 memory.grow drop",
@@ -297,36 +251,30 @@ mod tests {
     }
     #[test]
     fn host_request_budget_is_enforced_even_if_the_guest_ignores_errors() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
         let calls = Arc::new(AtomicUsize::new(0));
         let observed = calls.clone();
         let module = wat::parse_str(
             r#"(module
           (import "colecto" "request" (func $request (param i32 i32 i32 i32) (result i32)))
-          (import "colecto" "emit" (func $emit (param i32 i32) (result i32)))
           (memory (export "memory") 1)
           (data (i32.const 0) "{}")
-          (data (i32.const 512) "{\22title\22:\22Budget\22,\22text\22:\22Done\22,\22actions\22:[]}")
           (func (export "run") (local $count i32)
             (loop $again
               i32.const 0 i32.const 2 i32.const 8192 i32.const 1024 call $request drop
               local.get $count i32.const 1 i32.add local.tee $count
-              i32.const 20 i32.lt_u br_if $again)
-            i32.const 512 i32.const 45 call $emit drop))"#,
+              i32.const 80 i32.lt_u br_if $again)))"#,
         )
         .unwrap();
-        let view = run(
-            &module,
-            "open",
+        let result = invoke(
+            &compile(&module).unwrap(),
+            "{}",
             Box::new(move |_| {
                 observed.fetch_add(1, Ordering::Relaxed);
                 Ok(Value::Null)
             }),
         );
-        assert!(view.is_ok(), "{view:?}");
-        assert_eq!(calls.load(Ordering::Relaxed), 8);
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(calls.load(Ordering::Relaxed), MAX_REQUESTS as usize);
     }
 }

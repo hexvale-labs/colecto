@@ -8,7 +8,7 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/hexvale-labs/colecto'
 license=('MIT OR Apache-2.0')
 depends=('webkit2gtk-4.1' 'gtk3' 'openssl' 'dbus' 'hicolor-icon-theme')
-makedepends=('cargo' 'bun')
+makedepends=('rustup' 'bun')
 optdepends=('org.freedesktop.secrets: keep account passwords in the system keyring')
 options=('!lto')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
@@ -17,6 +17,8 @@ sha256sums=('SKIP')
 prepare() {
   cd "$pkgname-$pkgver"
   export RUSTUP_TOOLCHAIN=stable
+  # The AI extension's service part is WebAssembly built alongside the app.
+  rustup target add wasm32-unknown-unknown
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
   cd ui
   bun install --frozen-lockfile
@@ -24,9 +26,10 @@ prepare() {
 
 build() {
   cd "$pkgname-$pkgver"
-  (cd ui && bun run --bun build)
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
+  cargo build --frozen --release --target wasm32-unknown-unknown -p colecto-ai-service
+  (cd ui && bun run --bun build)
   cargo build --frozen --release -p colecto-app -p colecto-host
 }
 

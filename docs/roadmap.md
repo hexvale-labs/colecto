@@ -48,6 +48,14 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Install the daemon as a Windows logon task | Next |
 | Stress testing with thousands of messages and very long HTML mail | Next |
 | Sequential extension API versions; refuse extensions on a discontinued version with a link to why | Done |
+| Rebuild extensions as client-side Workers with a declarative component UI, reset to API 1 ([design](extensions/ui-model.md)) | Done; desktop and Android webviews not yet checked by hand |
+| Move core UI (app frame, docking, account switcher, Settings, command runner, toasts) out of `ui/src/extensions/` | Done |
+| Worker runtime, per-extension credentials, renderer, theme tokens and `frame`; reset to API 1 | Done |
+| Shared TypeScript client library and bundled client parts | Done |
+| Rust SDK support for client parts (Wasm client ABI) and building them with `cargo colecto` | Later |
+| Notifications, AI (auto-labels in a service part), inbox, reader and composer on the new model | Done |
+| Composer body as a rich-text editor `frame` | Later |
+| Oneko rewritten on `canvas` | Done |
 
 ## Platforms and hosting
 

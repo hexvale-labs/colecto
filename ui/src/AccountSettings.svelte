@@ -1,11 +1,13 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import AccountWizard from './AccountWizard.svelte';
-  import { createServices, hostService } from './lib/api';
+  import { hostService, request } from './lib/api';
   import type { AccountInfo, SecurityInfo } from './lib/api';
   import { hue, initial } from './lib/initial';
-  let { accounts, security, enabled, ontoggle, onrefresh, ondirty, onbusy }: {
+  let { accounts, security, pane, enabled, ontoggle, onrefresh, ondirty, onbusy }: {
     accounts: AccountInfo[]; security: SecurityInfo; onrefresh: () => Promise<void>;
+    /** The workspace's Accounts pane, which the owner can hide here or from its tab. */
+    pane?: { shown: boolean; toggle: (on: boolean) => void };
     /** Whether each account is on; off accounts are hidden from the workspace and not synced. */
     enabled: (id: string) => boolean; ontoggle: (id: string, on: boolean) => void;
     ondirty: (value: boolean) => void; onbusy: (value: boolean) => void;
@@ -71,7 +73,8 @@
     if (!account.configured) { open(account); return; }
     checking = account.id;
     await run(async () => {
-      await createServices(account.id).inbox.messages('inbox');
+      // Reconnecting refreshes the Inbox, as the mailbox would, so the result is known at once.
+      await request("inbox", account.id, '/messages/refresh', {});
       notice = `${title(account)} is connected.`;
     });
     checking = undefined;
@@ -120,6 +123,10 @@
       </ul>
       <button class="secondary add-account" disabled={working || security.locked} onclick={() => open()}><Icon name="plus" size={16} />Add account</button>
       {#if security.locked}<p class="hint">Unlock credentials below to add or change accounts.</p>{/if}
+      {#if pane}<div class="setting setting-row pane-row">
+        <div class="setting-text"><h3 id="accounts-pane-label">Accounts pane</h3><p>Show the account switcher as a pane in the workspace.</p></div>
+        <label class="switch"><input type="checkbox" aria-labelledby="accounts-pane-label" checked={pane.shown} onchange={(event) => pane.toggle(event.currentTarget.checked)} /></label>
+      </div>{/if}
     </section>
 
     <section class="settings-card security-card" aria-labelledby="protection-title"><h2 id="protection-title">Credential protection</h2><p class="protection-state">{security.cleanup_pending ? 'Credential cleanup pending' : security.protected ? security.locked ? 'Credentials locked' : 'Password protection enabled' : 'System credential store'}</p><p>By default, passwords and tokens stay in your system credential store. Optionally protect them with a master password.</p><p class="security-disclosure">Protects credentials only. Local emails and drafts remain unencrypted. A forgotten master password cannot be recovered.</p>

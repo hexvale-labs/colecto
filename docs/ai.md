@@ -97,8 +97,9 @@ End, Escape) offers **Summarize** and, when the composer is on, **Reply**.
   reply** opens the normal reply composer with the draft above the quoted message.
   Notes and the draft stay while the message is open.
 
-The reader does not import the AI extension; see "Reader slots" in the
-[extension contract](extensions/README.md#reader-slots).
+The reader does not import the AI extension: AI fills the reader's `reader/v1/actions`
+and `reader/v1/above_body` slots and starts replies with `reader/v1/reply` (see
+[Bundled bus surfaces](extensions/bundled-bus.md)).
 
 ## Automatic labels
 
@@ -117,39 +118,42 @@ pattern are refused with the label's name. The label editor tests its rules agai
 account's saved Inbox (`POST /ai/labels/preview`) as the owner types, without any
 network request, and shows how many messages match and the first five.
 
-Labelling runs in the background refresh (`crates/colecto-host/src/service.rs`) when it
-sees new message ids, which includes IMAP IDLE and JMAP push refreshes. It needs AI
-features and automatic labels on. Rules apply first; the model is asked only about the
-remaining model-enabled labels.
+Labelling runs in the AI extension's service part (`ui/src/extensions/ai/service/`,
+built to `service.wasm`), which the Host invokes with a `mail` event when the background
+refresh (`crates/colecto-host/src/service.rs`) sees new message ids, including IMAP IDLE
+and JMAP push refreshes. It works with no window open. It needs AI features and
+automatic labels on. Rules apply first; the model is asked only about the remaining
+model-enabled labels, through the `ai.decide` service operation.
 
 | Limit | Value |
 | --- | --- |
-| Model requests per account and refresh | 10 messages (one request each) |
-| Model requests per hour, all accounts | 120 |
-| Remembered handled messages per account | 2,000 |
+| Model requests per mail event | 10 messages (one request each) |
+| Model requests per hour, all accounts | 120, counted by the Host |
+| Remembered handled messages per account | 500, in the extension's own storage (`seen.<account>`) |
+| Service requests per event | 64 (the service-part limit) |
 
-Each message is handled at most once (the `ai-autolabel-seen` record). Removing a label
-from a message by hand also marks it handled, so automatic labelling never re-applies a
-label the owner removed. Mail that arrived while the Host was not running is not
-labelled, because the first refresh after start only sets the baseline. Labels that no
-longer exist are skipped. A failed model request stops model requests for the rest of
-that refresh; rules still apply.
+Each message is handled at most once, so a label the owner removes is never re-applied.
+Mail that arrived while the Host was not running is not labelled, because the first
+refresh after start only sets the baseline. Labels that no longer exist are skipped. A
+failed model request stops model requests for the rest of that event; rules still
+apply. After labelling, it emits `ai/v1/labeled` with `{account}`.
 
 ## HTTP routes
 
-All under `/api/v1`, owner bearer only. Scoped API keys are refused by the
-authentication layer, and Wasm extensions never receive the HTTP path.
+All under `/api/v1`. Scoped API keys are refused by the authentication layer. The AI
+extension's client part calls them with its own credential; `/ai/keys` stays owner-only
+and is reached only from the trusted key field the shell draws.
 
-| Route | Caller (`x-colecto-extension`) | Purpose |
+| Route | Caller | Purpose |
 | --- | --- | --- |
-| `GET`/`POST /ai/settings` | `host` | Read or replace the settings; returns `{settings, keys:{text,decision}}` |
-| `POST /ai/keys` | `host` | `{kind:"text"\|"decision", key:string\|null}` |
-| `POST /ai/test` | `host` | `{kind}`; checks the saved connection |
-| `POST /ai/labels/preview` | `host` (+ `x-colecto-account`) | `{rule}` → `{errors, checked, count, matches}` |
-| `GET`/`POST`/`DELETE /ai/summaries/{id}` | `ai`, needs `messages.read` | Read, create or delete the saved summary |
-| `POST /ai/reply` | `ai`, needs `messages.read` | `{message_id, input, tone}` → `{text}` |
+| `GET`/`POST /ai/settings` | Owner, or an extension with `ai.configure` | Read or replace the settings; returns `{settings, keys:{text,decision}}` |
+| `POST /ai/keys` | Owner only | `{kind:"text"\|"decision", key:string\|null}` |
+| `POST /ai/test` | Owner, or `ai.configure` | `{kind}`; checks the saved connection |
+| `POST /ai/labels/preview` | Owner, or `ai.configure` (+ `x-colecto-account`) | `{rule}` → `{errors, checked, count, matches}` |
+| `GET`/`POST`/`DELETE /ai/summaries/{id}` | An extension with `ai.text` and `messages.read` | Read, create or delete the saved summary |
+| `POST /ai/reply` | An extension with `ai.text` and `messages.read` | `{message_id, input, tone}` → `{text}` |
 
-The `ai` routes also require the extension to be enabled, and answer HTTP 409 while AI
+Extension callers must be enabled, and the summary and reply routes answer HTTP 409 while AI
 features are off. A locked credential vault answers 409 ("Unlock your credentials…").
 
 ## Storage
@@ -158,9 +162,8 @@ features are off. A locked credential vault answers 409 ("Unlock your credential
 | --- | --- | --- |
 | `ai` | Settings and label rules | Validated as above |
 | `ai-summaries` | `{account, message, text, created_at}` | 1,000 summaries of at most 4,000 characters; oldest dropped first |
-| `ai-autolabel-seen` | Handled message ids per account | 2,000 per account |
 
 API keys are `host:ai-text` and `host:ai-decision` secrets in the encrypted credential
 vault beside account credentials (see [accounts](accounts.md)). Locking the vault makes
 them unavailable; **Reset saved credentials** deletes them. Removing an account deletes
-its label rules, summaries and handled ids. Summaries are plaintext, like mail snapshots.
+its label rules and summaries. Summaries are plaintext, like mail snapshots.

@@ -6,8 +6,9 @@ they fit together, see [architecture](architecture.md); for where files live, se
 
 ## Prerequisites
 
-Stable Rust (1.89 or newer) with `rustfmt` and `clippy`, [`just`](https://just.systems),
-and Bun 1.4.4 or newer. Linux also needs OpenSSL and D-Bus development libraries and
+Stable Rust (1.89 or newer) with `rustfmt`, `clippy` and the `wasm32-unknown-unknown`
+target (`rustup target add wasm32-unknown-unknown`; the AI extension's service part
+is built for it), [`just`](https://just.systems), and Bun 1.4.4 or newer. Linux also needs OpenSSL and D-Bus development libraries and
 pkg-config (on Debian/Ubuntu: `libssl-dev libdbus-1-dev pkg-config`). The desktop app
 additionally needs [Tauri's system dependencies](https://v2.tauri.app/start/prerequisites/).
 
@@ -92,6 +93,18 @@ test Host never contacts GitHub (`COLECTO_UPDATE_CHECK=off`); tests that need a 
 answer mock `/api/v1/releases/latest`.
 The shared Playwright fixture skips the startup-screen delay; timing tests opt back
 in. Playwright may need system browser libraries.
+
+`ui/tests/parity.spec.ts` guards the move to the [client-side extension
+model](extensions/ui-model.md): the workspace, an open message, the composer, the command
+runner and every Settings section, at 390 px and 1280 px, with `colorScheme` light and
+dark. Its accessibility snapshots (`parity.spec.ts-snapshots/*.aria.yml`) start with
+`/children: deep-equal`, so roles, names, states and order must match exactly; Playwright's
+default is a partial match. Screenshots depend on fonts and GPU, so they are compared only
+with `COLECTO_PARITY_SCREENSHOTS=1` on the machine that recorded them (0.2% of pixels may
+differ). A change that alters these views on purpose re-records them with
+`--update-snapshots=changed`, puts the `deep-equal` line back, checks that generated
+snapshots match themselves (Playwright sometimes writes `text: ""` or drops a button's
+visible text), and lists the difference in its pull request.
 
 `ui/tests/html-mail.spec.ts` opens five published company email templates
 (`ui/tests/fixtures/html-mail/`, sources and licences in its `README.md`) in Chromium
@@ -204,19 +217,18 @@ An agent ships a release only when the maintainer asks for one in the current se
 
 ## CI build caches
 
-GitHub lets a run restore caches saved on its own branch or tag, or on `main`. Pull
-requests and tags never save; they restore what `main` saved, so an unchanged
-dependency tree is never rebuilt from scratch.
-`develop` saves nothing either, because the 10 GB budget has no room for a second set:
-a dependency change merged into `develop` builds cold in each pull request until the
-next release brings it to `main`.
+GitHub lets a run restore caches saved on its own branch or tag, on the pull request's
+base branch, or on `main`. Pull requests and tags never save; `main` and `develop` save
+only on a miss, so a dependency change merged into `develop` is cached there before the
+next release brings it to `main`, and an unchanged dependency tree is never rebuilt
+from scratch.
 
 | Cache | Saved by | Key |
 | --- | --- | --- |
-| Rust dependencies for CI (`verify`, also restored by `jmap`) | `ci.yml` on `main` | toolchain + `Cargo.lock` + root `Cargo.toml` |
+| Rust dependencies for CI (`verify`, also restored by `jmap`), including the `wasm32-unknown-unknown` ones of the AI service part | `ci.yml` on `main` and `develop` | toolchain + `Cargo.lock` + root `Cargo.toml` |
 | Rust dependencies per release target (`release-<triple>`) | `release.yml` on `main` | toolchain + `Cargo.lock` + root `Cargo.toml` |
 | Gradle distribution and downloads | `release.yml` on `main`, `android-arm64` job | Tauri CLI version |
-| Bun packages, Playwright browsers | `ci.yml` on `main` | `ui/bun.lock`, Playwright version |
+| Bun packages, Playwright browsers | `ci.yml` on `main` and `develop` | `ui/bun.lock`, Playwright version |
 
 - The root `Cargo.toml` hash is part of each Rust cache's `shared-key`, because
   rust-cache itself ignores `[profile.*]` changes. Without it, a profile change keeps
@@ -272,10 +284,8 @@ its own runner.
 
 ## Stress fixtures
 
-`cd ui && bun run vite --host 127.0.0.1` serves a development-only `/__stress` route
-with adversarial sample data (long names, right-to-left and CJK text, emoji, empty
-fields, many rows). The picker state lives in the URL. Production builds drop the
-route and its fixtures.
+`ui/src/lib/stress-fixtures.ts` holds adversarial sample mail (long names, right-to-left
+and CJK text, emoji, empty fields, many rows) for specs such as `workspace.spec.ts`.
 
 ## Bun troubleshooting
 

@@ -1,7 +1,25 @@
 id = "reader"
-name = "Message reader"
+name = "Reader"
 api_version = 1
-slot = "reader"
-capabilities = ["extensions.bus", "messages.organize", "messages.read", "messages.label"]
-description = "Read messages, including sandboxed HTML and attachments."
+client = "client/main.js"
+capabilities = ["extensions.bus", "messages.organize", "messages.read", "messages.list", "messages.label", "ui.frame", "ui.frame.remote", "ui.commands"]
+description = "Read messages, including sandboxed HTML and attachments, in tabs."
 author = "Colecto"
+
+[pane]
+icon = "mail"
+
+[bus]
+subscribe = ["inbox/v1/selected", "inbox/v1/listed", "inbox/v1/labels"]
+
+# Names the generated page in Settings; this extension draws nothing there itself.
+[settings_page]
+title = "Privacy"
+icon = "image"
+
+[[settings]]
+key = "remote_images"
+label = "Load remote images"
+description = "Messages show images from the internet without asking. Senders can then learn when, and possibly where, you opened their mail."
+type = "toggle"
+default = false

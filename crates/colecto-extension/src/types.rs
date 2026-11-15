@@ -71,141 +71,16 @@ pub struct OutgoingAttachment {
     pub data: String,
 }
 
+/// New mail arrived in `account`: the IDs of the new messages. Service parts that declare
+/// `messages.list` receive it, whether or not a window is open.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct MailEvent {
+    pub account: String,
+    pub ids: Vec<String>,
+}
+
 /// Local labels after a change: label name to the message IDs that carry it.
 pub type Labels = std::collections::BTreeMap<String, Vec<String>>;
-
-/// Why a panel extension was invoked.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PanelEvent {
-    /// The panel was displayed.
-    Open,
-    /// The owner pressed the button with this label. A button labelled exactly `open`
-    /// arrives as [`PanelEvent::Open`], so avoid that label.
-    Action(String),
-}
-
-/// A panel's text view. Text is rendered escaped; it never becomes HTML.
-///
-/// Limits: title 256 bytes, text 16 KiB, 16 actions of 1–128 bytes.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct View {
-    pub title: String,
-    pub text: String,
-    pub actions: Vec<String>,
-}
-
-impl View {
-    pub fn new(title: impl Into<String>, text: impl Into<String>) -> Self {
-        Self {
-            title: title.into(),
-            text: text.into(),
-            actions: Vec::new(),
-        }
-    }
-    /// Adds a button; pressing it invokes the panel with [`PanelEvent::Action`].
-    pub fn action(mut self, label: impl Into<String>) -> Self {
-        self.actions.push(label.into());
-        self
-    }
-}
-
-/// One overlay frame, sent about every 100 ms while the overlay is visible.
-///
-/// `state` is what the previous frame returned, or `S::default()` on the first frame
-/// and whenever the stored state no longer parses (for example after an update
-/// changed the state type).
-#[derive(Clone, Debug, PartialEq)]
-pub struct Frame<S> {
-    pub time_ms: f64,
-    pub pointer: Pointer,
-    pub viewport: Viewport,
-    pub state: S,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize)]
-#[serde(default)]
-pub struct Pointer {
-    pub x: f64,
-    pub y: f64,
-    /// Whether the pointer is inside the window.
-    pub inside: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize)]
-#[serde(default)]
-pub struct Viewport {
-    pub width: f64,
-    pub height: f64,
-}
-
-/// What an overlay draws this frame, and the state handed to the next one.
-///
-/// Limits: 16 sprites; the state is stored as JSON of at most 4096 bytes.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Overlay<S> {
-    pub items: Vec<Sprite>,
-    pub state: S,
-}
-
-/// One image from the package's `assets/`, cropped to `frame` and drawn at `x`, `y`
-/// with the given size. Sizes are 1–512 pixels; coordinates must be finite.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Sprite {
-    pub image: String,
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-    /// From 0 to 1.
-    pub opacity: f64,
-    pub frame: Rect,
-}
-
-impl Sprite {
-    /// The `frame` crop of `image`, drawn at the origin at its natural size.
-    pub fn new(image: impl Into<String>, frame: Rect) -> Self {
-        Self {
-            image: image.into(),
-            x: 0.0,
-            y: 0.0,
-            width: frame.width,
-            height: frame.height,
-            opacity: 1.0,
-            frame,
-        }
-    }
-    pub fn at(mut self, x: f64, y: f64) -> Self {
-        (self.x, self.y) = (x, y);
-        self
-    }
-    pub fn size(mut self, width: f64, height: f64) -> Self {
-        (self.width, self.height) = (width, height);
-        self
-    }
-    pub fn opacity(mut self, opacity: f64) -> Self {
-        self.opacity = opacity;
-        self
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Rect {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-}
-
-impl Rect {
-    pub fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

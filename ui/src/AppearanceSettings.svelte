@@ -2,13 +2,10 @@
   import Icon from './Icon.svelte';
   import Select from './Select.svelte';
   import { bundledFonts, canListAllFonts, familyOf, listAllFonts, loadBundled, probeSystemFonts, textSizes } from './lib/typography';
-  import type { ListDensity } from './lib/api';
-  let { value, font, textSize, density, dateGroups, onchange, ontypography, onlist }: {
-    value: string | null; font: string; textSize: number; density: ListDensity; dateGroups: boolean;
-    onchange: (accent: string) => void; ontypography: (change: { font?: string; font_size?: number }) => void;
-    onlist: (change: { list_density?: ListDensity; date_groups?: boolean }) => void;
+  let { value, font, textSize, onchange, ontypography, children }: {
+    value: string | null; font: string; textSize: number;
+    onchange: (accent: string) => void; ontypography: (change: { font?: string; font_size?: number }) => void; children?: import('svelte').Snippet;
   } = $props();
-  const densities: { value: ListDensity; label: string }[] = [{ value: 'full', label: 'Full' }, { value: 'medium', label: 'Medium' }, { value: 'compact', label: 'Compact' }];
   let systemFonts = $state(probeSystemFonts());
   let fontNote = $state('');
   let fontOptions = $derived([
@@ -42,7 +39,7 @@
 
 <section class="settings-section" aria-labelledby="appearance-title">
   <header class="section-head"><h2 id="appearance-title">Appearance</h2>
-  <p>Colecto stays dark. Choose how text looks, how dense the message list is, and the accent used for selection, focus and primary buttons.</p></header>
+  <p>Colecto stays dark. Choose how text looks, the accent used for selection, focus and primary buttons, and where notifications appear.</p></header>
   <div class="settings-group">
     <h3 class="group-label">Text</h3>
     <div class="setting">
@@ -66,20 +63,6 @@
     </fieldset>
   </div>
   <div class="settings-group">
-    <h3 class="group-label">Message list</h3>
-    <fieldset class="setting setting-row">
-      <legend class="sr-only">List density</legend>
-      <div class="setting-text"><h3>Density</h3><p>Full shows a preview line, Medium is shorter, Compact fits each message on one line.</p></div>
-      <div class="segmented">
-        {#each densities as item (item.value)}<label><input type="radio" name="list-density" checked={density === item.value} onchange={() => onlist({ list_density: item.value })} />{item.label}</label>{/each}
-      </div>
-    </fieldset>
-    <div class="setting setting-row">
-      <div class="setting-text"><h3>Date headings</h3><p>Group messages under Today, Yesterday and month names.</p></div>
-      <label class="switch"><input type="checkbox" checked={dateGroups} onchange={(event) => onlist({ date_groups: event.currentTarget.checked })} /><span class="sr-only">Date headings</span></label>
-    </div>
-  </div>
-  <div class="settings-group">
     <h3 class="group-label">Colour</h3>
     <div class="setting">
       <div class="setting-text"><h3 id="accent-title">Accent</h3><p>Used for selection, focus and primary buttons. Pick a preset or any colour.</p></div>
@@ -98,4 +81,5 @@
       {#if value}<button type="button" class="text-button" onclick={() => onchange('')}>Restore the default mint</button>{/if}
     </div>
   </div>
+  {@render children?.()}
 </section>

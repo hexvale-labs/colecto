@@ -228,8 +228,8 @@ downloaded ahead of time so it opens without waiting for the provider.
 | --- | --- | --- | --- |
 | Content cache | `colecto.db` (`colecto-core/src/content.rs`) | 1000 messages and 256 MB per account; oldest evicted first | Complete raw messages keyed by account, provider identity and id. Reads take no account lock, so opening mail never waits behind a refresh |
 | Prefetch | Host, after each background Inbox refresh (`colecto-host/src/sync.rs`) | Owner preference `prefetch: {enabled, count}`, default on and 50, at most 100 | Downloads the newest uncached Inbox messages, a few accounts at a time; never marks mail read. Skipped for accounts that are off |
-| Reader cache | UI memory (`ui/src/lib/api.ts`) | 150 messages | Warmed from the Host with `GET …/messages/{id}/content?cached=true`, which answers only from the content cache and never reaches the provider |
-| Folder lists | UI memory (`MailShell.svelte`) | Per account and folder | Switching Inbox, Drafts and Sent shows the last list at once, then refreshes it |
+| Reader cache | The reader client part's memory (`ui/src/extensions/reader/client/main.ts`) | 150 messages | Warmed from the Host with `GET …/messages/{id}/content?cached=true`, which answers only from the content cache and never reaches the provider |
+| Folder lists | The inbox client part's memory (`ui/src/extensions/inbox/client/main.ts`) | Per account and folder | Switching Inbox, Drafts and Sent shows the last list at once, then refreshes it |
 
 Settings → Mail turns prefetch on or off and sets how many messages to keep ready.
 

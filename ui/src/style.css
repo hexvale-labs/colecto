@@ -769,6 +769,7 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .icon-button.spinning .icon { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .add-account { margin-top: 14px; }
+.pane-row { padding-top: 18px; border-top: 1px solid var(--line-soft); }
 .settings-card .hint, .sheet .hint { margin-top: 8px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
 @container settings (max-width: 460px) {
   .account-line .sep, .account-detail, .protocol-tag { display: none; }
@@ -857,3 +858,11 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
   .service-row { flex-wrap: wrap; }
   .service-controls { width: 100%; padding-left: 50px; }
 }
+
+/* Extension panes and pages: the shell's chrome around what an extension draws. */
+.extension-pane { height: 100%; padding: 16px; overflow: auto; }
+.extension-from { color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); }
+.toast-source { display: block; margin-bottom: 1px; color: var(--ink-3); font-size: calc(11.5px * var(--text-scale)); font-weight: 560; }
+.extension-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
+/* A contribution toolbar with nothing in it is not drawn or announced. */
+.bus-actions:empty { display: none; }

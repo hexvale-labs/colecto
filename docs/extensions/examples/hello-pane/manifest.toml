@@ -1,0 +1,16 @@
+id = "hello-pane"
+name = "Hello pane"
+description = "Shows which account is selected and counts presses of a button."
+author = "Colecto"
+api_version = 1
+client = "client/main.js"
+capabilities = ["account.read"]
+
+[pane]
+icon = "extension"
+
+[[settings]]
+key = "greeting"
+label = "Greeting"
+type = "text"
+default = "Hello"

@@ -1,0 +1,27 @@
+- /children: deep-equal
+- dialog "Settings":
+  - navigation "Settings sections":
+    - heading "Settings" [level=1]
+    - button "Collapse the section list" [expanded]
+    - group "Built-in":
+      - text: ""
+      - button "Accounts"
+      - button "Mail"
+      - button "Appearance"
+      - button "Notifications"
+      - button "Privacy"
+      - button "Connection"
+      - button "Extensions"
+      - button "AI"
+      - button "API keys"
+      - button "Send approvals"
+  - banner:
+    - paragraph:
+      - text: Settings
+      - strong: Send approvals
+    - button "Close settings"
+  - region "Send approvals":
+    - heading "Send approvals" [level=2]
+    - paragraph: /Automation cannot send until you approve the exact message below\. Requests expire after \d+ minutes, and any change needs a new request\./
+    - button "Refresh"
+    - paragraph: Nothing waiting for you. Automation is behaving.

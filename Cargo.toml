@@ -1,12 +1,12 @@
 [workspace]
-exclude = ["docs/extensions/examples/oneko"]
-members = ["crates/*"]
+# The AI service part lives next to its extension, so one package stays one folder.
+members = ["crates/*", "ui/src/extensions/ai/service"]
 # The Tauri app needs WebView system libraries; build it with `just build native`.
-default-members = ["crates/cargo-colecto", "crates/colecto-core", "crates/colecto-extension", "crates/colecto-extension-api", "crates/colecto-extension-sys", "crates/colecto-host", "crates/colecto-package"]
+default-members = ["crates/cargo-colecto", "crates/colecto-core", "crates/colecto-extension", "crates/colecto-extension-api", "crates/colecto-extension-sys", "crates/colecto-host", "crates/colecto-package", "ui/src/extensions/ai/service"]
 resolver = "3"
 
 [workspace.package]
-version = "0.5.4"
+version = "0.6.0"
 edition = "2024"
 publish = false
 license = "MIT OR Apache-2.0"
@@ -42,6 +42,7 @@ tower = { version = "0.5", features = ["util"] }
 colecto-core = { path = "crates/colecto-core" }
 colecto-extension-api = { path = "crates/colecto-extension-api" }
 colecto-extension-sys = { path = "crates/colecto-extension-sys" }
+colecto-extension = { path = "crates/colecto-extension" }
 colecto-package = { path = "crates/colecto-package" }
 colecto-host = { path = "crates/colecto-host" }
 tauri-plugin-colecto-native = { path = "crates/colecto-native" }

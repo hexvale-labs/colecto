@@ -1,0 +1,87 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Colecto extension runtime</title>
+<!-- One per extension, in an <iframe sandbox="allow-scripts">: an opaque origin with no network
+     (the Host serves it with connect-src 'none'). It starts the extension's Worker and hands it
+     the shell's MessagePort; after that it relays nothing. See docs/extensions/ui-model.md. -->
+<script>
+(() => {
+  // The Worker's own prelude: the `colecto` global, the JS form of the protocol.
+  function prelude() {
+    let port = null;
+    const outbox = [];
+    const files = new Map();
+    const colecto = {
+      onmessage: null,
+      send(message, transfer) {
+        const data = { json: JSON.stringify(message), buffers: transfer || [] };
+        if (port) port.postMessage(data, data.buffers); else outbox.push(data);
+      },
+      file(path) {
+        const bytes = files.get(path);
+        return bytes ? Promise.resolve(bytes.slice(0)) : Promise.reject(new Error(`No file ${path}`));
+      },
+    };
+    Object.defineProperty(self, 'colecto', { value: colecto });
+    const deliver = (data) => {
+      let message;
+      try { message = JSON.parse(data.json); } catch { return; }
+      // Transferred buffers are referenced from the JSON as {"$buffer": index}.
+      const revive = (value) => {
+        if (Array.isArray(value)) return value.map(revive);
+        if (value && typeof value === 'object') {
+          if (typeof value.$buffer === 'number' && Object.keys(value).length === 1) return data.buffers[value.$buffer];
+          for (const key of Object.keys(value)) value[key] = revive(value[key]);
+        }
+        return value;
+      };
+      if (typeof colecto.onmessage === 'function') colecto.onmessage(revive(message));
+    };
+    self.onmessage = (event) => {
+      self.onmessage = null;
+      for (const [path, bytes] of Object.entries(event.data.files)) files.set(path, bytes);
+      port = event.data.port;
+      port.onmessage = (message) => deliver(message.data);
+      for (const data of outbox.splice(0)) port.postMessage(data, data.buffers);
+      if (event.data.wasm) startWasm(event.data.wasm);
+    };
+    // The Wasm client ABI: exports memory, colecto_alloc(len) and colecto_receive(ptr, len);
+    // imports colecto.send(ptr, len) and colecto.file(path_ptr, path_len, out_ptr, out_cap).
+    async function startWasm(path) {
+      const decoder = new TextDecoder();
+      const encoder = new TextEncoder();
+      let exports = null;
+      const bytes = (ptr, len) => new Uint8Array(exports.memory.buffer, ptr, len);
+      const { instance } = await WebAssembly.instantiate(files.get(path), { colecto: {
+        send(ptr, len) {
+          try { colecto.send(JSON.parse(decoder.decode(bytes(ptr, len)))); return 0; } catch { return -1; }
+        },
+        file(pathPtr, pathLen, out, capacity) {
+          const data = files.get(decoder.decode(bytes(pathPtr, pathLen)));
+          if (!data || data.byteLength > capacity) return -1;
+          bytes(out, data.byteLength).set(new Uint8Array(data));
+          return data.byteLength;
+        },
+      } });
+      exports = instance.exports;
+      colecto.onmessage = (message) => {
+        const input = encoder.encode(JSON.stringify(message));
+        const ptr = exports.colecto_alloc(input.length);
+        bytes(ptr, input.length).set(input);
+        exports.colecto_receive(ptr, input.length);
+      };
+    }
+  }
+  addEventListener('message', function boot(event) {
+    if (event.source !== parent || event.data?.t !== 'colecto.boot') return;
+    removeEventListener('message', boot);
+    const { files, entry, port } = event.data;
+    const wasm = entry.endsWith('.wasm');
+    const source = [`(${prelude})();`, wasm ? '' : new TextDecoder().decode(files[entry])];
+    const worker = new Worker(URL.createObjectURL(new Blob(source, { type: 'text/javascript' })));
+    // An uncaught error stops the extension; the shell shows "name stopped".
+    worker.onerror = (error) => { error.preventDefault(); parent.postMessage({ t: 'colecto.crash' }, '*'); };
+    worker.postMessage({ files, port, wasm: wasm ? entry : null }, [port]);
+  });
+})();
+</script>
