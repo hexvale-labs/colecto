@@ -132,6 +132,8 @@ test('command runner opens by keyboard, filters actions and searches drafts', as
   await page.getByRole('combobox', { name: 'Search commands' }).fill('drafts');
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog', { name: 'Commands' })).not.toBeVisible();
+  // Switching folders rebuilds the search field, so type once Drafts is shown.
+  await expect(page.getByRole('navigation', { name: 'Mail folders' }).getByRole('button', { name: /Drafts/ })).toHaveAttribute('aria-current', 'page');
   // Search follows typing; there is nothing to submit.
   await page.getByRole('searchbox').fill('absent words');
   await expect(page.getByText('No matching messages')).toBeVisible();
@@ -180,8 +182,11 @@ test('search command keeps focus and send command uses the existing send flow', 
   await page.route('**/api/v1/accounts', route => route.fulfill({ json: [{ id: 'demo', settings: null, configured: false, connected: true }] }));
   await page.route('**/api/v1/send', route => route.fulfill({ json: true }));
   await page.goto('/');
+  // The inbox and its commands are ready once it lists the account's mail.
+  await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
   await page.getByRole('button', { name: /Commands/ }).click();
   await page.getByRole('combobox', { name: 'Search commands' }).fill('Search emails');
+  await expect(page.getByRole('option', { name: 'Search emails', exact: true })).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('searchbox')).toBeFocused();
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
