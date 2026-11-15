@@ -16,7 +16,10 @@ test('local labels can be created, assigned, filtered and removed', async ({ pag
   await page.getByRole('combobox', { name: 'Search commands' }).fill('Remove label: Follow up');
   await page.keyboard.press('Enter');
   await expect(page.getByLabel('Label Follow up', { exact: true })).not.toBeChecked();
+  // The reader's Worker saves the label; wait for the Host to have it before reloading.
+  const saved = page.waitForResponse(response => response.url().endsWith('/api/v1/labels') && response.request().method() === 'POST');
   await page.getByLabel('Label Follow up', { exact: true }).check();
+  expect((await saved).ok()).toBe(true);
   await page.reload();
   await page.getByRole('group', { name: 'Filter by label' }).getByRole('button', { name: 'Follow up', exact: true }).click();
   await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
