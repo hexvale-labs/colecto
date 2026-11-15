@@ -3,7 +3,7 @@
   // decides what to announce; these settings belong to the core toast surface.
   import CornerPicker from './CornerPicker.svelte';
   import type { NotificationPreferences } from './lib/api';
-  import { notify } from './shell/toasts.svelte';
+  import { notify } from './shell/toast-store.svelte';
   let { value, onchange }: { value: NotificationPreferences; onchange: (next: NotificationPreferences) => void } = $props();
   let note = $state('');
   const supported = typeof Notification === 'function';

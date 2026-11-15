@@ -3,7 +3,7 @@
   import { quintOut } from 'svelte/easing';
   import { onMount } from 'svelte';
   import Icon from '../Icon.svelte';
-  import { dismiss, notificationPosition, toasts, type Toast } from './toasts.svelte';
+  import { dismiss, notificationPosition, toasts, type Toast } from './toast-store.svelte';
   let region: HTMLElement;
   let position = $derived(notificationPosition.value);
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
