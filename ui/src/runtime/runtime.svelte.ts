@@ -5,7 +5,7 @@
 import { callFailure, extensionHost, ServiceError, type ExtensionState } from '../lib/api';
 import { checkOutgoing, checkTree, LIMITS, ProtocolError, type Node, type Patch, type ToastAction } from './protocol';
 import type { Theme } from './theme';
-import { dismissKey, notify } from '../shell/toasts.svelte';
+import { dismissKey, notify } from '../shell/toast-store.svelte';
 import type { IconName } from '../Icon.svelte';
 
 export interface AccountSummary { id: string; name: string; address: string; connected: boolean; configured: boolean }

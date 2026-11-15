@@ -28,7 +28,9 @@ RUN apt-get update \
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
+# Files the Host compiles in: bundled manifests and the extension runtime page.
 COPY ui/src/extensions ui/src/extensions
+COPY ui/src/runtime/frame.html ui/src/runtime/frame.html
 # Compiled into the daemon and reported by GET /api/v1/version; empty when unset.
 ARG COLECTO_COMMIT=""
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
