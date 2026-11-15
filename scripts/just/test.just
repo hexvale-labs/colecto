@@ -5,8 +5,9 @@ j := just_executable() + " --justfile " + quote(justfile_directory() / "justfile
 [default]
 all: rust ui
 
-# Run workspace tests and doctests.
+# Run workspace tests and doctests. The Host runs the real AI service part, so build it first.
 rust:
+    {{j}} build ai-service
     cargo test --locked
 
 # Run UI unit tests without starting a browser or mail service.

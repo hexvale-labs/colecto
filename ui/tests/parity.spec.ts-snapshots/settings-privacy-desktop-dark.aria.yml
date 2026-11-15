@@ -22,8 +22,10 @@
     - button "Close settings"
   - region "Privacy":
     - heading "Privacy" [level=2]
-    - paragraph: Choose what Colecto fetches from other servers when you open a message.
-    - heading "Load remote images automatically" [level=3]
-    - paragraph: Senders can use remote images to see when and where you open their mail. When this is off, each message asks first.
-    - checkbox "Load remote images automatically"
-    - text: Load remote images automatically
+    - paragraph: From Reader
+    - paragraph: Read messages, including sandboxed HTML and attachments, in tabs.
+    - heading "Load remote images" [level=3]
+    - paragraph: Messages show images from the internet without asking. Senders can then learn when, and possibly where, you opened their mail.
+    - checkbox "Load remote images"
+    - button "Reset to defaults" [disabled]
+    - status

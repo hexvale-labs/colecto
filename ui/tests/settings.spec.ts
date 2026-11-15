@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { test, expect, ownerToken } from './fixtures';
+import { test, expect, hostEvents, ownerToken } from './fixtures';
 import type { Page } from '@playwright/test';
 
 const origin = `http://127.0.0.1:${process.env.COLECTO_TEST_PORT ?? '4179'}`;
@@ -14,16 +14,7 @@ async function openSettings(page: Page, section: string) {
   return settings;
 }
 
-/** Serve one burst of Host events, then nothing. */
-async function events(page: Page, list: [string, unknown][]) {
-  let sent = false;
-  await page.route('**/api/v1/events', async route => {
-    if (sent) return route.fulfill({ status: 204 });
-    sent = true;
-    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeEnabled();
-    return route.fulfill({ status: 200, contentType: 'text/event-stream', body: list.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join('') });
-  });
-}
+const events = hostEvents;
 
 /** Whether the element's centre is the topmost thing there, so it is visible and clickable. */
 const onTop = (page: Page, selector: string) => page.locator(selector).first().evaluate(element => {
@@ -36,8 +27,9 @@ test('notifications show above Settings, with their actions starting from the le
   await page.goto('/');
   const request = page.getByRole('alertdialog', { name: 'Automation wants to send a message' });
   await expect(request).toBeVisible();
-  const settings = await openSettings(page, 'Notifications');
-  await expect(settings.getByRole('heading', { name: 'Notifications', level: 2 })).toBeVisible();
+  // Where toasts appear (and the test toast) is part of Appearance; the toast surface is core UI.
+  const settings = await openSettings(page, 'Appearance');
+  await expect(settings.getByRole('heading', { name: 'Appearance', level: 2 })).toBeVisible();
   expect(await onTop(page, '.toast')).toBe(true);
   // A notification that arrives while Settings is open is on top too.
   await settings.getByRole('button', { name: 'Show a test notification' }).click();
@@ -70,9 +62,10 @@ test('a leaving notification fades in place while the others slide, without jump
   await page.waitForTimeout(400);
   const range = (tops: number[]) => Math.max(...tops) - Math.min(...tops);
   // The oldest, lowest toast leaves first, as it does when it times out. It fades where it is
-  // (drifting at most its 10 px exit) and nothing else moves.
+  // (drifting its 10 px exit, plus the scale-down on a toast that also names its source) and
+  // nothing else moves.
   const [oldest, approval, newest] = await dismissAndWatch(page, 0);
-  expect(range(oldest)).toBeLessThan(12);
+  expect(range(oldest)).toBeLessThan(14);
   expect(range(approval)).toBeLessThan(1);
   expect(range(newest)).toBeLessThan(1);
   await expect(page.locator('.toasts .toast')).toHaveCount(2);
@@ -119,7 +112,8 @@ test('the message list has three densities and optional date headings', async ({
   await expect(page.locator('.day').first()).toBeVisible();
   const height = async () => (await row.boundingBox())!.height;
   const full = await height();
-  const settings = await openSettings(page, 'Appearance');
+  // List density and date headings belong to the mailbox: Settings → Mail.
+  const settings = await openSettings(page, 'Mail');
   await settings.locator('.segmented label', { hasText: 'Medium' }).click();
   await expect.poll(height).toBeLessThan(full);
   const medium = await height();
@@ -128,12 +122,12 @@ test('the message list has three densities and optional date headings', async ({
   await expect.poll(height).toBeLessThan(medium);
   await settings.getByRole('checkbox', { name: 'Date headings' }).uncheck();
   await expect(page.locator('.day')).toHaveCount(0);
-  // Both are owner preferences, kept by the Host.
+  // Both are the mailbox's own settings, kept by the Host.
   await page.reload();
   await expect(page.locator('.mailbox')).toHaveAttribute('data-density', 'compact');
   await expect(page.locator('.mail-item').first()).toBeVisible();
   await expect(page.locator('.day')).toHaveCount(0);
-  const again = await openSettings(page, 'Appearance');
+  const again = await openSettings(page, 'Mail');
   await again.getByRole('checkbox', { name: 'Date headings' }).check();
   await again.locator('.segmented label', { hasText: 'Full' }).click();
   await expect(page.locator('.day').first()).toBeAttached();
@@ -161,7 +155,7 @@ test('a newer release is announced once, and never checked when turned off', asy
     // With "New updates" off, the app never asks.
     const settings = await openSettings(page, 'Notifications');
     await settings.getByRole('checkbox', { name: 'New updates' }).uncheck();
-    await expect.poll(async () => (await (await page.request.get(`${origin}/api/v1/preferences`, { headers: host })).json()).notifications.updates).toBe(false);
+    await expect.poll(async () => (await (await page.request.get(`${origin}/api/v1/extensions/notifications/settings`, { headers: host })).json()).values.updates).toBe(false);
     checks = 0;
     await page.reload();
     await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeEnabled();

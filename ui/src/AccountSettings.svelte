@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import AccountWizard from './AccountWizard.svelte';
-  import { createServices, hostService } from './lib/api';
+  import { hostService, request } from './lib/api';
   import type { AccountInfo, SecurityInfo } from './lib/api';
   import { hue, initial } from './lib/initial';
   let { accounts, security, pane, enabled, ontoggle, onrefresh, ondirty, onbusy }: {
@@ -73,7 +73,8 @@
     if (!account.configured) { open(account); return; }
     checking = account.id;
     await run(async () => {
-      await createServices(account.id).inbox.messages('inbox');
+      // Reconnecting refreshes the Inbox, as the mailbox would, so the result is known at once.
+      await request("inbox", account.id, '/messages/refresh', {});
       notice = `${title(account)} is connected.`;
     });
     checking = undefined;

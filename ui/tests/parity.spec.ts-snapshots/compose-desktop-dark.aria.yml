@@ -12,10 +12,11 @@
   - tablist "Panes in this group":
     - tab "Accounts" [selected]
   - button "Arrange Accounts"
-- region "Reader group":
+- region "Composer group":
   - tablist "Panes in this group":
-    - tab "Reader" [selected]
-  - button "Arrange Reader"
+    - tab "Reader"
+    - tab "Composer" [selected]
+  - button "Arrange Composer"
 - separator "Resize the panes above and below"
 - separator "Resize the panes on either side"
 - tabpanel "Mail":
@@ -49,11 +50,11 @@
       - text: Alex Rivera
       - time: Nov 4
       - text: "Plain text, with a little character Hello 世界 👋 Mail should be readable, whatever language you write in. This is text, not a button: <button>Do not click</button> And this is just text too: <script>alert('hello')</script> Alex"
-    - text: /Updated \d+:\d+ AM/
+    - text: /Updated \d+:\d+ AM ·Sample mail/
     - button "Refresh"
 - tabpanel "Accounts":
   - button "Current account": Demo account Local sample mail
-- tabpanel "Reader":
+- tabpanel "Composer":
   - region "Draft editor":
     - heading "New message" [level=2]
     - group:

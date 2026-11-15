@@ -50,7 +50,8 @@
 
 <section class="settings-section" aria-labelledby="extension-settings-title">
   <header class="section-head">
-    <h2 id="extension-settings-title">{manifest.name}</h2>
+    <h2 id="extension-settings-title">{manifest.settings_page?.title ?? manifest.name}</h2>
+    <p class="extension-from">From {manifest.name}</p>
     <p>{manifest.description}</p>
   </header>
   {#if data}

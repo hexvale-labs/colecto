@@ -48,7 +48,7 @@
   {#each toasts as toast (toast.id)}
     <div class="toast" role={toast.duration === 0 ? 'alertdialog' : 'status'} aria-label={toast.title} animate:flip={{ duration: reduced ? 0 : 240, easing: quintOut }} in:slide={{ duration: 260 }} out:slide={{ duration: 180 }} use:timer={toast}>
       <span class="toast-mark" aria-hidden="true"><Icon name={toast.icon ?? (toast.duration === 0 ? 'shield' : 'mail')} size={15} /></span>
-      <div class="toast-text"><strong>{toast.title}</strong>{#if toast.body}<p>{toast.body}</p>{/if}</div>
+      <div class="toast-text">{#if toast.source}<span class="toast-source">{toast.source}</span>{/if}<strong>{toast.title}</strong>{#if toast.body}<p>{toast.body}</p>{/if}</div>
       <button class="toast-close" aria-label="Dismiss notification" onclick={() => dismiss(toast.id)}><Icon name="close" size={13} /></button>
       {#if toast.actions?.length}<div class="toast-actions">{#each toast.actions as action (action.label)}<button class={action.primary ? 'primary' : 'secondary'} onclick={() => void act(toast, action.run)}>{action.label}</button>{/each}</div>{/if}
     </div>

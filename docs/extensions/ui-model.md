@@ -4,20 +4,20 @@ The planned replacement for today's extension system: every extension, bundled o
 third-party, runs its client part in a Web Worker on the device and describes its
 interface as a component tree that trusted Colecto code renders.
 
-**Status: approved design, being built.** Done: step 2 (core UI out) and step 3 except
-the shared client library, the bundled client parts' build and Rust client parts (see
-[Migration order](#migration-order)). The [extension contract](README.md) describes what
-works today; where the two disagree, the contract describes what runs.
+**Status: approved design, built.** Every step in [Migration order](#migration-order)
+has landed except the parts marked below. The [extension contract](README.md) describes
+what runs; where the two disagree, the contract wins.
 
 | Section | State |
 | --- | --- |
-| Packages, manifest, capabilities, credentials, event stream, bus, service part | Built |
+| Packages, manifest, capabilities, credentials, event stream, bus, service part, storage | Built |
 | Client runtime, Wasm client ABI in the runtime page, theme tokens | Built |
-| Components: containers, text and media, controls, static `list`, states, `frame` without scripts | Built |
-| Shared client library, bundled client parts | With notifications |
-| `state`, `focus`, `dialog`, toasts, commands, app actions, contribution slots, `virtual` lists, `message_row`, `tabs`, script frames, storage | With the bundled extension that first needs each |
-| Rust SDK for client parts, `cargo colecto` client builds | Later |
-| `canvas` | With Oneko |
+| Component vocabulary, `state`, `focus`, `dialog`, toasts, commands, app actions, contribution slots, virtual lists | Built |
+| Shared client library (`ui/src/extension-sdk/`), bundled client parts | Built: notifications, AI, inbox, reader, composer |
+| AI auto-labels in a service part (`ui/src/extensions/ai/service/`) | Built |
+| `canvas` overlay | Built; Oneko uses it |
+| Editor `frame` with scripts | Not built: the composer body is still a plain `textarea` |
+| Rust SDK for client parts, `cargo colecto` client builds | Later; `cargo colecto` packages a prebuilt `client/` folder |
 
 ## Goals
 
@@ -241,7 +241,9 @@ The broker turns a Worker's API call into a request with
 `Authorization: Colecto-Extension <token>` and `x-colecto-account`, and **no** owner
 bearer. The Host resolves the principal `Extension { id, generation }` and checks, on
 every call, that the extension is enabled, the generation is current, the manifest
-declares the capability, and the account exists. Owner-only routes (accounts,
+declares the capability. The account named in `x-colecto-account` is not checked
+up front: as for the owner, work on an account that does not exist fails where it is
+done. Owner-only routes (accounts,
 credentials, security, policy, API keys, send-request decisions, preferences, the
 credential route itself) refuse extension principals. This replaces today's
 `x-colecto-extension` routing label, which only worked because the caller also held
@@ -273,8 +275,10 @@ it does for Wasm guests today.
 A TypeScript library at `ui/src/extension-sdk/` that runs inside Workers. Bundled
 extensions import it at build time; third-party authors vendor it from a release tag,
 as they pin the Rust SDK today. It is not an extension, holds no shared state between
-extensions (each Worker has its own copy), and replaces the data plumbing in
-`MailShell.svelte`.
+extensions (each Worker has its own copy), and replaced the data plumbing in the old
+`MailShell.svelte`. As built it is thinner than the table below: `app` (messages,
+events, `now()`), `call`, `bus`, `storage`, `toast` and `clip`; each bundled extension
+keeps its own folder, label and message caches on top of `call`.
 
 | Area | Replaces in `MailShell.svelte` / `lib/api.ts` | API |
 | --- | --- | --- |
@@ -326,10 +330,10 @@ authoritative for service parts.
 
 ### Storage
 
-Each extension gets a small key-value store in the Host (`storage.get`, `storage.set`,
-`storage.delete`), at most 64 KiB in all, deleted on removal. Notifications keeps the
-last announced release there; the AI service part keeps the set of messages it already
-labelled (today `ai-autolabel-seen`).
+Each extension gets a small key-value store in the Host (`storage.get`, `storage.set`;
+setting `null` deletes), at most 64 KiB in all, deleted on removal. Client parts reach
+it at `/extensions/{id}/storage/{key}`. Notifications keeps the last announced release
+there; the AI service part keeps the set of messages it already labelled.
 
 ## Surfaces
 
@@ -424,7 +428,7 @@ All controls take `disabled`. Text fields keep their value in the renderer; see
 
 | Type | Props | Events |
 | --- | --- | --- |
-| `button` | `label`, `icon`, `icon_only`, `variant` (`primary`, `secondary`, `tool`, `text`, `icon`, `chip`, `chip_remove`), `detail` (small second line), `pressed`, `busy` (spinner), `title`, `type` (`button`, `submit`), `copy` (text the renderer copies on press) | `press`; with `copy`, `copied` with `{ok}` |
+| `button` | `label`, `icon`, `icon_only`, `variant` (`primary`, `secondary`, `tool`, `text`, `icon`, `chip`, `chip_remove`), `detail` (small second line), `pressed`, `busy` (spinner), `title`, `submit` (submits the surrounding `form`), `copy` (text the renderer copies on press; with `live`, the button reads Copy, Copied or Copy failed and `label` names it) | `press`; with `copy`, `copied` with `{ok}` |
 | `menu_button` | `label`, `icon`, `variant`, `items: [{id, label, disabled}]` | `select` with `{item}` |
 | `action_ref` | `action` (`<extension>/<app action id>`), `labelled` | Draws another extension's app action; pressing runs it there |
 | `input` | `kind` (`text`, `search`, `email`, `url`, `number`), `label`, `label_hidden`, `placeholder`, `value`, `maxlength`, `min`, `max`, `step`, `autocomplete` (`off`, `email`), `inputmode`, `enterkeyhint`, `spellcheck`, `autocapitalize`, `report` (`change`, `input`), `debounce_ms` (0–1000), `error` | `change` or `input` with `{value}` |
@@ -515,7 +519,7 @@ string; the JSON refers to them as `{"$buffer": <index>}`.
 | `render` | `{surface, tree}`: replaces the whole surface |
 | `patch` | `{surface, ops: [...]}` |
 | `state` | `{surface, dirty, busy, back}` |
-| `focus` | `{surface, node}`: honoured only within 1 s after an event from that surface, or when the surface first renders |
+| `focus` | `{surface, node}`: honoured only within 1 s after an event from that surface or after the owner picks one of its commands, app actions or toast buttons (or presses Back), or when the surface first renders |
 | `contribute` | `{slot: "<owner>/<name>", tree \| null}` |
 | `dialog` | `{tree \| null}` |
 | `app_actions`, `commands`, `command_search`, `command_hits`, `toast`, `toast_dismiss` | As above |
@@ -604,17 +608,19 @@ nonce-tagged scripts run, inline handlers in quoted mail inside the editor do no
 
 ### Canvas
 
-Planned for the Oneko rewrite, not part of API 1 unless it lands before API 1 ships.
-The intended shape: `ui.canvas` gives a `canvas` component or a full-window overlay
-(`pointer-events: none`, `z_index` 1–10000 from `ui/src/lib/layers.ts`); the renderer
-transfers an `OffscreenCanvas` to the Worker, which draws at its own pace, and sends
-pointer position at most once per animation frame. Where `OffscreenCanvas` is missing,
-the Worker sends `ImageBitmap` frames instead. Sprites come from `assets/`.
+`ui.canvas` with `[overlay] z_index` (1–10,000) gives one full-window overlay that never
+takes the pointer (`pointer-events: none`, `aria-hidden`). The runtime transfers an
+`OffscreenCanvas` to the Worker, which draws at its own pace, and sends the pointer
+position at most once per animation frame. Outside Chromium engines the runtime sends
+`mode: "frames"` instead, because WebKit accepts the transfer but never shows what a
+Worker draws on it, and draws each `ImageBitmap` the Worker returns in a `frame`
+message at its `x`, `y`. Sprites come from `assets/`, fetched with
+`call` and `bytes: true`. A `canvas` component inside a pane is not built. Messages:
+[Canvas overlay](README.md#canvas-overlay).
 
 ## Contribution slots
 
-Today's bundled-only reader slots (`actions`, `aboveBody`, `ui/src/lib/reader-slots.ts`)
-become a general mechanism:
+The alpha's bundled-only reader slots became a general mechanism:
 
 1. Any extension puts a `slot` node in its tree, for example
    `{"type":"slot","id":"ai","name":"v1/actions","context":{"message_id":"42"}}`. The
@@ -766,7 +772,7 @@ The owner preferences these extensions take over (`list_density`, `date_groups`,
 | `README.md`, `EXAMPLE.md` there | Kept, updated; the rule that every later change adds the next version stays, and so does discontinuation |
 | Panel view and overlay sprite ABI, `/extensions/{id}/run`, `overlay.rs`, panel and overlay paths in `sandbox.rs`, `ExtensionPanel.svelte`, `GuestOverlay.svelte`, `OverlayLayer.svelte` | Deleted |
 | `docs/extensions/examples/connection-panel` | Deleted; replaced by a small JS example pane |
-| Oneko | Old source deleted; its sprite sheet kept; rewritten on `canvas` in the last step. `just build oneko` and its checks are removed until then. |
+| Oneko | Rewritten as a JavaScript client part on the `canvas` overlay; `just build extension` packages it. |
 | Rust SDK (`colecto-extension`, `colecto-extension-sys`) | `View`, `PanelEvent`, `Overlay`, `Frame` and `export! { panel, overlay }` deleted; new client-part support over the Wasm client ABI and service-part support over the kept imports |
 | `cargo colecto` | Builds the client Wasm and the service Wasm, checks both against the manifest, packages `client/` and `service` |
 | Stored data | On startup, third-party packages installed under the old system (old policy version, or a manifest that no longer parses) are dropped with their settings and a log line, instead of failing to start. Unknown old preference fields are ignored. |
@@ -816,14 +822,14 @@ Each step says which of these it verified and on what.
 | `MessageChannel` port passed through an opaque frame | Automated | Manual | Manual | Manual |
 | Mail `frame` without scripts, links to the system browser | Automated (today's specs) | Manual (navigation allowlist in `runtime.rs`) | Manual | Manual |
 | Editor `frame` with nonce scripts and bridge | Automated | Manual | Manual | Manual |
-| `OffscreenCanvas` in a Worker (Oneko step) | Automated | Manual; fall back to `ImageBitmap` if missing | Manual | Manual |
+| Canvas overlay (Oneko) | Automated: `OffscreenCanvas` drawn in the Worker | Frames mode (`ImageBitmap`), automated in Playwright WebKit; manual in the app | Manual | Manual |
 
 `native_navigation_allowed` must also admit the runtime page; WebKitGTK asks about
 subframe loads.
 
 ## Expected visible differences
 
-To be confirmed or removed in each step's pull request.
+The parity specs (`ui/tests/parity.spec.ts`) record these on purpose.
 
 | Difference | Why | Step |
 | --- | --- | --- |
@@ -836,6 +842,8 @@ To be confirmed or removed in each step's pull request.
 | Bundled names become their tab names: "Mailbox" → "Mail", "Message reader" → "Reader" | Pane tabs show the extension name | Inbox, reader |
 | The composer has its own pane tab next to Reader | One pane per extension | Composer |
 | Mail, Privacy and Notifications settings start from defaults once | Fresh reset | Runtime |
+| Settings → Notifications loses its "Show notifications" switch; turning the Notifications extension off silences its toasts | What to announce belongs to the extension; the core toast surface keeps only position and desktop delivery | Notifications |
+| "Settings: …" commands list Mail, Notifications, Privacy and AI in sidebar order, and settings pages from declared settings show "From *name*" | Trusted attribution | Notifications |
 
 ## Open questions
 

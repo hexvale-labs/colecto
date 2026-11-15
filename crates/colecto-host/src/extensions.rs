@@ -43,6 +43,8 @@ struct CachedPackage {
 #[derive(Clone)]
 pub struct Extensions {
     setting_values: HashMap<String, serde_json::Map<String, serde_json::Value>>,
+    /// Each extension's own small key-value store (`storage.get`/`storage.set`).
+    storage: HashMap<String, serde_json::Map<String, serde_json::Value>>,
     manifests: Vec<ExtensionManifest>,
     policy: Policy,
     database: Option<Database>,
@@ -51,11 +53,15 @@ pub struct Extensions {
     /// bound to it, and it changes whenever the extension is disabled, removed or reinstalled.
     generations: HashMap<String, u64>,
     cache: HashMap<String, Arc<CachedPackage>>,
+    /// Service parts of bundled extensions, built with the UI and loaded from its assets.
+    bundled_services: HashMap<String, Arc<crate::sandbox::Compiled>>,
     memory_packages: HashMap<String, Arc<Vec<u8>>>,
     /// `api_support`, replaceable in tests because no real version is discontinued yet.
     support: fn(u32) -> ApiSupport,
 }
 const MAX_POLICY_BYTES: u64 = 4 * 1024 * 1024;
+/// Everything one extension stores, serialized.
+pub const MAX_STORAGE_BYTES: usize = 64 * 1024;
 impl Extensions {
     pub fn bundled() -> Self {
         let manifests: Vec<ExtensionManifest> = [
@@ -70,6 +76,7 @@ impl Extensions {
         .collect();
         let mut extensions = Self {
             setting_values: HashMap::new(),
+            storage: HashMap::new(),
             manifests,
             policy: Policy {
                 version: POLICY_VERSION,
@@ -80,6 +87,7 @@ impl Extensions {
             epoch: 0,
             generations: HashMap::new(),
             cache: HashMap::new(),
+            bundled_services: HashMap::new(),
             memory_packages: HashMap::new(),
             support: api_support,
         };
@@ -136,6 +144,10 @@ impl Extensions {
             crate::store::open(&database, "extension-settings", HashMap::new, |b| {
                 serde_json::from_slice(b).map_err(|e| e.to_string())
             })?;
+        extensions.storage =
+            crate::store::open(&database, "extension-storage", HashMap::new, |b| {
+                serde_json::from_slice(b).map_err(|e| e.to_string())
+            })?;
         extensions.database = Some(database);
         let mut dropped = old_packages.into_inner();
         // A package that no longer reads or matches its manifest is dropped too, rather than
@@ -163,10 +175,12 @@ impl Extensions {
             for id in &dropped {
                 tracing::warn!(extension = %id, "Removed an extension built for the old extension system");
                 extensions.setting_values.remove(id);
+                extensions.storage.remove(id);
                 let _ = database.remove_record("extension-packages", id, 1);
             }
             crate::store::save(&database, "extensions", &extensions.policy)?;
             crate::store::save(&database, "extension-settings", &extensions.setting_values)?;
+            crate::store::save(&database, "extension-storage", &extensions.storage)?;
         }
         Ok(extensions)
     }
@@ -202,6 +216,7 @@ impl Extensions {
                 return Err("Extension policy too large".into());
             }
             crate::store::save(database, "extension-settings", &next.setting_values)?;
+            crate::store::save(database, "extension-storage", &next.storage)?;
             crate::store::save(database, "extensions", &next.policy)?;
         }
         *self = next;
@@ -265,6 +280,39 @@ impl Extensions {
             .extend(values);
         self.commit(next)?;
         self.settings(id)
+    }
+    /// One value from an extension's own store.
+    pub fn stored(&self, id: &str, key: &str) -> serde_json::Value {
+        self.storage
+            .get(id)
+            .and_then(|values| values.get(key))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    }
+    /// Set (or, with `null`, delete) one value; the whole store stays within 64 KiB.
+    pub fn store(&mut self, id: &str, key: &str, value: serde_json::Value) -> Result<(), String> {
+        if self.manifest(id).is_none() {
+            return Err("Unknown extension".into());
+        }
+        if key.is_empty()
+            || key.len() > 64
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b))
+        {
+            return Err("Storage keys are 1–64 bytes of a-z, 0-9, _, . and -".into());
+        }
+        let mut next = self.clone();
+        let values = next.storage.entry(id.into()).or_default();
+        if value.is_null() {
+            values.remove(key);
+        } else {
+            values.insert(key.into(), value);
+        }
+        if serde_json::to_vec(values).map_err(|e| e.to_string())?.len() > MAX_STORAGE_BYTES {
+            return Err("Extension storage is limited to 64 KiB".into());
+        }
+        self.commit(next)
     }
     pub fn list(&self, _account: &str) -> Vec<ExtensionState> {
         self.manifests
@@ -370,6 +418,7 @@ impl Extensions {
         }
         let mut next = self.clone();
         next.setting_values.remove(id);
+        next.storage.remove(id);
         next.policy.packages.retain(|p| p.manifest.id != id);
         next.cache.remove(id);
         next.generations.remove(id);
@@ -399,8 +448,34 @@ impl Extensions {
     /// The compiled service part of an enabled extension, with its generation.
     pub fn service(&self, id: &str) -> Option<(u64, Arc<crate::sandbox::Compiled>)> {
         let generation = self.generation(id)?;
-        let service = self.cache.get(id)?.service.clone()?;
+        let service = match self.bundled_services.get(id) {
+            Some(service) => service.clone(),
+            None => self.cache.get(id)?.service.clone()?,
+        };
         Some((generation, service))
+    }
+    /// Bundled extensions whose manifest names a service part, with its file name.
+    pub fn bundled_service_names(&self) -> Vec<(String, String)> {
+        self.manifests
+            .iter()
+            .filter_map(|m| m.service.clone().map(|service| (m.id.clone(), service)))
+            .collect()
+    }
+    pub fn load_bundled_service(&mut self, id: &str, bytes: &[u8]) -> Result<(), String> {
+        self.bundled_services
+            .insert(id.into(), crate::sandbox::compile(bytes)?);
+        Ok(())
+    }
+    /// Enabled extensions whose service part hears about new mail (`messages.list`).
+    pub fn mail_services(&self) -> Vec<(String, u64, Arc<crate::sandbox::Compiled>)> {
+        self.list("")
+            .into_iter()
+            .filter(|s| s.enabled && s.manifest.capabilities.contains(&Capability::MessagesList))
+            .filter_map(|s| {
+                let (generation, service) = self.service(&s.manifest.id)?;
+                Some((s.manifest.id, generation, service))
+            })
+            .collect()
     }
     pub fn has_client(&self, id: &str) -> bool {
         self.manifest(id).is_some_and(|m| m.client.is_some())
@@ -591,6 +666,43 @@ pub(crate) mod tests {
                 .contains("v9.0.0")
         );
         upgraded.remove("hello-pane").unwrap();
+    }
+    #[test]
+    fn storage_is_per_extension_bounded_and_removed_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut extensions = Extensions::open(Database::open(dir.path()).unwrap()).unwrap();
+        extensions.install(&package(EXAMPLE, None)).unwrap();
+        extensions
+            .store("hello-pane", "seen", serde_json::json!(["1"]))
+            .unwrap();
+        assert_eq!(
+            extensions.stored("hello-pane", "seen"),
+            serde_json::json!(["1"])
+        );
+        assert_eq!(extensions.stored("reader", "seen"), serde_json::Value::Null);
+        assert!(
+            extensions
+                .store("hello-pane", "Bad Key", serde_json::json!(1))
+                .is_err()
+        );
+        let big = "x".repeat(MAX_STORAGE_BYTES);
+        assert!(
+            extensions
+                .store("hello-pane", "big", serde_json::json!(big))
+                .is_err()
+        );
+        assert_eq!(
+            Extensions::open(extensions.database.clone().unwrap())
+                .unwrap()
+                .stored("hello-pane", "seen"),
+            serde_json::json!(["1"])
+        );
+        extensions.remove("hello-pane").unwrap();
+        extensions.install(&package(EXAMPLE, None)).unwrap();
+        assert_eq!(
+            extensions.stored("hello-pane", "seen"),
+            serde_json::Value::Null
+        );
     }
     #[test]
     fn installed_package_count_boundary() {

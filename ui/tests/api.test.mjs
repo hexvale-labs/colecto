@@ -1,9 +1,11 @@
 import { afterEach, expect, test } from 'bun:test';
-import { createServices, hostService, ServiceError } from '../src/lib/api.ts';
+import { callFailure, hostService, request, ServiceError } from '../src/lib/api.ts';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
+// A send whose answer was lost may still have gone out; the message must not invite a resend.
+// The same wording reaches the composer's client part through the extension runtime's calls.
 for (const failure of ['malformed', 'interrupted']) {
   for (const operation of ['send', 'approve']) {
     test(`${operation} reports uncertainty after ${failure} successful response`, async () => {
@@ -11,7 +13,7 @@ for (const failure of ['malformed', 'interrupted']) {
         ? new Response('<html>Proxy reply</html>', { status: 200 })
         : new Response(new ReadableStream({ start(controller) { controller.error(new TypeError('Connection closed')); } }), { status: 200 });
       const result = operation === 'send'
-        ? createServices('demo').composer.send({ recipient: 'friend@example.test', subject: 'Hello', body: 'Preserve this draft' })
+        ? request('composer', 'demo', '/send', { recipient: 'friend@example.test', subject: 'Hello', body: 'Preserve this draft' })
         : hostService.decideSend('request-id', 'approve');
       const error = await result.catch(error => error);
       expect(error).toBeInstanceOf(ServiceError);
@@ -22,23 +24,20 @@ for (const failure of ['malformed', 'interrupted']) {
   }
 }
 
-test('unreadable read response retains its ordinary recovery category', async () => {
-  globalThis.fetch = async () => new Response('not JSON', { status: 200 });
-  const error = await createServices('demo').inbox.labels().catch(error => error);
-  expect(error.category).toBe('invalid_response');
+test('an unreachable Host during a send is uncertain, elsewhere a network error', () => {
+  expect(callFailure('/send', 'unreachable').category).toBe('delivery_uncertain');
+  expect(callFailure('/send-requests/abc/approve', 'unreachable').category).toBe('delivery_uncertain');
+  expect(callFailure('/send-requests/abc/reject', 'unreachable').category).toBe('network');
+  expect(callFailure('/messages', 'unreachable').message).toContain('try again');
 });
 
-test('bus sends caller identity and returns only request data', async () => {
-  const { extensionBus } = await import('../src/lib/bus.ts');
-  const calls = [];
-  globalThis.fetch = async (path, input) => {
-    calls.push({path, ...input});
-    return Response.json(path.endsWith('/request') ? {data: {draft: {body: 'Updated'}}} : {});
-  };
-  const bus = extensionBus('composer');
-  expect(await bus.request('helper', 'v1/rewrite', {draft: {body: 'Original'}})).toEqual({draft: {body: 'Updated'}});
-  await bus.emit('v1/opened', {});
-  expect(calls[0].headers['x-colecto-extension']).toBe('composer');
-  expect(calls[0].path).toBe('/api/v1/bus/helper/request');
-  expect(JSON.parse(calls[1].body)).toEqual({name:'v1/opened',payload:{}});
+test('a refused call keeps the Host reason, or says to check delivery for sends', () => {
+  expect(callFailure('/send', 'refused', { error: 'Recipient refused', category: 'smtp' }, 550)).toMatchObject({ message: 'Recipient refused', category: 'smtp', status: 550 });
+  expect(callFailure('/send', 'refused', null, 502).message).toContain('Check delivery status');
+});
+
+test('unreadable read response retains its ordinary recovery category', async () => {
+  globalThis.fetch = async () => new Response('not JSON', { status: 200 });
+  const error = await request('inbox', 'demo', '/labels').catch(error => error);
+  expect(error.category).toBe('invalid_response');
 });

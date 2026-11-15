@@ -112,7 +112,8 @@ The shell follows Android's window size classes, by window width rather than dev
 The bar and the rail mark the current folder with Material's pill indicator, which widens
 in from the middle. Window classes change while the app runs (rotation, split screen,
 folding, resizing a ChromeOS window), and the layout follows. Only the shell reads them,
-through media queries and `matchMedia` in `MailShell.svelte`.
+through media queries and `matchMedia` in `ui/src/shell/Shell.svelte`, which tells
+extensions when the window is compact.
 
 ## Back and gestures
 

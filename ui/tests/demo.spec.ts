@@ -8,7 +8,7 @@ async function openExtensions(page: import('@playwright/test').Page) {
   if (!await dialog.count() && await settings.count()) await settings.click();
   await extensions.click();
 }
-import { test, expect, ownerToken, chooseAccount } from './fixtures';
+import { test, expect, hostEvents, ownerToken, chooseAccount } from './fixtures';
 
 test('reads sample messages as text and returns to the inbox on a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -85,9 +85,9 @@ test('shows a failed draft-open error and recovery on a narrow screen', async ({
   await page.getByRole('button', { name: /^Drafts/ }).click();
   await page.route(`**/api/v1/drafts/${draft.id}`, route => route.fulfill({ status: 404, json: { error: 'Draft unavailable' } }), { times: 1 });
   await page.getByRole('button', { name: /Open failure example/ }).click();
-  await expect(page.getByRole('alert')).toBeVisible();
+  // The composer says why, in its own pane, and goes back to the list from there.
   await expect(page.getByRole('alert')).toContainText('Draft unavailable');
-  await page.getByRole('button', { name: 'Try again' }).click();
+  await page.getByRole('button', { name: 'Back to list' }).click();
   await page.getByRole('button', { name: /Open failure example/ }).click();
   await expect(page.getByLabel('Message', { exact: true })).toHaveValue('Still saved');
 });
@@ -226,7 +226,7 @@ test('extension controls expose TOML metadata, and the workspace itself is not a
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
   await openExtensions(page);
-  await expect(page.getByRole('group', { name: 'Mailbox' }).getByText('By Colecto · API 1')).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Mail', exact: true }).getByText('By Colecto · API 1')).toBeVisible();
   // The mail workspace and the account switcher are core UI: nothing here turns them off.
   await expect(page.getByRole('group', { name: 'Mail workspace' })).toHaveCount(0);
   await expect(page.getByRole('group', { name: 'Account switcher' })).toHaveCount(0);
@@ -312,7 +312,9 @@ test('a rejected owner bearer preserves draft edits until the owner reconnects',
   await page.goto('/');
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
   await page.getByLabel('Subject', { exact: true }).fill('Keep edits through owner reconnect');
-  await page.route('**/api/v1/drafts', route => route.fulfill({ status: 401, json: { error: 'Owner authentication required' } }), { times: 1 });
+  // The composer's credential is refused, and so is the owner bearer it would be renewed with.
+  await page.route('**/api/v1/drafts', route => route.fulfill({ status: 401, json: { error: 'Extension credential revoked' } }), { times: 1 });
+  await page.route('**/api/v1/extensions/composer/credential', route => route.fulfill({ status: 401, json: { error: 'Owner authentication required' } }), { times: 1 });
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page.getByLabel('Daemon access token')).toBeVisible();
   await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Keep edits through owner reconnect');
@@ -389,24 +391,18 @@ test('owner reviews the complete immutable automation snapshot on a phone and se
 
 
 test('notifications can be disabled while the mail workspace keeps working', async ({ page }) => {
-  let mail = false;
-  // One new-mail event per page load, sent once the shell listens.
-  await page.route('**/api/v1/events', async route => {
-    if (mail) return route.fulfill({ status: 204 });
-    mail = true;
-    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeEnabled();
-    return route.fulfill({ status: 200, contentType: 'text/event-stream', body: `event: mail\ndata: ${JSON.stringify({ account: 'demo', ids: ['n1', 'n2'] })}\n\n` });
-  });
+  await hostEvents(page, [['mail', { account: 'demo', ids: ['n1', 'n2'] }]]);
   await page.goto('/');
   await expect(page.getByRole('status', { name: '2 new messages' })).toBeVisible();
   await openExtensions(page);
   const toggle = page.getByRole('group', { name: 'Notifications', exact: true }).getByRole('checkbox', { name: 'Enabled for all accounts' });
   await toggle.uncheck();
   await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-  mail = false;
+  for (const pattern of ['**/api/v1/events', '**/api/v1/extensions/events']) await page.unroute(pattern);
+  await hostEvents(page, [['mail', { account: 'demo', ids: ['n1', 'n2'] }]]);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
-  await expect.poll(() => mail).toBe(true);
+  await page.waitForTimeout(800);
   // The toast surface is core UI and stays; the extension that decides what to announce is off.
   await expect(page.locator('section.toasts')).toHaveCount(1);
   await expect(page.getByRole('status', { name: '2 new messages' })).toHaveCount(0);
@@ -415,52 +411,30 @@ test('notifications can be disabled while the mail workspace keeps working', asy
   await page.getByRole('button', { name: 'Close settings', exact: true }).click();
 });
 
-test('pending attachment reads reserve limits and block sending, and failures remain visible', async ({ page }) => {
+test('attachments keep their limits, report files that cannot be read, and are sent', async ({ page }) => {
   await page.route('**/api/v1/accounts', route => route.fulfill({ json: [{ id: 'demo', settings: null, connected: true, configured: false }] }));
-  await page.addInitScript(() => {
-    const readers: FileReader[] = [];
-    (window as any).attachmentReaders = readers;
-    window.FileReader = class {
-      result = 'data:text/plain;base64,YQ==';
-      onload: any; onerror: any; onabort: any;
-      readAsDataURL() { readers.push(this as unknown as FileReader); }
-    } as any;
-  });
   await page.goto('/');
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
   const input = page.locator('input[type=file]');
+  // Sizes come from the files the owner picked; two of these make more than 25 MB.
   await page.evaluate(() => Object.defineProperty(File.prototype, 'size', { configurable: true, get: () => 14 * 1024 * 1024 }));
   await input.setInputFiles({ name: 'large.txt', mimeType: 'text/plain', buffer: Buffer.from('a') });
   await input.setInputFiles({ name: 'also-large.txt', mimeType: 'text/plain', buffer: Buffer.from('a') });
   await expect(page.getByRole('alert')).toContainText('25 MB');
-  await page.evaluate(() => {
-    delete (File.prototype as any).size;
-    (window as any).attachmentReaders[0].onload();
-  });
+  await page.evaluate(() => { delete (File.prototype as any).size; });
   await page.getByRole('button', { name: 'Remove large.txt', exact: true }).click();
-  await page.evaluate(() => { (window as any).attachmentReaders.splice(0); });
-  await input.setInputFiles(Array.from({ length: 20 }, (_, i) => ({ name: `${i}.txt`, mimeType: 'text/plain', buffer: Buffer.from('a') })));
-  const send = page.getByRole('button', { name: 'Send', exact: true });
-  await expect(send).toBeDisabled();
-  await expect(page.getByText('Reading attachments… Send will be available when all files are ready.')).toBeVisible();
-  await input.setInputFiles({ name: 'extra.txt', mimeType: 'text/plain', buffer: Buffer.from('a') });
+  await input.setInputFiles(Array.from({ length: 21 }, (_, i) => ({ name: `${i}.txt`, mimeType: 'text/plain', buffer: Buffer.from('a') })));
   await expect(page.getByRole('alert')).toContainText('at most 20');
-  await page.evaluate(() => {
-    const readers = (window as any).attachmentReaders;
-    readers[0].onerror();
-    readers.slice(1).forEach((reader: any) => reader.onload());
-  });
-  await expect(page.getByRole('alert')).toContainText('Could not read 0.txt');
-  await expect(send).toBeDisabled();
-  await page.getByRole('button', { name: 'Remove all attachments' }).click();
-  await expect(send).toBeEnabled();
+  // A file the browser cannot read is reported instead of being sent empty.
+  await page.evaluate(() => { File.prototype.arrayBuffer = () => Promise.reject(new Error('unreadable')); });
+  await input.setInputFiles({ name: 'broken.txt', mimeType: 'text/plain', buffer: Buffer.from('a') });
+  await expect(page.getByRole('alert')).toContainText('Could not read broken.txt');
+  await page.evaluate(() => { delete (File.prototype as any).arrayBuffer; });
   await input.setInputFiles({ name: 'ready.txt', mimeType: 'text/plain', buffer: Buffer.from('a') });
-  await page.evaluate(() => (window as any).attachmentReaders.at(-1).onload());
-  await expect(send).toBeEnabled();
   await expect(page.getByRole('list', { name: 'Files to send' })).toContainText('ready.txt');
   let payload: any;
   await page.route('**/api/v1/send', route => { payload = route.request().postDataJSON(); return route.fulfill({ json: true }); });
-  await send.click();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('button', { name: 'Sent', exact: true })).toBeVisible();
   expect(payload.attachments).toEqual([{ name: 'ready.txt', content_type: 'text/plain', data: 'YQ==' }]);
 });

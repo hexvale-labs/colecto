@@ -146,11 +146,14 @@ fn native_owner_initialization_uses_storage_only_for_its_exact_local_origin() {
       const assert = require('node:assert/strict');
       const input = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
       for (const origin of ['https://mail.example.test', 'https://127.0.0.1:4173', 'http://127.0.0.1:4174', 'http://evil.test']) {
-        const window = { location: { origin }, get sessionStorage() { throw new Error('Remote storage accessed'); } };
+        const window = { origin, location: { origin }, get sessionStorage() { throw new Error('Remote storage accessed'); } };
         vm.runInNewContext(input.script, { window });
       }
+      // A sandboxed extension frame reports the app's location but an opaque origin.
+      const sandboxed = { origin: 'null', location: { origin: input.origin }, get sessionStorage() { throw new Error('Sandboxed frame got the token'); } };
+      vm.runInNewContext(input.script, { window: sandboxed });
       let writes = 0;
-      const window = { location: { origin: input.origin }, sessionStorage: { setItem(key, value) { assert.equal(key, 'colecto.token'); assert.equal(value, input.token); writes++; } } };
+      const window = { origin: input.origin, location: { origin: input.origin }, sessionStorage: { setItem(key, value) { assert.equal(key, 'colecto.token'); assert.equal(value, input.token); writes++; } } };
       vm.runInNewContext(input.script, { window });
       assert.equal(writes, 1);
     "#).stdin(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();

@@ -180,7 +180,8 @@ async fn authenticate(
 }
 
 /// What a client part's credential can reach: mail routes (each checks the extension's
-/// capabilities), the bus, and its own settings. Owner controls stay out of reach.
+/// capabilities), the bus, the release check, AI routes (each checks `ai.*`; keys stay owner
+/// only), and its own settings and storage. Owner controls stay out of reach.
 fn extension_route(path: &str) -> bool {
     matches!(
         path,
@@ -190,13 +191,32 @@ fn extension_route(path: &str) -> bool {
             | "/api/v1/drafts"
             | "/api/v1/labels"
             | "/api/v1/send"
-    ) || ["/api/v1/messages/", "/api/v1/drafts/", "/api/v1/bus/"]
-        .iter()
-        .any(|prefix| path.starts_with(prefix))
+            | "/api/v1/releases/latest"
+            | "/api/v1/sync"
+            | "/api/v1/ai/settings"
+            | "/api/v1/ai/test"
+            | "/api/v1/ai/reply"
+            | "/api/v1/ai/labels/preview"
+    ) || [
+        "/api/v1/messages/",
+        "/api/v1/drafts/",
+        "/api/v1/bus/",
+        "/api/v1/ai/summaries/",
+    ]
+    .iter()
+    .any(|prefix| path.starts_with(prefix))
         || path
             .strip_prefix("/api/v1/extensions/")
-            .and_then(|rest| rest.strip_suffix("/settings"))
-            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+            .is_some_and(|rest| {
+                // Its own settings and storage; the handlers check that the ID is the caller's.
+                let mut parts = rest.split('/');
+                matches!(
+                    (parts.next(), parts.next(), parts.next(), parts.next()),
+                    (Some(id), Some("settings"), None, None)
+                        | (Some(id), Some("storage" | "assets"), Some(_), None)
+                        if !id.is_empty()
+                )
+            })
 }
 
 #[derive(Clone)]
@@ -239,7 +259,26 @@ impl MailService {
             )));
         }
         let database = accounts.database();
-        let extensions = crate::extensions::Extensions::open(database.clone())?;
+        let mut extensions = crate::extensions::Extensions::open(database.clone())?;
+        // Bundled service parts are built with the UI and ship with its assets.
+        for (id, service) in extensions.bundled_service_names() {
+            let path = format!("/extensions/{id}/{service}");
+            let bytes = match &assets {
+                crate::Assets::Directory(directory) => {
+                    std::fs::read(directory.join(&path[1..])).ok()
+                }
+                crate::Assets::Embedded(lookup) => lookup(&path).map(|(bytes, _)| bytes),
+            };
+            match bytes.map(|bytes| extensions.load_bundled_service(&id, &bytes)) {
+                Some(Ok(())) => {}
+                Some(Err(error)) => {
+                    tracing::warn!(extension = %id, %error, "Bundled service part does not load")
+                }
+                None => {
+                    tracing::warn!(extension = %id, "Bundled service part is missing from the UI build")
+                }
+            }
+        }
         let keys = Arc::new(Mutex::new(ApiKeys::open(database.clone())?));
         let preferences = Arc::new(Mutex::new(crate::preferences::PreferenceStore::open(
             database.clone(),
@@ -417,7 +456,7 @@ impl MailService {
                                 && let Some(event) = snapshots
                                     .observe(&account, messages.iter().map(|m| m.id.clone()))
                             {
-                                let _ = crate::ai::arrived(&host, &account, &messages, &event);
+                                crate::bus::deliver_mail(&host, &account, &event);
                                 let _ = events.send(("mail", event));
                             }
                         }

@@ -150,13 +150,13 @@ test('sliders follow a finger and ignore a swipe that becomes a scroll', async (
     const box = input.getBoundingClientRect();
     input.dispatchEvent(new PointerEvent(type as string, { pointerId: 7, pointerType: 'touch', bubbles: true, clientX: box.left + box.width * (ratio as number), clientY: box.top + box.height / 2 }));
   }, [type, ratio] as const);
-  const saved = page.waitForRequest(request => request.url().endsWith('/api/v1/preferences') && request.method() === 'POST' && 'prefetch' in (request.postDataJSON() ?? {}));
+  const saved = page.waitForRequest(request => request.url().endsWith('/api/v1/extensions/inbox/settings') && request.method() === 'PUT' && 'prefetch_count' in (request.postDataJSON() ?? {}));
   await touch('pointerdown', 0.5);
   for (const ratio of [0.6, 0.75, 0.9, 1.2]) await touch('pointermove', ratio);
   await expect(slider).toHaveValue('100');
-  await expect(page.locator('output[for="prefetch-count"]')).toHaveText('100');
+  await expect(page.locator('output[for="ext-inbox-prefetch_count"]')).toHaveText('100');
   await touch('pointerup', 1.2);
-  expect((await saved).postDataJSON().prefetch.count).toBe(100);
+  expect((await saved).postDataJSON().prefetch_count).toBe(100);
   // A tap jumps to where it lands.
   await touch('pointerdown', 0.2); await touch('pointerup', 0.2);
   await expect(slider).not.toHaveValue('100');

@@ -857,6 +857,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "colecto-ai-service"
+version = "0.5.4"
+dependencies = [
+ "colecto-extension",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "colecto-app"
 version = "0.5.4"
 dependencies = [

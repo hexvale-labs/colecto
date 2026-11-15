@@ -1,6 +1,8 @@
 <script lang="ts">
-  // Keys are write-only: once saved, the Host only says that one exists.
-  let { label, saved, onsave }: { label: string; saved: boolean; onsave: (key: string | null) => Promise<void> } = $props();
+  // A write-only key field: the typed value goes from here to the Host and never to the
+  // extension's Worker. Once saved, the Host only says that a key exists.
+  import { request } from '../lib/api';
+  let { label, target, saved, onsaved }: { label: string; target: 'ai.text' | 'ai.decision'; saved: boolean; onsaved: (saved: boolean) => void } = $props();
   const uid = Math.random().toString(36).slice(2);
   let replacing = $state(false);
   let value = $state('');
@@ -8,8 +10,11 @@
   let error = $state('');
   async function submit(key: string | null) {
     busy = true; error = '';
-    try { await onsave(key); value = ''; replacing = false; }
-    catch (e) { error = (e as Error).message; }
+    try {
+      const view = await request<{ keys: { text: boolean; decision: boolean } }>('host', 'demo', '/ai/keys', { kind: target === 'ai.text' ? 'text' : 'decision', key });
+      value = ''; replacing = false;
+      onsaved(target === 'ai.text' ? view.keys.text : view.keys.decision);
+    } catch (e) { error = (e as Error).message; }
     finally { busy = false; }
   }
 </script>

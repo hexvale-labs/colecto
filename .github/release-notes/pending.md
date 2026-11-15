@@ -11,5 +11,18 @@ The extension system was rebuilt: extensions now run their interface in a sandbo
 Worker on your device and describe it with components Colecto draws, with optional
 background work in a WebAssembly sandbox. Extensions built for the old system no longer
 load and are removed on startup (their settings too); reinstall versions built for the
-new extension API 1. The Oneko example is gone until its rewrite.
+new extension API 1.
+
+What you may notice:
+
+- Mail, Reader, Composer, Notifications and AI are extensions on the new system. The
+  composer has its own tab next to Reader.
+- List density and date headings moved to Settings → Mail; toast position and desktop
+  notifications moved to Settings → Appearance. Mail, Privacy and Notifications
+  settings start from their defaults once.
+- Toasts, extension dialogs and extension settings pages name the extension they come
+  from.
+- AI auto-labels run in the background inside the AI extension's sandbox, even with no
+  window open.
+- The Oneko example is back, drawing on the new canvas overlay.
 

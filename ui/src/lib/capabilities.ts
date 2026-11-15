@@ -8,7 +8,7 @@ const labels: Record<Capability, string> = {
   'app.navigate': 'Navigate the app',
   'ui.frame': 'Show web content in a sealed frame', 'ui.frame.remote': 'Load images from the internet in its frames (servers can learn when, and possibly what, it shows)',
   'ui.commands': 'Add commands to the command runner', 'ui.app_actions': 'Add buttons to the top bar',
-  'ui.toasts': 'Show notifications', 'ui.contribute': 'Add content inside other extensions',
+  'ui.toasts': 'Show notifications', 'ui.contribute': 'Add content inside other extensions', 'ui.canvas': 'Draw over the whole window',
   'approvals.notify': 'See send requests waiting for your approval', 'releases.read': 'See when a new Colecto release is out',
   'ai.text': 'Use your AI text model', 'ai.decide': 'Use your AI decision model', 'ai.configure': 'Change AI settings and keys',
 };

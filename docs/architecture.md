@@ -16,7 +16,7 @@ locations, see the [documentation index](README.md#where-things-are).
 ```
  ┌─────────── Svelte UI (app origin, trusted) ───────────┐   ┌─ opaque-origin frames ─┐
  │ shell (ui/src/shell), renderer, extension runtimes;    │◄─►│ extension client parts │
- │ bundled extensions not yet moved: trusted Svelte       │   │ in Web Workers         │
+ │ (bundled extensions run as client parts too)           │   │ in Web Workers         │
  └───────────────────────────┬────────────────────────────┘   └────────────────────────┘
                              │ HTTP API (/api/v1), SSE events
  ┌───────────────────────────▼────────────────────────────────────────────────────────┐
@@ -47,8 +47,7 @@ An extension's client part runs in a Web Worker inside an opaque-origin sandboxe
 with no DOM and no network; it sends component trees that the shell's renderer draws,
 and reaches the API only through the shell, with its own credential that the Host checks
 on every call. An optional service part runs in a fuel- and memory-limited `wasmi`
-runtime without WASI. Bundled extensions are moving to that runtime one at a time; until
-then they run as trusted Svelte. See the [extension contract](extensions/README.md) and
+runtime without WASI. Bundled extensions use the same runtime. See the [extension contract](extensions/README.md) and
 the [extension UI model](extensions/ui-model.md). Rust service parts can use the
 [Rust SDK](extensions/rust-sdk.md).
 

@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, setExtensionSettings } from './fixtures';
 import type { Page } from '@playwright/test';
 
 /** Serve one message with this HTML body and open it in the reader. */
@@ -89,11 +89,8 @@ test('renders HTML in a script-free sandbox, gates remote images, and prefills r
 });
 
 test('loads remote images straight away when Privacy settings allow it', async ({ page }) => {
-  await page.route('**/api/v1/preferences', async route => {
-    if (route.request().method() !== 'GET') return route.fallback();
-    const response = await route.fetch();
-    return route.fulfill({ response, json: { ...await response.json(), remote_images: true } });
-  });
+  // Settings → Privacy belongs to the reader.
+  await setExtensionSettings(page, 'reader', { remote_images: true });
   const remote: string[] = [];
   await page.route('https://remote.test/**', route => { remote.push(route.request().url()); return route.abort(); });
   await openHtml(page, '<p>Newsletter</p><img alt="banner" src="https://remote.test/banner.png">');

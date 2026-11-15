@@ -130,6 +130,7 @@ colecto_extension::export! { requests: [count] }
 | --- | --- | --- |
 | `requests: [f, …]` | `fn(R, &mut Context) -> Result<R::Response>` where `R: BusRequest` | Bus requests to your bus named `R::NAME` |
 | `events: [f, …]` | `fn(E, &mut Context) -> Result<()>` where `E: BusEvent` | Events from bus `E::BUS` named `E::NAME` |
+| `mail: f` | `fn(MailEvent, &mut Context) -> Result<()>` | New mail: `MailEvent {account, ids}`; needs `messages.list`. The bundled AI auto-labeller (`ui/src/extensions/ai/service/`) is an example |
 
 Entries may come in any order. When nothing matches, nothing is emitted, which the Host treats as no answer.
 
@@ -144,7 +145,7 @@ What happens on failure:
 ## Call the Host
 
 `Context` wraps the service operations. Each call needs the capability in parentheses,
-acts on the account the owner has selected, and counts toward the limit of eight calls
+acts on the account the owner has selected, and counts toward the limit of 64 calls
 per invocation. Errors the Host reports come back as `Error::Service`, and refused
 bridge calls as `Error::Bridge`.
 
@@ -159,6 +160,8 @@ bridge calls as `Error::Bridge`.
 | `save_draft(&DraftInput)` | `drafts.write` | `Draft` |
 | `send(&DraftInput)` | `messages.send` (plus `messages.read` with `forward_of`) | `()` |
 | `label(name, message_id, remove)` | `messages.label` | `Labels` (label name to message IDs) |
+| `labels()` | `labels.list` (`messages.list`) | `Labels` |
+| `stored::<T>(key)`, `store(key, &value)` | `storage.get`, `storage.set` (none) | `Option<T>`, `()` |
 | `request(&R)` | `bus.request` (`extensions.bus`) | `Option<R::Response>` |
 | `emit(&E)` | `bus.emit` (`extensions.bus`) | `()` |
 | `call::<T>(&request)` | Any raw request | The response `data` as `T` |

@@ -83,6 +83,12 @@ pub fn parse_any_version(source: &str) -> Result<ExtensionManifest, String> {
     {
         return Err("Unknown pane icon".into());
     }
+    if let Some(overlay) = &manifest.overlay
+        && !(manifest.capabilities.contains(&Capability::UiCanvas)
+            && (1..=10000).contains(&overlay.z_index))
+    {
+        return Err("[overlay] needs ui.canvas and a z_index from 1 to 10000".into());
+    }
     if let Some(page) = &manifest.settings_page {
         if page.title.trim().is_empty() || page.title.len() > 32 {
             return Err("settings_page.title must be 1–32 bytes".into());

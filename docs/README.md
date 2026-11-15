@@ -63,7 +63,7 @@ Start with the page that matches what you want to do:
 | `ui/src/extensions/<id>/` | Bundled extensions: Svelte code next to its `extension.toml` |
 | `ui/src/lib/` | API client, layout, navigation, layer (z-index) registry and helpers |
 | `ui/tests/` | Playwright specs (`*.spec.ts`) and Bun tests (`*.test.mjs`) |
-| `docs/extensions/examples/` | Example extensions: `hello-pane` (a JavaScript client part), Oneko's sprite sheet |
+| `docs/extensions/examples/` | Example extensions: `hello-pane` (a JavaScript pane) and `oneko` (a `canvas` overlay) |
 | `docs/performance/` | Measurement method, committed baseline, local results (ignored by git) |
 | `scripts/just/` | `just` modules: `build`, `check`, `test`, `run`, `install` |
 | `scripts/python/`, `scripts/javascript/` | Resource benchmark and AUR publishing helpers |
@@ -80,7 +80,7 @@ Start with the page that matches what you want to do:
 - **Extension:** an optional package that adds interface or background work. Its
   **client part** runs in a Web Worker and sends components for Colecto to draw; an
   optional **service part** runs as WebAssembly in the Host. **Bundled extensions** ship
-  with the app (some still as trusted Svelte until they move to the runtime);
+  with the app and run on the same runtime;
   **third-party extensions** are installed `.colectoext` packages.
 - **Daemon:** the Host running on its own, usually on a server.
 - **Owner:** the one person whose accounts a data directory holds.

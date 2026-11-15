@@ -71,6 +71,14 @@ pub struct OutgoingAttachment {
     pub data: String,
 }
 
+/// New mail arrived in `account`: the IDs of the new messages. Service parts that declare
+/// `messages.list` receive it, whether or not a window is open.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct MailEvent {
+    pub account: String,
+    pub ids: Vec<String>,
+}
+
 /// Local labels after a change: label name to the message IDs that carry it.
 pub type Labels = std::collections::BTreeMap<String, Vec<String>>;
 

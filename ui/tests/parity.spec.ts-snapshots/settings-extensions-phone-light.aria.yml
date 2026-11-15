@@ -16,12 +16,12 @@
       - text: /Extension package \.colectoext, up to \d+ MiB Browse/
       - button "Install" [disabled]
     - heading "Installed" [level=3]
-    - group "Mailbox":
+    - group "Mail":
       - text: ""
       - paragraph: Bundled By Colecto · API 1
       - checkbox "Enabled for all accounts" [checked]
       - text: Enabled for all accounts
-      - paragraph: Browse messages and saved drafts for the selected account.
+      - paragraph: Browse, search and filter the messages and drafts of the selected account.
       - checkbox "Show in the workspace" [checked]
       - text: Show in the workspace Capabilities · all accounts
       - list:
@@ -29,20 +29,26 @@
         - listitem: Read account connection status
         - listitem: Organize messages
         - listitem: List messages
+        - listitem: Manage message labels
         - listitem: List drafts
-    - group "Message reader":
+        - listitem: Add commands to the command runner
+    - group "Reader":
       - text: ""
       - paragraph: Bundled By Colecto · API 1
       - checkbox "Enabled for all accounts" [checked]
       - text: Enabled for all accounts
-      - paragraph: Read messages, including sandboxed HTML and attachments.
+      - paragraph: Read messages, including sandboxed HTML and attachments, in tabs.
       - checkbox "Show in the workspace" [checked]
       - text: Show in the workspace Capabilities · all accounts
       - list:
         - listitem: Talk to other extensions by name
         - listitem: Organize messages
         - listitem: Read messages and attachments
+        - listitem: List messages
         - listitem: Manage message labels
+        - listitem: Show web content in a sealed frame
+        - listitem: Load images from the internet in its frames (servers can learn when, and possibly what, it shows)
+        - listitem: Add commands to the command runner
     - group "Composer":
       - text: ""
       - paragraph: Bundled By Colecto · API 1
@@ -56,14 +62,21 @@
         - listitem: Create and edit drafts
         - listitem: Send mail
         - listitem: Read messages and attachments
+        - listitem: Add buttons to the top bar
+        - listitem: Add commands to the command runner
     - group "Notifications":
       - text: ""
       - paragraph: Bundled By Colecto · API 1
       - checkbox "Enabled for all accounts" [checked]
       - text: Enabled for all accounts
-      - paragraph: New mail and delivery approval notifications.
+      - paragraph: Tells you about new mail, automation waiting for your approval and new Colecto releases.
       - text: Capabilities · all accounts
       - list:
+        - listitem: Show notifications
+        - listitem: See send requests waiting for your approval
+        - listitem: See when a new Colecto release is out
+        - listitem: List messages
+        - listitem: Read account connection status
         - listitem: Talk to other extensions by name
     - group "AI":
       - text: ""
@@ -75,3 +88,9 @@
       - list:
         - listitem: Read messages and attachments
         - listitem: List messages
+        - listitem: Manage message labels
+        - listitem: Use your AI text model
+        - listitem: Use your AI decision model
+        - listitem: Change AI settings and keys
+        - listitem: Add content inside other extensions
+        - listitem: Talk to other extensions by name

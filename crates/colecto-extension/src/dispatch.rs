@@ -1,6 +1,6 @@
 //! Routes one invocation's action to the function registered with `export!`.
 
-use crate::{BusEvent, BusRequest, Context, Result};
+use crate::{BusEvent, BusRequest, Context, MailEvent, Result};
 use colecto_extension_sys as sys;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -18,6 +18,7 @@ enum Action {
         name: String,
         payload: Value,
     },
+    Mail(MailEvent),
 }
 
 /// The action shapes from `docs/extensions/README.md`; unknown fields are ignored.
@@ -38,6 +39,8 @@ enum Envelope {
         #[serde(default)]
         payload: Value,
     },
+    #[serde(rename = "mail")]
+    Mail { account: String, ids: Vec<String> },
 }
 
 pub struct Dispatch {
@@ -64,6 +67,7 @@ impl Dispatch {
             Ok(Envelope::BusEvent { bus, name, payload }) => {
                 Action::BusEvent { bus, name, payload }
             }
+            Ok(Envelope::Mail { account, ids }) => Action::Mail(MailEvent { account, ids }),
             Err(_) => Action::Done,
         };
         Self { action }
@@ -113,6 +117,20 @@ impl Dispatch {
         if let Ok(event) = serde_json::from_value::<E>(payload) {
             let _ = handler(event, &mut Context::new(None));
         }
+    }
+
+    pub fn mail<F>(&mut self, handler: F)
+    where
+        F: FnOnce(MailEvent, &mut Context) -> Result<()>,
+    {
+        let Action::Mail(_) = &self.action else {
+            return;
+        };
+        let Action::Mail(event) = std::mem::replace(&mut self.action, Action::Done) else {
+            unreachable!()
+        };
+        // The Host ignores output for mail events, so errors have nowhere to go.
+        let _ = handler(event, &mut Context::new(None));
     }
 
     /// Nothing matched; requests and events then go unanswered, which the Host allows.

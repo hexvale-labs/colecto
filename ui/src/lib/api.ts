@@ -35,9 +35,19 @@ async function download(extension: string, account: string, path: string): Promi
   if (!response.ok) { const data = await response.json().catch(() => null); throw new ServiceError(typeof data?.error === 'string' ? data.error : `Download failed (HTTP ${response.status}).`, typeof data?.category === 'string' ? data.category : 'server', response.status); }
   return response.blob();
 }
+const deliveryWarning = 'Delivery status is unknown. Check Sent and delivery requests before sending again.';
+/** Calls that may have delivered mail even when no readable answer came back. */
+const isDelivery = (path: string) => path === '/send' || (path.startsWith('/send-requests/') && path.endsWith('/approve'));
+/** Why a call failed, worded so nobody resends a message that may already have gone out. Used
+ *  for the shell's own calls and for the calls it makes for extensions' client parts. */
+export function callFailure(path: string, kind: 'unreachable' | 'unreadable' | 'refused', data?: unknown, status?: number): ServiceError {
+  const delivery = isDelivery(path);
+  const reported = data as { error?: unknown; category?: unknown } | null | undefined;
+  if (kind === 'unreachable') return new ServiceError(delivery ? deliveryWarning : 'Cannot reach Colecto. Check that your mail service is running, then try again.', delivery ? 'delivery_uncertain' : 'network');
+  if (kind === 'unreadable') return new ServiceError(delivery ? deliveryWarning : 'Mail service returned an unreadable response. Check your connection and try again.', delivery ? 'delivery_uncertain' : 'invalid_response', status);
+  return new ServiceError(typeof reported?.error === 'string' ? reported.error : `Mail service returned HTTP ${status}. ${delivery ? 'Check delivery status before sending again.' : 'Try again when the service is available.'}`, typeof reported?.category === 'string' ? reported.category : 'server', status);
+}
 export async function request<T>(extension: string, account: string, path: string, input?: unknown, method?: 'DELETE' | 'PUT'): Promise<T> {
-  const delivery = path === '/send' || (path.startsWith('/send-requests/') && path.endsWith('/approve'));
-  const deliveryWarning = 'Delivery status is unknown. Check Sent and delivery requests before sending again.';
   let response: Response;
   try {
     response = await fetch(`/api/v1${path}`, {
@@ -47,82 +57,15 @@ export async function request<T>(extension: string, account: string, path: strin
       ...(input === undefined ? {} : { body: JSON.stringify(input) }),
     });
   } catch {
-    throw new ServiceError(delivery ? deliveryWarning : 'Cannot reach Colecto. Check that your mail service is running, then try again.', delivery ? 'delivery_uncertain' : 'network');
+    throw callFailure(path, 'unreachable');
   }
   if (response.status === 401) window.dispatchEvent(new Event('colecto-auth-required'));
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new ServiceError(typeof data?.error === 'string' ? data.error : `Mail service returned HTTP ${response.status}. ${delivery ? 'Check delivery status before sending again.' : 'Try again when the service is available.'}`, typeof data?.category === 'string' ? data.category : 'server', response.status);
-  if (data === null) throw new ServiceError(delivery ? deliveryWarning : 'Mail service returned an unreadable response. Check your connection and try again.', delivery ? 'delivery_uncertain' : 'invalid_response', response.status);
+  if (!response.ok) throw callFailure(path, 'refused', data, response.status);
+  if (data === null) throw callFailure(path, 'unreadable', null, response.status);
   return data as T;
 }
 
-// Opened mail stays in memory so going back to a message, or opening one that was warmed
-// ahead of time, never waits for the network. Content of a message id never changes.
-const MAX_CACHED = 150;
-const contentCache = new Map<string, Promise<MessageContent>>();
-const messageCache = new Map<string, Message>();
-const cacheKey = (account: string, id: string) => `${account}\u0000${id}`;
-function remember<T>(cache: Map<string, T>, key: string, value: T) {
-  cache.delete(key); cache.set(key, value);
-  while (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value!);
-}
-function cachedContent(account: string, id: string, onlyCached = false): Promise<MessageContent> {
-  const key = cacheKey(account, id);
-  const load = (only: boolean) => {
-    const pending = request<MessageContent>('reader', account, `/messages/${encodeURIComponent(id)}/content${only ? '?cached=true' : ''}`);
-    remember(contentCache, key, pending);
-    pending.catch(() => { if (contentCache.get(key) === pending) contentCache.delete(key); });
-    return pending;
-  };
-  const hit = contentCache.get(key);
-  if (!hit) return load(onlyCached);
-  remember(contentCache, key, hit);
-  // A warm-up that found nothing cached must not fail a real open: fetch it properly then.
-  return onlyCached ? hit : hit.catch(() => load(false));
-}
-/** List results double as message headers, so the reader can show a listed message at once. */
-export function rememberMessages(account: string, messages: Message[]) {
-  for (const message of messages.slice(0, MAX_CACHED).reverse()) remember(messageCache, cacheKey(account, message.id), message);
-}
-/** Warm the content cache for `ids` (newest first), a few at a time. Only content the mail
- *  service already holds is fetched, so this never adds provider downloads of its own. */
-export async function prefetchContent(account: string, ids: string[], concurrency = 3) {
-  const queue = ids.filter(id => !contentCache.has(cacheKey(account, id))).slice(0, MAX_CACHED / 2);
-  const worker = async () => { for (let id = queue.shift(); id !== undefined; id = queue.shift()) await cachedContent(account, id, true).catch(() => {}); };
-  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
-}
-
-// Supplied service clients capture an immutable account, including during async work.
-export function createServices(account: string) {
-  return {
-    inbox: {
-      setFlags: (ids: string[], seen?: boolean, flagged?: boolean) => request<{ ok: true }>('inbox', account, '/messages/flags', { ids, seen, flagged }),
-      moveTo: (ids: string[], folder: string) => request<{ ok: true }>('inbox', account, '/messages/move', { ids, folder }),
-      archive: (ids: string[]) => request<{ ok: true }>('inbox', account, '/messages/archive', { ids }),
-      delete: (ids: string[]) => request<{ ok: true }>('inbox', account, '/messages/delete', { ids }),
-      cached: (folder: 'inbox' | 'sent' = 'inbox') => request<MailSnapshot>('inbox', account, `/messages/cache?folder=${folder}`),
-      labels: () => request<Labels>('inbox', account, '/labels'),
-      connected: () => request<boolean>('inbox', account, '/account'),
-      messages: (folder: 'inbox' | 'sent' = 'inbox', query = '') => { const params = new URLSearchParams(); if (folder !== 'inbox') params.set('folder', folder); if (query) params.set('q', query); return request<Message[]>('inbox', account, `/messages/refresh${params.size ? `?${params}` : ''}`, {}); },
-      drafts: () => request<Draft[]>('inbox', account, '/drafts'),
-    },
-    reader: {
-      setFlags: (ids: string[], seen?: boolean, flagged?: boolean) => request<{ ok: true }>('reader', account, '/messages/flags', { ids, seen, flagged }),
-      moveTo: (ids: string[], folder: string) => request<{ ok: true }>('reader', account, '/messages/move', { ids, folder }),
-      archive: (ids: string[]) => request<{ ok: true }>('reader', account, '/messages/archive', { ids }),
-      delete: (ids: string[]) => request<{ ok: true }>('reader', account, '/messages/delete', { ids }), label: (name: string, message_id?: string, remove = false) => request<Labels>('reader', account, '/labels', { name, message_id, remove }),
-      read: (id: string) => { const known = messageCache.get(cacheKey(account, id)); return known ? Promise.resolve(known) : request<Message>('reader', account, `/messages/${encodeURIComponent(id)}`); },
-      content: (id: string) => cachedContent(account, id),
-      attachment: (id: string, index: number) => download('reader', account, `/messages/${encodeURIComponent(id)}/attachments/${index}`) },
-    composer: {
-      send: (draft: DraftInput) => request<boolean>('composer', account, '/send', draft),
-      read: (id: string) => request<Draft>('composer', account, `/drafts/${encodeURIComponent(id)}`),
-      save: (draft: DraftInput) => request<Draft>('composer', account, '/drafts', draft),
-    },
-  };
-}
-export type ReaderService = Pick<ReturnType<typeof createServices>['reader'], 'read' | 'label' | 'content' | 'attachment'>;
-export type ComposerService = ReturnType<typeof createServices>['composer'];
 /** Owner preferences, stored by the Host in Turso. `workspace` is the dock layout. */
 export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right' | 'bottom' | 'bottom-left' | 'left';
 export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner; updates: boolean }
@@ -165,12 +108,12 @@ export const hostService = {
 };
 
 export type Capability = 'extensions.bus' | 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate'
-  | 'ui.frame' | 'ui.frame.remote' | 'ui.commands' | 'ui.app_actions' | 'ui.toasts' | 'ui.contribute' | 'approvals.notify' | 'releases.read' | 'ai.text' | 'ai.decide' | 'ai.configure';
+  | 'ui.frame' | 'ui.frame.remote' | 'ui.commands' | 'ui.app_actions' | 'ui.toasts' | 'ui.contribute' | 'ui.canvas' | 'approvals.notify' | 'releases.read' | 'ai.text' | 'ai.decide' | 'ai.configure';
 export interface ExtensionState {
   manifest: {
     settings?: ExtensionSetting[]; id: string; name: string; description: string; author: string; api_version: number; capabilities: Capability[];
     /** The client part's entry; bundled extensions not yet on the runtime have none. */
-    client?: string; service?: string; pane?: { icon: string }; settings_page?: { title: string; icon: string }; navigation?: string[];
+    client?: string; service?: string; pane?: { icon: string }; overlay?: { z_index: number }; settings_page?: { title: string; icon: string }; navigation?: string[];
   };
   bundled: boolean;
   enabled: boolean;

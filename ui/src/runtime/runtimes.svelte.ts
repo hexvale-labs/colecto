@@ -2,36 +2,73 @@
 // (docs/extensions/ui-model.md, "Event stream"). The Host picks each event's recipients by
 // their credentials; this only delivers it.
 import { extensionHost, openEvents, type ExtensionState } from '../lib/api';
-import { ExtensionRuntime, type AccountSummary } from './runtime.svelte';
+import { ExtensionRuntime, type AccountSummary, type ShellActions } from './runtime.svelte';
 import { currentTheme, type Theme } from './theme';
 
 class Runtimes {
   list = $state<ExtensionRuntime[]>([]);
   #account: AccountSummary | null = null;
+  #accounts: AccountSummary[] = [];
+  shell: ShellActions | null = null;
   #theme: Theme | null = null;
   #stopEvents = () => {};
   #tokens = '';
 
+  #slots = new Map<string, unknown>();
+  /** App actions drawn inside a pane (`action_ref`), which the top bar then leaves out. */
+  refs = $state<Record<string, number>>({});
+  /** Narrow windows show one pane at a time and lift bottom navigation out of panes. */
+  compact = $state(false);
+  /** False until the shell knows the account; app actions wait for it. */
+  ready = $state(false);
+  /** Reopen the event stream when a credential was renewed. */
+  relisten() { this.#listen(); }
+
   get(id: string) { return this.list.find(runtime => runtime.id === id); }
+
+  /** Whether any surface reported busy work, such as a draft being saved. */
+  get busy() { return this.list.some(runtime => Object.values(runtime.states).some(state => state.busy)); }
+  get dirty() { return this.list.some(runtime => Object.values(runtime.states).some(state => state.dirty)); }
+
+  /** A slot appeared, changed context or went away (`null`); contributors hear about it. */
+  openSlot(full: string, context: unknown) {
+    if (context === null) this.#slots.delete(full); else this.#slots.set(full, context);
+    for (const runtime of this.list) this.#tellSlot(runtime, full, context);
+  }
+  #tellSlot(runtime: ExtensionRuntime, full: string, context: unknown) {
+    const [owner, ...rest] = full.split('/');
+    if (runtime.capabilities.includes('ui.contribute') && runtime.id !== owner) runtime.send({ t: 'slot', slot: rest.join('/'), owner, context });
+  }
+
+  showRef(key: string, visible: boolean) { this.refs[key] = Math.max(0, (this.refs[key] ?? 0) + (visible ? 1 : -1)); }
+
+  /** Ask every extension that searches this scope; each answers with `command_hits`. */
+  query(scope: string, seq: number, query: string) {
+    for (const runtime of this.list) if (runtime.searchScope === scope) runtime.send({ t: 'command_query', seq, query });
+  }
 
   /** Start client parts that were turned on or installed, stop the ones that went away. */
   sync(extensions: ExtensionState[]) {
-    const wanted = extensions.filter(extension => extension.enabled && extension.manifest.client && !extension.bundled);
+    const wanted = extensions.filter(extension => extension.enabled && extension.manifest.client);
     for (const runtime of this.list.filter(runtime => !wanted.some(extension => extension.manifest.id === runtime.id))) runtime.stop();
     const kept = this.list.filter(runtime => wanted.some(extension => extension.manifest.id === runtime.id));
     for (const extension of wanted.filter(extension => !kept.some(runtime => runtime.id === extension.manifest.id))) {
-      const runtime = new ExtensionRuntime(extension, () => ({ account: this.#account, theme: this.#theme ??= currentTheme() }));
+      const runtime = new ExtensionRuntime(extension, () => ({ account: this.#account, accounts: this.#accounts, theme: this.#theme ??= currentTheme(), shell: this.shell }));
       kept.push(runtime);
-      void runtime.start().then(() => this.#listen());
+      void runtime.start().then(() => {
+        this.#listen();
+        for (const [full, context] of this.#slots) this.#tellSlot(runtime, full, context);
+      });
     }
     this.list = kept;
     this.#listen();
   }
 
-  setAccount(account: AccountSummary | null) {
-    if (JSON.stringify(account) === JSON.stringify(this.#account)) return;
-    this.#account = account;
-    for (const runtime of this.list) runtime.send({ t: 'account', account });
+  /** The selected account and every account that is on. */
+  setAccount(account: AccountSummary | null, accounts: AccountSummary[]) {
+    if (JSON.stringify([account, accounts]) === JSON.stringify([this.#account, this.#accounts])) return;
+    this.#account = account; this.#accounts = accounts;
+    for (const runtime of this.list) runtime.send({ t: 'account', account, ...runtime.accounts(accounts) });
   }
 
   /** Call after Appearance changes have been applied to the page. */

@@ -147,7 +147,7 @@ mod tests {
         let for_extensions = |c: Capability| match c {
             ExtensionsBus | AccountRead | MessagesList | MessagesRead | DraftsList | DraftsRead
             | DraftsWrite | MessagesSend | MessagesLabel | MessagesOrganize | UiFrame
-            | UiFrameRemote | UiCommands | UiAppActions | UiToasts | UiContribute
+            | UiFrameRemote | UiCommands | UiAppActions | UiToasts | UiContribute | UiCanvas
             | ApprovalsNotify | ReleasesRead | AiText | AiDecide | AiConfigure => true,
             AppNavigate => false,
         };
@@ -168,6 +168,7 @@ mod tests {
             UiAppActions,
             UiToasts,
             UiContribute,
+            UiCanvas,
             ApprovalsNotify,
             ReleasesRead,
             AiText,
