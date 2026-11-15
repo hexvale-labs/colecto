@@ -8,6 +8,8 @@ export interface Toast {
   key?: string;
   /** An `Icon` name; defaults to mail, or a shield for toasts that wait to be acted on. */
   icon?: import('../Icon.svelte').IconName;
+  /** The extension that sent it, shown on the toast so no extension can pass as Colecto. */
+  source?: string;
 }
 const MAX = 4;
 let next = 0;

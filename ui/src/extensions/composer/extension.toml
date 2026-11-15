@@ -1,6 +1,11 @@
 id = "composer"
 name = "Composer"
 api_version = 1
-capabilities = ["extensions.bus", "drafts.read", "drafts.write", "messages.send", "messages.read"]
+client = "client/main.js"
+navigation = ["compose"]
+capabilities = ["extensions.bus", "drafts.read", "drafts.write", "messages.send", "messages.read", "ui.app_actions", "ui.commands"]
 description = "Write, reply, forward, and send mail with attachments; save drafts."
 author = "Colecto"
+
+[pane]
+icon = "compose"

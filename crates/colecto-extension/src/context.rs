@@ -96,6 +96,23 @@ impl Context {
 
     /// Sends a raw service request and returns its `data`. Use it for operations this
     /// SDK does not wrap yet.
+    /// The local labels of the account: label name to message IDs (`messages.list`).
+    pub fn labels(&mut self) -> Result<Labels> {
+        self.call(&serde_json::json!({"operation": "labels.list"}))
+    }
+
+    /// One value from this extension's own store, or `None`.
+    pub fn stored<T: DeserializeOwned>(&mut self, key: &str) -> Result<Option<T>> {
+        self.call(&serde_json::json!({"operation": "storage.get", "key": key}))
+    }
+
+    /// Store one value (at most 64 KiB in all); `null` deletes it.
+    pub fn store(&mut self, key: &str, value: &impl Serialize) -> Result<()> {
+        let _: serde_json::Value = self
+            .call(&serde_json::json!({"operation": "storage.set", "key": key, "value": value}))?;
+        Ok(())
+    }
+
     pub fn call<T: DeserializeOwned>(&mut self, request: &impl Serialize) -> Result<T> {
         let input = serde_json::to_vec(request)?;
         let output = sys::request(&input).ok_or(Error::Bridge)?;

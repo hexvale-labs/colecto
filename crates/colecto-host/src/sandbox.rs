@@ -8,6 +8,8 @@ use wasmi::{
 use crate::package::MAX_MODULE;
 use std::sync::Arc;
 const MAX_OUTPUT: usize = 32 * 1024;
+/// Service requests per invocation: enough for a pass over a burst of new mail.
+pub const MAX_REQUESTS: u8 = 64;
 pub const FUEL: u64 = 10_000_000;
 pub const MAX_MEMORY: usize = 32 * 1024 * 1024;
 type Service = Box<dyn FnMut(Value) -> Result<Value, String> + Send>;
@@ -157,7 +159,7 @@ pub fn invoke(compiled: &Compiled, action: &str, service: Service) -> Result<Val
              output: i32,
              capacity: i32|
              -> i32 {
-                if caller.data().calls >= 8 {
+                if caller.data().calls >= MAX_REQUESTS {
                     return -1;
                 }
                 caller.data_mut().calls += 1;
@@ -261,7 +263,7 @@ mod tests {
             (loop $again
               i32.const 0 i32.const 2 i32.const 8192 i32.const 1024 call $request drop
               local.get $count i32.const 1 i32.add local.tee $count
-              i32.const 20 i32.lt_u br_if $again)))"#,
+              i32.const 80 i32.lt_u br_if $again)))"#,
         )
         .unwrap();
         let result = invoke(
@@ -273,6 +275,6 @@ mod tests {
             }),
         );
         assert!(result.is_ok(), "{result:?}");
-        assert_eq!(calls.load(Ordering::Relaxed), 8);
+        assert_eq!(calls.load(Ordering::Relaxed), MAX_REQUESTS as usize);
     }
 }

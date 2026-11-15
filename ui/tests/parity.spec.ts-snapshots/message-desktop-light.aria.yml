@@ -15,6 +15,7 @@
 - region "Reader group":
   - tablist "Panes in this group":
     - tab "Reader" [selected]
+    - tab "Composer"
   - navigation "Open messages":
     - button "A small plan for the weekend" [pressed]
     - button "Close A small plan for the weekend"
@@ -52,7 +53,7 @@
       - text: Alex Rivera
       - time: Nov 4
       - text: "Plain text, with a little character Hello 世界 👋 Mail should be readable, whatever language you write in. This is text, not a button: <button>Do not click</button> And this is just text too: <script>alert('hello')</script> Alex"
-    - text: /Updated \d+:\d+ AM/
+    - text: /Updated \d+:\d+ AM ·Sample mail/
     - button "Refresh"
 - tabpanel "Accounts":
   - button "Current account": Demo account Local sample mail

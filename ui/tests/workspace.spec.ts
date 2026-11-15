@@ -111,7 +111,7 @@ test('mobile controls stay reachable and mail text stays selectable on narrow sc
   await page.getByRole('button', { name: /Maya Chen/ }).click();
   await expect(page.locator('.letter-body')).toBeVisible();
   expect(await page.locator('.letter').evaluate(el => getComputedStyle(el).userSelect)).toBe('text');
-  await page.locator('.reading-pane').evaluate(el => el.scrollTop = el.scrollHeight);
+  await page.locator('#pane-reader .reading-pane').evaluate(el => el.scrollTop = el.scrollHeight);
   await expect(page.getByRole('button', { name: 'Back to list' })).toBeInViewport();
   await page.getByRole('button', { name: 'Back to list' }).click();
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
@@ -271,10 +271,10 @@ test('docks panes by dragging onto edges and tab strips, keeps an open draft, an
   reader = (await group('Reader').boundingBox())!;
   expect((await group('Accounts').boundingBox())!.x).toBeGreaterThanOrEqual(reader.x + reader.width);
   await expect(subject).toHaveValue('Moving house');
-  // Dropping on a tab strip adds a tab instead; the hidden reader keeps the draft.
+  // Dropping on a tab strip adds a tab instead; the hidden composer keeps the draft.
   const head = (await group('Reader').locator('.dock-head').boundingBox())!;
   await drag('Mail', head.x + head.width - 80, head.y + head.height / 2);
-  await expect(group('Reader').getByRole('tab')).toHaveText(['Reader', 'Mail']);
+  await expect(group('Reader').getByRole('tab')).toHaveText(['Reader', 'Composer', 'Mail']);
   await expect(page.getByRole('tab', { name: 'Mail', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(subject).toHaveValue('Moving house');
   const handle = page.getByRole('separator').first();
@@ -282,7 +282,7 @@ test('docks panes by dragging onto edges and tab strips, keeps an open draft, an
   await handle.focus();
   await page.keyboard.press('Shift+ArrowLeft');
   await expect(handle).not.toHaveAttribute('aria-valuenow', String(before));
-  await page.getByRole('tab', { name: 'Reader', exact: true }).click();
+  await page.getByRole('tab', { name: 'Composer', exact: true }).click();
   await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Draft editor' }).getByRole('status')).toContainText('Draft saved');
   await page.getByRole('button', { name: 'Arrange Accounts' }).click();
@@ -290,7 +290,7 @@ test('docks panes by dragging onto edges and tab strips, keeps an open draft, an
   await expect(page.getByRole('tab', { name: 'Accounts', exact: true })).toHaveCount(0);
   // The layout is stored by the Host, so a reload restores it.
   await page.reload();
-  await expect(group('Reader').getByRole('tab')).toHaveText(['Reader', 'Mail']);
+  await expect(group('Reader').getByRole('tab')).toHaveText(['Reader', 'Composer', 'Mail']);
   await expect(page.getByRole('tab', { name: 'Accounts', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Accounts', exact: true }).click();
@@ -344,7 +344,7 @@ test('command runner closes on Escape and outside clicks, finds mail, sorts and 
   // The last result hands the words to the provider's search.
   await page.keyboard.press('Control+k');
   await page.keyboard.type('weekend');
-  await runner.getByRole('option', { name: 'Search Inbox for “weekend”' }).click();
+  await runner.getByRole('option', { name: 'Search mail for “weekend”' }).click();
   await expect(page.getByLabel('Search Inbox')).toHaveValue('weekend');
   await expect(page.getByRole('button', { name: /Studio North/ })).toHaveCount(0);
   await page.keyboard.press('Control+k');
@@ -421,7 +421,7 @@ test('appearance applies and restores typography preferences', async ({ page }) 
   let typography = { font: 'mona', font_size: 14 };
   await page.route('**/api/v1/preferences', async route => {
     if (route.request().method() !== 'GET') typography = { ...typography, ...route.request().postDataJSON() };
-    await route.fulfill({ json: { mcp: false, account: null, workspace: null, accent: null, remote_images: false, notifications: { enabled: true, mail: true, approvals: true, system: false, position: 'top' }, ...typography } });
+    await route.fulfill({ json: { mcp: false, onboarded: true, account: null, workspace: null, accent: null, remote_images: false, notifications: { enabled: true, mail: true, approvals: true, system: false, position: 'top' }, ...typography } });
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();

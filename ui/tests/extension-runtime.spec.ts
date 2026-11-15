@@ -116,7 +116,7 @@ test('turning an extension off stops its Worker and revokes its credential', asy
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('button', { name: 'Extensions', exact: true }).click();
     await page.getByRole('group', { name: 'Hello pane', exact: true }).getByRole('checkbox', { name: 'Enabled for all accounts' }).uncheck();
-    await expect(page.locator('#extension-runtimes iframe')).toHaveCount(0);
+    await expect(page.locator('#extension-runtimes iframe[title="Hello pane runtime"]')).toHaveCount(0);
     await expect(page.getByRole('tab', { name: 'Hello pane' })).toHaveCount(0);
   } finally { await remove(page, 'hello-pane'); }
 });
@@ -167,4 +167,39 @@ test('a client part answers requests on its own bus', async ({ page }) => {
     const response = await page.request.post(`${origin}/api/v1/bus/echoer/request`, { headers: { ...host, 'x-colecto-extension': 'composer' }, data: { name: 'v1/echo', payload: { hello: 1 } } });
     expect(await response.json()).toEqual({ data: { echo: { hello: 1 }, from: 'composer' } });
   } finally { await remove(page, 'echoer'); }
+});
+
+test('Oneko draws on a click-through canvas overlay and runs toward the pointer', async ({ page }) => {
+  await install(page, readFileSync('../target/extensions/oneko.colectoext'));
+  try {
+    await page.goto('/');
+    const overlay = page.locator('canvas.extension-canvas');
+    await expect(overlay).toHaveCount(1);
+    await expect(overlay).toHaveAttribute('aria-hidden', 'true');
+    // Where the cat's pixels are: the centre of everything drawn on the overlay.
+    const cat = () => page.evaluate(() => {
+      const source = document.querySelector<HTMLCanvasElement>('canvas.extension-canvas')!;
+      // A quarter-size copy in CSS pixels is precise enough and quick to read.
+      const copy = new OffscreenCanvas(Math.ceil(innerWidth / 4), Math.ceil(innerHeight / 4));
+      const context = copy.getContext('2d')!;
+      context.drawImage(source, 0, 0, copy.width, copy.height);
+      const pixels = context.getImageData(0, 0, copy.width, copy.height).data;
+      let x = 0, y = 0, count = 0;
+      for (let i = 3; i < pixels.length; i += 4) if (pixels[i]) { const n = (i - 3) / 4; x += n % copy.width; y += Math.floor(n / copy.width); count++; }
+      return count ? { x: x / count * 4, y: y / count * 4 } : null;
+    });
+    await expect.poll(cat).not.toBeNull();
+    const start = (await cat())!;
+    await page.mouse.move(900, 600);
+    await page.mouse.move(905, 605);
+    // It runs toward the pointer; how fast depends on the machine, so only the direction counts.
+    const away = Math.hypot(905 - start.x, 605 - start.y);
+    expect(away).toBeGreaterThan(500);
+    await expect.poll(async () => { const now = await cat(); return now ? Math.hypot(905 - now.x, 605 - now.y) : Infinity; }, { timeout: 15_000 }).toBeLessThan(away / 3);
+    // The overlay never takes clicks from the app, and goes away with the extension.
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Extensions', exact: true }).click();
+    await page.getByRole('group', { name: 'Oneko', exact: true }).getByRole('checkbox', { name: 'Enabled for all accounts' }).uncheck();
+    await expect(overlay).toHaveCount(0);
+  } finally { await remove(page, 'oneko'); }
 });

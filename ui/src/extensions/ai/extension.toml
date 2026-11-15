@@ -1,6 +1,12 @@
 id = "ai"
 name = "AI"
 api_version = 1
-capabilities = ["messages.read", "messages.list"]
+client = "client/main.js"
+service = "service.wasm"
+capabilities = ["messages.read", "messages.list", "messages.label", "ai.text", "ai.decide", "ai.configure", "ui.contribute", "extensions.bus"]
 description = "Optional summaries, drafted replies and automatic labels using AI services you configure. Off until you turn it on in Settings → AI."
 author = "Colecto"
+
+[settings_page]
+title = "AI"
+icon = "cpu"

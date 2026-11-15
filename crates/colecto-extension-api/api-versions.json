@@ -21,6 +21,7 @@
         "ui.app_actions",
         "ui.toasts",
         "ui.contribute",
+        "ui.canvas",
         "approvals.notify",
         "releases.read",
         "ai.text",

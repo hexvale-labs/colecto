@@ -21,7 +21,8 @@ test('local labels can be created, assigned, filtered and removed', async ({ pag
   await page.getByRole('group', { name: 'Filter by label' }).getByRole('button', { name: 'Follow up', exact: true }).click();
   await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Alex Rivera/ })).toHaveCount(0);
-  page.once('dialog', dialog => dialog.accept());
+  // The mailbox asks first, in a dialog that names it.
   await page.getByRole('button', { name: 'Delete label Follow up' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete label', exact: true }).click();
   await expect(page.getByRole('button', { name: /Alex Rivera/ })).toBeVisible();
 });

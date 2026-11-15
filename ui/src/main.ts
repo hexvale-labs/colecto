@@ -45,8 +45,4 @@ async function revealApp() {
 }
 void revealApp();
 await startupPaint;
-if (import.meta.env.DEV && location.pathname === '/__stress') {
-  void import('./StressPreview.svelte').then(({ default: Preview }) => mount(Preview, { target: document.getElementById('app')! }));
-} else {
-  mount(App, { target: document.getElementById('app')! });
-}
+mount(App, { target: document.getElementById('app')! });

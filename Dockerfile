@@ -1,12 +1,25 @@
 # syntax=docker/dockerfile:1
 # Colecto mail daemon. See docs/docker.md for configuration and docker compose usage.
 
+# The AI extension's service part: Wasm the Host loads from the UI assets.
+FROM rust:1-bookworm AS service
+RUN rustup target add wasm32-unknown-unknown
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY crates crates
+COPY ui/src/extensions ui/src/extensions
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --locked --target wasm32-unknown-unknown -p colecto-ai-service \
+    && cp target/wasm32-unknown-unknown/release/colecto_ai_service.wasm /ai-service.wasm
+
 FROM oven/bun:1.4.4 AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY ui/ ./
-RUN bun run --bun build
+COPY --from=service /ai-service.wasm /src/ai-service.wasm
+RUN COLECTO_AI_SERVICE=/src/ai-service.wasm bun run --bun build
 
 FROM rust:1-bookworm AS daemon
 RUN apt-get update \

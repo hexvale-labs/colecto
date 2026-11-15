@@ -247,6 +247,8 @@ pub enum Capability {
     UiToasts,
     #[serde(rename = "ui.contribute")]
     UiContribute,
+    #[serde(rename = "ui.canvas")]
+    UiCanvas,
     #[serde(rename = "approvals.notify")]
     ApprovalsNotify,
     #[serde(rename = "releases.read")]
@@ -302,6 +304,9 @@ pub struct ExtensionManifest {
     /// One workspace pane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane: Option<PaneDeclaration>,
+    /// A drawing surface over the whole window (needs `ui.canvas`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<OverlayDeclaration>,
     /// A section in Settings drawn by the extension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings_page: Option<SettingsPageDeclaration>,
@@ -315,6 +320,13 @@ pub struct ExtensionManifest {
 #[serde(deny_unknown_fields)]
 pub struct PaneDeclaration {
     pub icon: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OverlayDeclaration {
+    /// 1–10000; see the layers in `ui/src/lib/layers.ts`.
+    pub z_index: u16,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

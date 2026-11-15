@@ -1,6 +1,33 @@
 id = "notifications"
 name = "Notifications"
 author = "Colecto"
-description = "New mail and delivery approval notifications."
+description = "Tells you about new mail, automation waiting for your approval and new Colecto releases."
 api_version = 1
-capabilities = ["extensions.bus"]
+client = "client/main.js"
+capabilities = ["ui.toasts", "approvals.notify", "releases.read", "messages.list", "account.read", "extensions.bus"]
+
+# Names the generated page in Settings; this extension draws nothing there itself.
+[settings_page]
+title = "Notifications"
+icon = "bell"
+
+[[settings]]
+key = "mail"
+label = "New mail"
+description = "When a message arrives in any connected account."
+type = "toggle"
+default = true
+
+[[settings]]
+key = "approvals"
+label = "Send approvals"
+description = "When automation asks to send a message. Reject it from the notification, or open it to review."
+type = "toggle"
+default = true
+
+[[settings]]
+key = "updates"
+label = "New updates"
+description = "When a newer Colecto release is published. Off means Colecto never checks."
+type = "toggle"
+default = true

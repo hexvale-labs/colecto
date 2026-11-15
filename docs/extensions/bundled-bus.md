@@ -18,26 +18,40 @@ extensions talk to each other, not how they talk to Colecto.
 
 | Bus | Name | Kind | Payload → answer | Since |
 | --- | --- | --- | --- | --- |
-| `composer` | `v1/add_button` | Request | `{id,label,request}` | v0.3.0 |
-| `composer` | `v1/remove_button` | Request | `{id}` | v0.3.0 |
+| `composer` | `v1/open` | Request | `{draft_id}` opens a saved draft, `{draft:{recipient?,subject?,body?,…}}` a new one with those fields, `{}` a blank one | API 1 |
 | `composer` | `v1/get_draft` | Request | `null` → `{recipient,subject,body}`, or null when closed | v0.3.0 |
 | `composer` | `v1/set_draft` | Request | `{recipient?,subject?,body?}` | v0.3.0 |
 | `composer` | `v1/opened` | Event | `{}` | v0.3.0 |
+| `composer` | `v1/editing` | Event | `{draft_id}`, or `null` when closed or not yet saved | API 1 |
+| `composer` | `v1/saved` | Event | `{draft_id}` | API 1 |
 | `composer` | `v1/sending` | Event | `{}` (informational) | v0.3.0 |
 | `reader` | `v1/get_html` | Request | `{message_id}` | v0.3.0 |
 | `reader` | `v1/set_html` | Request | `{message_id,html}` | v0.3.0 |
 | `reader` | `v1/add_banner` | Request | `{message_id,text,tone:"info"\|"warning"}` | v0.3.0 |
+| `reader` | `v1/reply` | Request | `{message_id,body}`: start a reply to the shown message with `body` above the quote | API 1 |
 | `reader` | `v1/message_opened` | Event | `{message_id,subject,from,html,text}` | v0.3.0 |
-| `inbox` | `v1/selected` | Event | `{message_id}` | v0.3.0 |
+| `reader` | `v1/viewing` | Event | `{account,message_id}` (`null` when nothing is shown) | API 1 |
+| `reader` | `v1/labels` | Event | `{account}`: the reader changed labels | API 1 |
+| `inbox` | `v1/open` | Request | `{account?,message_id}`: switch to Inbox and open the message | API 1 |
+| `inbox` | `v1/selected` | Event | `{account,message_id,folder,subject}` (`account`, `folder`, `subject` added in API 1) | v0.3.0 |
+| `inbox` | `v1/listed` | Event | `{account,folder,ids}`: the first rows to prefetch | API 1 |
+| `inbox` | `v1/labels` | Event | `{account}`: the inbox changed labels | API 1 |
 | `notifications` | `v1/notify` | Request | `{title,body}` | v0.3.0 |
+| `ai` | `v1/labeled` | Event | `{account}`: the AI service part auto-labelled new mail | API 1 |
 
-Mail shell, accounts and AI have no bus surface.
+| Slot | Context | Shown |
+| --- | --- | --- |
+| `reader/v1/actions` | `{account,message_id}` | In the reader's toolbar |
+| `reader/v1/above_body` | `{account,message_id}` | Between the header and the message body |
+| `composer/v1/actions` | `{draft_id}` | Next to the composer's Send and Save buttons |
+
+Slots take `contribute` trees from extensions with `ui.contribute`. `composer`'s
+`v1/add_button` and `v1/remove_button` are gone: an extension contributes to
+`composer/v1/actions` instead, and reads or changes the draft with `v1/get_draft` and
+`v1/set_draft`.
 
 ## Behaviour
 
-Composer buttons belong to their caller (four per caller, labels at most 32
-characters, rendered as text). Clicking requests the caller's named operation with
-`{draft:{recipient,subject,body}}`; returned `{draft:{...}}` fields update the editor.
 Draft requests return null when the composer is closed. Reader awaits event delivery
 before displaying the body. HTML replacements stay in its sandboxed iframe and show
 “<extension name> changed how this message is shown”; banners are text only (at most

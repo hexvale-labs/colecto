@@ -146,6 +146,38 @@ async fn publish(host: Host, bus: String, account: String, input: Input) {
     }
     while tasks.join_next().await.is_some() {}
 }
+/// New mail: every enabled service part with `messages.list` runs once with
+/// `{"event":"mail","account","ids"}`, in the background and with today's limits.
+pub(crate) fn deliver_mail(host: &Host, account: &str, event: &str) {
+    let Ok(event) = serde_json::from_str::<Value>(event) else {
+        return;
+    };
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let targets = host
+        .extensions
+        .lock()
+        .map(|e| e.mail_services())
+        .unwrap_or_default();
+    for (id, epoch, module) in targets {
+        let host = host.clone();
+        let account = account.to_owned();
+        let action = json!({"event": "mail", "account": account, "ids": event["ids"]});
+        runtime.spawn(async move {
+            let Ok(permit) = host.execution.clone().acquire_owned().await else {
+                return;
+            };
+            let _ = tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                if let Err(error) = deliver(&host, &id, &account, epoch, &module, action) {
+                    tracing::warn!(extension = %id, %error, "A service part failed on new mail");
+                }
+            })
+            .await;
+        });
+    }
+}
 pub(super) fn service(
     host: &Host,
     extension: &str,

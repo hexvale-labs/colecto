@@ -11,7 +11,7 @@ use axum::{
 use colecto_extension_api::{Capability, Message};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, VecDeque},
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -20,13 +20,9 @@ const TEXT_KEY: &str = "host:ai-text";
 const DECISION_KEY: &str = "host:ai-decision";
 const MAX_SUMMARIES: usize = 1000;
 const MAX_SUMMARY_CHARS: usize = 4000;
-const MAX_SEEN_PER_ACCOUNT: usize = 2000;
 /// Email text sent to the text model and the decision model, in characters.
 const TEXT_MODEL_EMAIL_CHARS: usize = 24_000;
-const DECISION_EMAIL_CHARS: usize = 8_000;
 const MAX_REPLY_INPUT_CHARS: usize = 4000;
-/// New messages per account and refresh that may go to the decision model.
-const DECISIONS_PER_PASS: usize = 10;
 /// Decision requests per rolling hour, across all accounts.
 const DECISIONS_PER_HOUR: usize = 120;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
@@ -223,17 +219,11 @@ struct Summary {
     created_at: u64,
 }
 
-#[derive(Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct Seen(BTreeMap<String, VecDeque<String>>);
-
 pub(crate) struct Ai {
     database: colecto_core::Database,
     settings: Mutex<AiSettings>,
     /// Oldest first; bounded by `MAX_SUMMARIES`.
     summaries: Mutex<Vec<Summary>>,
-    /// Messages auto-labelling has already handled, so it never acts on one twice.
-    seen: Mutex<Seen>,
     decisions: Mutex<VecDeque<Instant>>,
     client: reqwest::Client,
 }
@@ -249,9 +239,6 @@ impl Ai {
         let summaries = crate::store::open(&database, "ai-summaries", Vec::new, |bytes| {
             serde_json::from_slice::<Vec<Summary>>(bytes).map_err(|_| "Invalid AI summaries".into())
         })?;
-        let seen = crate::store::open(&database, "ai-autolabel-seen", Seen::default, |bytes| {
-            serde_json::from_slice::<Seen>(bytes).map_err(|_| "Invalid auto-label state".into())
-        })?;
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(120))
@@ -262,7 +249,6 @@ impl Ai {
             database,
             settings: Mutex::new(settings),
             summaries: Mutex::new(summaries),
-            seen: Mutex::new(seen),
             decisions: Mutex::default(),
             client,
         })
@@ -270,33 +256,15 @@ impl Ai {
     fn settings(&self) -> AiSettings {
         self.settings.lock().map(|s| s.clone()).unwrap_or_default()
     }
-    /// Remember a message as handled. Returns false when it already was.
-    fn mark_seen(&self, account: &str, message: &str) -> bool {
-        let Ok(mut seen) = self.seen.lock() else {
-            return false;
-        };
-        let list = seen.0.entry(account.into()).or_default();
-        if list.iter().any(|id| id == message) {
-            return false;
-        }
-        list.push_back(message.into());
-        while list.len() > MAX_SEEN_PER_ACCOUNT {
-            list.pop_front();
-        }
-        true
-    }
-    fn save_seen(&self) {
-        if let Ok(seen) = self.seen.lock()
-            && crate::store::save(&self.database, "ai-autolabel-seen", &*seen).is_err()
-        {
-            tracing::warn!("Could not save auto-label state");
-        }
-    }
-    /// The owner removed a label by hand: auto-labelling must leave this message alone.
-    pub(crate) fn owner_unlabeled(&self, account: &str, message: &str) {
-        if self.mark_seen(account, message) {
-            self.save_seen();
-        }
+    /// What the AI service part needs for automatic labels: never URLs, models or keys.
+    pub(crate) fn public_settings(&self) -> serde_json::Value {
+        let settings = self.settings();
+        serde_json::json!({
+            "enabled": settings.enabled,
+            "autolabel": settings.autolabel,
+            "decision": {"threshold": settings.decision.threshold},
+            "labels": settings.labels,
+        })
     }
     /// Forget everything kept for a removed account.
     pub(crate) fn remove_account(&self, account: &str) {
@@ -310,12 +278,8 @@ impl Ai {
             summaries.retain(|s| s.account != account);
             let _ = crate::store::save(&self.database, "ai-summaries", &*summaries);
         }
-        if let Ok(mut seen) = self.seen.lock() {
-            seen.0.remove(account);
-        }
-        self.save_seen();
     }
-    fn take_decision_budget(&self) -> bool {
+    pub(crate) fn take_decision_budget(&self) -> bool {
         let Ok(mut times) = self.decisions.lock() else {
             return false;
         };
@@ -567,25 +531,51 @@ async fn read_email(host: &Host, account: &str, id: &str) -> Result<(Message, St
     .await
 }
 
-/// Bundled `ai` extension calls only: owner bearer, enabled extension with `messages.read`.
+/// Summaries and replies: an extension's client part with `ai.text` and `messages.read`.
 fn ai_grant(
     host: &Host,
     principal: &crate::Principal,
     headers: &HeaderMap,
 ) -> Result<String, Failure> {
-    if !matches!(principal, crate::Principal::Owner)
-        || headers
-            .get("x-colecto-extension")
-            .and_then(|v| v.to_str().ok())
-            != Some("ai")
-    {
-        return Err(forbidden());
-    }
+    extension_with(host, principal, Capability::AiText)?;
     let account = crate::grant(host, principal, headers, Capability::MessagesRead)?;
     if !host.ai.settings().enabled {
         return Err(off());
     }
     Ok(account)
+}
+
+/// The calling client part, if it holds `capability`.
+fn extension_with(
+    host: &Host,
+    principal: &crate::Principal,
+    capability: Capability,
+) -> Result<(), Failure> {
+    let crate::Principal::Extension(token) = principal else {
+        return Err(forbidden());
+    };
+    let (id, generation) = crate::caller_extension(host, token)?;
+    if host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .allows_generation(&id, "", capability, generation)
+    {
+        Ok(())
+    } else {
+        Err(forbidden())
+    }
+}
+/// Settings, tests and previews: the owner, or a client part with `ai.configure`.
+fn configure_grant(
+    host: &Host,
+    principal: &crate::Principal,
+    headers: &HeaderMap,
+) -> Result<(), Failure> {
+    match principal {
+        crate::Principal::Owner => host_grant(headers),
+        _ => extension_with(host, principal, Capability::AiConfigure),
+    }
 }
 
 #[derive(Serialize)]
@@ -615,18 +605,20 @@ fn view(host: &Host) -> Result<SettingsView, Failure> {
 
 pub(crate) async fn get_settings(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<crate::Principal>,
     headers: HeaderMap,
 ) -> Result<Json<SettingsView>, Failure> {
-    host_grant(&headers)?;
+    configure_grant(&host, &principal, &headers)?;
     view(&host).map(Json)
 }
 
 pub(crate) async fn put_settings(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<crate::Principal>,
     headers: HeaderMap,
     input: Result<Json<AiSettings>, JsonRejection>,
 ) -> Result<Json<SettingsView>, Failure> {
-    host_grant(&headers)?;
+    configure_grant(&host, &principal, &headers)?;
     let Json(mut input) = input.map_err(|_| bad("Invalid AI settings"))?;
     input.text.base_url = input.text.base_url.trim().into();
     input.decision.base_url = input.decision.base_url.trim().into();
@@ -688,10 +680,11 @@ pub(crate) struct TestInput {
 /// Check the saved connection with a tiny request.
 pub(crate) async fn test_connection(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<crate::Principal>,
     headers: HeaderMap,
     input: Result<Json<TestInput>, JsonRejection>,
 ) -> Result<Json<serde_json::Value>, Failure> {
-    host_grant(&headers)?;
+    configure_grant(&host, &principal, &headers)?;
     let Json(input) = input.map_err(|_| bad("Invalid test"))?;
     if !host.ai.settings().enabled {
         return Err(off());
@@ -728,10 +721,11 @@ pub(crate) struct PreviewInput {
 /// Test a label's rules against the account's saved Inbox, without any network request.
 pub(crate) async fn preview(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<crate::Principal>,
     headers: HeaderMap,
     input: Result<Json<PreviewInput>, JsonRejection>,
 ) -> Result<Json<serde_json::Value>, Failure> {
-    host_grant(&headers)?;
+    configure_grant(&host, &principal, &headers)?;
     let account = headers
         .get("x-colecto-account")
         .and_then(|v| v.to_str().ok())
@@ -898,145 +892,6 @@ pub(crate) async fn draft_reply(
     Ok(Json(serde_json::json!({"text": text})))
 }
 
-/// Called from the background refresh with the event it is about to send for new mail.
-/// Returns at once; matching and model requests run on the runtime.
-pub(crate) fn arrived(
-    host: &Host,
-    account: &str,
-    messages: &[Message],
-    event: &str,
-) -> Option<tokio::task::JoinHandle<()>> {
-    let settings = host.ai.settings();
-    if !settings.enabled || !settings.autolabel {
-        return None;
-    }
-    let rules: BTreeMap<String, LabelRule> = settings
-        .labels
-        .get(account)?
-        .clone()
-        .into_iter()
-        .filter(|(_, r)| r.enabled && (r.model || !r.rules.is_empty()))
-        .collect();
-    if rules.is_empty() {
-        return None;
-    }
-    let ids: BTreeSet<String> = serde_json::from_str::<serde_json::Value>(event)
-        .ok()
-        .and_then(|v| {
-            v["ids"].as_array().map(|ids| {
-                ids.iter()
-                    .filter_map(|id| id.as_str().map(str::to_owned))
-                    .collect()
-            })
-        })
-        .unwrap_or_default();
-    let fresh: Vec<Message> = messages
-        .iter()
-        .filter(|m| ids.contains(&m.id) && host.ai.mark_seen(account, &m.id))
-        .cloned()
-        .collect();
-    if fresh.is_empty() {
-        return None;
-    }
-    host.ai.save_seen();
-    let runtime = tokio::runtime::Handle::try_current().ok()?;
-    Some(runtime.spawn(autolabel(
-        host.clone(),
-        account.to_owned(),
-        fresh,
-        rules,
-        settings.decision.threshold,
-    )))
-}
-
-async fn autolabel(
-    host: Host,
-    account: String,
-    messages: Vec<Message>,
-    rules: BTreeMap<String, LabelRule>,
-    threshold: f64,
-) {
-    let Ok(existing) = crate::with_store(host.clone(), account.clone(), |s| s.labels()).await
-    else {
-        return;
-    };
-    let compiled: BTreeMap<&String, Vec<(Field, regex::Regex)>> = rules
-        .iter()
-        .filter(|(name, _)| existing.contains_key(*name))
-        .map(|(name, rule)| {
-            let res = rule
-                .rules
-                .iter()
-                .filter_map(|r| compile(&r.pattern).ok().map(|re| (r.field, re)))
-                .collect();
-            (name, res)
-        })
-        .collect();
-    let mut model_budget = DECISIONS_PER_PASS;
-    let mut changed = false;
-    for message in &messages {
-        let mut apply = BTreeSet::new();
-        let mut ask = Vec::new();
-        for (name, res) in &compiled {
-            if existing
-                .get(*name)
-                .is_some_and(|ids| ids.contains(&message.id))
-            {
-                continue;
-            }
-            if matches_any(res, message) {
-                apply.insert((*name).clone());
-            } else if rules[*name].model {
-                ask.push(*name);
-            }
-        }
-        if !ask.is_empty() && model_budget > 0 && host.ai.take_decision_budget() {
-            model_budget -= 1;
-            let questions = ask
-                .iter()
-                .map(|name| {
-                    let description = rules[*name].description.trim();
-                    if description.is_empty() {
-                        format!("This email belongs under the label \"{name}\".")
-                    } else {
-                        format!(
-                            "This email belongs under the label \"{name}\". The label is for: {description}"
-                        )
-                    }
-                })
-                .collect::<Vec<_>>();
-            let state = email_text(message, &message.body, DECISION_EMAIL_CHARS);
-            match decide(&host, state, &questions).await {
-                Ok(answers) => {
-                    for (name, p) in ask.iter().zip(answers) {
-                        if p.is_some_and(|p| p >= threshold) {
-                            apply.insert((*name).clone());
-                        }
-                    }
-                }
-                // The failure is already logged by status; stop asking for this pass.
-                Err(_) => model_budget = 0,
-            }
-        }
-        for name in apply {
-            let id = message.id.clone();
-            if crate::with_store(host.clone(), account.clone(), move |s| {
-                s.update_label(&name, Some(&id), false)
-            })
-            .await
-            .is_ok()
-            {
-                changed = true;
-            }
-        }
-    }
-    if changed {
-        let _ = host
-            .events
-            .send(("mail", serde_json::json!({"account": account}).to_string()));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1152,40 +1007,61 @@ mod tests {
         (host, dir)
     }
 
-    #[tokio::test]
-    async fn new_mail_gets_rule_and_model_labels_above_the_threshold_only_once() {
+    /// The real AI service part, built for wasm32 (`cargo build -p colecto-ai-service`).
+    fn service_module() -> Option<Vec<u8>> {
+        let target = std::env::var("CARGO_TARGET_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                let output = std::process::Command::new(env!("CARGO"))
+                    .args(["metadata", "--format-version", "1", "--no-deps"])
+                    .output()
+                    .unwrap();
+                let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                metadata["target_directory"].as_str().unwrap().into()
+            });
+        std::fs::read(target.join("wasm32-unknown-unknown/release/colecto_ai_service.wasm")).ok()
+    }
+
+    /// New mail runs the AI service part in the sandbox: rules label at once, the decision model
+    /// answers the rest through the Host, and each message is handled only once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn new_mail_runs_the_service_part_within_its_limits() {
+        let Some(module) = service_module() else {
+            panic!(
+                "Build the AI service part first: cargo build --release --target wasm32-unknown-unknown -p colecto-ai-service"
+            );
+        };
         let (host, _dir) = host();
-        // "q0".."q2" follow the order of the labels the model is asked about (sorted by name).
-        let (url, seen) = decisions_server(serde_json::json!({
-            "q0": {"type":"noul","noul":0.91},
-            "q1": {"type":"noul","noul":0.4},
-            "q2": {"type":"refusal"},
-        }))
-        .await;
-        let messages = {
+        host.extensions
+            .lock()
+            .unwrap()
+            .load_bundled_service("ai", &module)
+            .unwrap();
+        let (url, seen) =
+            decisions_server(serde_json::json!({"q0": {"type":"noul","noul":0.91}})).await;
+        {
             let accounts = host.accounts.lock().unwrap();
             let store = accounts.store("demo").unwrap();
             let mut store = store.lock().unwrap();
-            for name in ["Friends", "Later", "Plans", "Studio", "Unused"] {
+            for name in ["Friends", "Studio"] {
                 store.update_label(name, None, false).unwrap();
             }
-            store.messages().to_vec()
-        };
-        let model = |description: &str| LabelRule {
-            enabled: true,
-            model: true,
-            description: description.into(),
-            rules: vec![],
-        };
+        }
         {
             let mut settings = host.ai.settings.lock().unwrap();
             settings.enabled = true;
             settings.autolabel = true;
             settings.decision.base_url = url;
             let labels = settings.labels.entry("demo".into()).or_default();
-            labels.insert("Friends".into(), model("Mail from friends"));
-            labels.insert("Later".into(), model(""));
-            labels.insert("Plans".into(), model(""));
+            labels.insert(
+                "Friends".into(),
+                LabelRule {
+                    enabled: true,
+                    model: true,
+                    description: "Mail from friends".into(),
+                    rules: vec![],
+                },
+            );
             labels.insert(
                 "Studio".into(),
                 LabelRule {
@@ -1198,104 +1074,26 @@ mod tests {
                     }],
                 },
             );
-            // Switched off: never applied, never asked about.
-            labels.insert(
-                "Unused".into(),
-                LabelRule {
-                    enabled: false,
-                    model: true,
-                    description: String::new(),
-                    rules: vec![Rule {
-                        field: Field::Any,
-                        pattern: ".".into(),
-                    }],
-                },
-            );
         }
         let event = r#"{"account":"demo","ids":["weekend","notes"]}"#;
-        // The owner already unlabelled "notes" by hand, so auto-labelling leaves it alone.
-        host.ai.owner_unlabeled("demo", "notes");
-        arrived(&host, "demo", &messages, event)
-            .unwrap()
-            .await
-            .unwrap();
-        let labels = crate::with_store(host.clone(), "demo".into(), |s| s.labels())
-            .await
-            .ok()
-            .unwrap();
-        assert_eq!(labels["Friends"], vec!["weekend".to_string()]);
-        assert!(labels["Later"].is_empty() && labels["Plans"].is_empty());
-        assert!(labels["Studio"].is_empty() && labels["Unused"].is_empty());
-        let requests = seen.lock().unwrap().clone();
-        assert_eq!(requests.len(), 1);
-        let request = &requests[0];
-        assert_eq!(request["model"], "typesafe/jev-1.14");
-        let state = request["state"][0].as_str().unwrap();
-        assert!(
-            state.contains("Maya Chen <maya@example.test>")
-                && state.contains("Subject: A small plan")
-        );
-        assert_eq!(request["questions"]["q0"]["type"], "noul");
-        assert!(
-            request["questions"]["q0"]["instructions"]
-                .as_str()
-                .unwrap()
-                .contains("\"Friends\". The label is for: Mail from friends")
-        );
-        assert_eq!(request["questions"].as_object().unwrap().len(), 3);
-
-        // The rule label applies without asking the model, and a second event is ignored.
-        assert!(arrived(&host, "demo", &messages, event).is_none());
-        host.ai.seen.lock().unwrap().0.clear();
-        let notes = r#"{"account":"demo","ids":["notes"]}"#;
-        host.ai.settings.lock().unwrap().decision.threshold = 0.95;
-        arrived(&host, "demo", &messages, notes)
-            .unwrap()
-            .await
-            .unwrap();
-        let labels = crate::with_store(host.clone(), "demo".into(), |s| s.labels())
-            .await
-            .ok()
-            .unwrap();
+        for _ in 0..2 {
+            crate::bus::deliver_mail(&host, "demo", event);
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+        }
+        let labels = {
+            let accounts = host.accounts.lock().unwrap();
+            let store = accounts.store("demo").unwrap();
+            let store = store.lock().unwrap();
+            store.labels().unwrap()
+        };
         assert_eq!(labels["Studio"], vec!["notes".to_string()]);
-        // 0.91 is below the raised threshold.
-        assert!(!labels["Friends"].contains(&"notes".to_string()));
+        // The model said yes to both messages, but was asked only once per message.
+        assert_eq!(labels["Friends"].len(), 2);
         assert_eq!(seen.lock().unwrap().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn autolabel_does_nothing_while_ai_is_off() {
-        let (host, _dir) = host();
-        host.ai
-            .settings
-            .lock()
-            .unwrap()
-            .labels
-            .entry("demo".into())
-            .or_default()
-            .insert(
-                "Any".into(),
-                LabelRule {
-                    enabled: true,
-                    rules: vec![Rule {
-                        field: Field::Any,
-                        pattern: ".".into(),
-                    }],
-                    ..Default::default()
-                },
-            );
-        let messages = host
-            .accounts
-            .lock()
-            .unwrap()
-            .store("demo")
-            .unwrap()
-            .lock()
-            .unwrap()
-            .messages()
-            .to_vec();
-        assert!(arrived(&host, "demo", &messages, r#"{"ids":["notes"]}"#).is_none());
-        host.ai.settings.lock().unwrap().enabled = true;
-        assert!(arrived(&host, "demo", &messages, r#"{"ids":["notes"]}"#).is_none());
+        // Turned off, nothing runs.
+        host.ai.settings.lock().unwrap().enabled = false;
+        crate::bus::deliver_mail(&host, "demo", r#"{"account":"demo","ids":["new"]}"#);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(seen.lock().unwrap().len(), 2);
     }
 }

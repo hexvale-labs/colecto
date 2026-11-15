@@ -41,7 +41,7 @@ pub use {serde, serde_json};
 
 /// Everything a typical extension needs, plus serde's derive traits.
 pub mod prelude {
-    pub use crate::{BusEvent, BusRequest, Context, Error, Result};
+    pub use crate::{BusEvent, BusRequest, Context, Error, MailEvent, Result};
     pub use serde::{Deserialize, Serialize};
 }
 
@@ -95,6 +95,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// colecto_extension::export! {
 ///     requests: [word_count],      // fn(R: BusRequest, &mut Context) -> Result<R::Response>
 ///     events: [on_message_opened], // fn(E: BusEvent, &mut Context) -> Result<()>
+///     mail: on_new_mail,           // fn(MailEvent, &mut Context) -> Result<()> (needs messages.list)
 /// }
 /// ```
 ///
@@ -119,6 +120,10 @@ macro_rules! export {
 #[macro_export]
 macro_rules! __export_entries {
     ($d:ident) => {};
+    ($d:ident mail: $f:path $(, $($rest:tt)*)?) => {
+        $d.mail($f);
+        $crate::__export_entries!($d $($($rest)*)?);
+    };
     ($d:ident requests: [$($f:path),* $(,)?] $(, $($rest:tt)*)?) => {
         $(
             $d.request($f);

@@ -86,6 +86,8 @@ fn app(dir: &std::path::Path) -> axum::Router {
     )
 }
 
+/// Calls a route as the owner (`host`) or as a bundled extension's client part, which uses a
+/// credential the owner minted for it, as the shell does.
 async fn call(
     router: &axum::Router,
     method: &str,
@@ -93,12 +95,26 @@ async fn call(
     extension: &str,
     body: serde_json::Value,
 ) -> (StatusCode, serde_json::Value, String) {
+    let authorization = if extension == "host" {
+        format!("Bearer {}", "a".repeat(64))
+    } else {
+        let (status, minted, text) = Box::pin(call(
+            router,
+            "POST",
+            &format!("/api/v1/extensions/{extension}/credential"),
+            "host",
+            serde_json::json!({}),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        format!("Colecto-Extension {}", minted["token"].as_str().unwrap())
+    };
     let request = Request::builder()
         .method(method)
         .uri(path)
         .header("host", "127.0.0.1:4173")
         .header("origin", ORIGIN)
-        .header("authorization", format!("Bearer {}", "a".repeat(64)))
+        .header("authorization", authorization)
         .header("x-colecto-account", "demo")
         .header("x-colecto-extension", extension)
         .header("content-type", "application/json")
@@ -130,7 +146,7 @@ fn settings(url: &str, model: &str) -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn ai_is_off_by_default_and_owner_only() {
+async fn ai_is_off_by_default_and_reachable_only_with_its_capabilities() {
     let dir = tempfile::tempdir().unwrap();
     let router = app(dir.path());
     let (status, body, _) = call(
@@ -158,10 +174,20 @@ async fn ai_is_off_by_default_and_owner_only() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
-    // Settings are Host controls; other bundled identities cannot reach them or the AI actions.
+    // The AI extension may read its settings (`ai.configure`); keys stay owner-only, and
+    // extensions without the AI capabilities reach neither.
+    let (status, _, _) = call(
+        &router,
+        "GET",
+        "/api/v1/ai/settings",
+        "ai",
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
     for (method, path, extension) in [
-        ("GET", "/api/v1/ai/settings", "ai"),
         ("GET", "/api/v1/ai/settings", "reader"),
+        ("POST", "/api/v1/ai/keys", "ai"),
         ("POST", "/api/v1/ai/keys", "inbox"),
         ("POST", "/api/v1/ai/summaries/welcome", "reader"),
         ("POST", "/api/v1/ai/reply", "composer"),

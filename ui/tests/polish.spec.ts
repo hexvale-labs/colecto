@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, hostEvents } from './fixtures';
 import type { Page } from '@playwright/test';
 
 /** Every scroll area ends at its content, and the window itself never scrolls. */
@@ -80,7 +80,7 @@ test('feels like an app: chrome is not selectable, mail is, and images do not dr
   expect(await select('.list-footer')).toBe('none');
   expect(await select('.dock-tab')).toBe('none');
   expect(await select('.letter-body')).toBe('text');
-  expect(await select('#mail-search')).not.toBe('none');
+  expect(await select('input[type=search]')).not.toBe('none');
   const dragged = await page.locator('.brand-mark').evaluate(image => !image.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true })));
   expect(dragged).toBe(true);
   // The reader can copy the message text.
@@ -90,17 +90,7 @@ test('feels like an app: chrome is not selectable, mail is, and images do not dr
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('Hello');
 });
 
-/** Serve one burst of Host events, then nothing, so each test controls exactly what arrives. */
-async function events(page: Page, list: [string, unknown][]) {
-  let sent = false;
-  await page.route('**/api/v1/events', async route => {
-    if (sent) return route.fulfill({ status: 204 });
-    sent = true;
-    // The stream is shared and may open before the mail shell listens; it listens once Settings enables.
-    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeEnabled();
-    return route.fulfill({ status: 200, contentType: 'text/event-stream', body: list.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join('') });
-  });
-}
+const events = hostEvents;
 
 test('approval requests arrive as notifications with decisions, a close button and a chosen position', async ({ page }) => {
   const decided: string[] = [];
@@ -134,12 +124,16 @@ test('approval requests arrive as notifications with decisions, a close button a
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
-  await settings.getByRole('button', { name: 'Notifications', exact: true }).click();
+  // Where toasts appear belongs to the core toast surface (Appearance); what to announce to the
+  // notifications extension (Notifications).
+  await settings.getByRole('button', { name: 'Appearance', exact: true }).click();
   await settings.getByRole('radio', { name: 'Top left' }).check();
   await expect(toasts).toHaveAttribute('data-position', 'top-left');
+  await settings.getByRole('button', { name: 'Notifications', exact: true }).click();
   await settings.getByRole('checkbox', { name: 'Send approvals' }).uncheck();
-  // Both choices are the owner's preferences, kept by the Host.
+  // Both choices are kept by the Host.
   await page.unroute('**/api/v1/events');
+  await page.unroute('**/api/v1/extensions/events');
   await events(page, [['approval', { id: 'r2', account: 'demo', from: 'me@example.test', subject: 'Muted' }]]);
   await page.reload();
   await expect(page.locator('section.toasts')).toHaveAttribute('data-position', 'top-left');

@@ -17,10 +17,10 @@ Extensions never write HTML. A client part sends component trees that trusted Co
 code renders (see [Components](#components)); everything around them, such as pane tabs
 and settings pages, is shell chrome that names the extension.
 
-Bundled extensions (`ui/src/extensions/<id>/`) are moving to the same runtime one at a
-time (see [migration order](ui-model.md#migration-order)). Until its own step, a bundled
-extension still runs as trusted Svelte in the app origin, has no `client` entry, and
-cannot be installed or removed. The app frame, docking workspace, account switcher,
+Bundled extensions (`ui/src/extensions/<id>/`) run on the same runtime: each has an
+`extension.toml` and a TypeScript client part under `client/`, built into
+`dist/extensions/<id>/client/` with the app, and the AI extension also a Rust service
+part under `service/`. They cannot be installed or removed, only turned off. The app frame, docking workspace, account switcher,
 Settings, command runner, toast surface and recovery screens are core UI in
 `ui/src/shell/` and cannot be turned off.
 
@@ -50,11 +50,12 @@ icon = "extension"
 | `[pane]` | No | `icon` from the [icon set](#icons). One workspace pane; its tab shows `name` |
 | `[settings_page]` | No | `title` (1–32 bytes, not a core section title such as Accounts or Extensions, ignoring case) and `icon`. A Settings section the extension draws |
 | `navigation` | No | Destinations it opens: `inbox`, `drafts`, `sent`, `compose` |
+| `[overlay]` | No | `z_index` (1–10,000), needs `ui.canvas`. A [canvas overlay](#canvas-overlay) over the whole window |
 | `[bus]` | No | `subscribe = ["<bus>/<name>", …]`, needs `extensions.bus`; see [Extension bus](#extension-bus) |
 | `[[settings]]` | No | Declarative owner settings; see [Extension settings](#extension-settings) |
 
-Unknown fields are rejected. `slot`, `z_index` and `window.overlay` belonged to the old
-panel and overlay system and are gone.
+Unknown fields are rejected. The old top-level `slot`, `z_index` and `window.overlay`
+fields belonged to the alpha's panel system and are gone.
 
 ## Packages
 
@@ -107,7 +108,8 @@ every call.
 | `messages.send` | Send mail (with `forward_of`, also `messages.read`) |
 | `extensions.bus` | Talk to other extensions by name |
 | `ui.frame`, `ui.frame.remote` | `frame` components; frames that may load `https:` images |
-| `ui.commands`, `ui.app_actions`, `ui.toasts`, `ui.contribute` | Commands, top-bar buttons, toasts, content in other extensions' slots (API 1 lists them; the shell honours them as each bundled extension moves over) |
+| `ui.commands`, `ui.app_actions`, `ui.toasts`, `ui.contribute` | Command-runner entries and search, top-bar buttons, toasts, content in other extensions' slots |
+| `ui.canvas` | A [canvas overlay](#canvas-overlay) declared by `[overlay]` |
 | `approvals.notify`, `releases.read` | Send-approval events; the newest Colecto release |
 | `ai.text`, `ai.decide`, `ai.configure` | The owner's AI models and settings |
 
@@ -199,18 +201,33 @@ transferred buffers are referenced as `{"$buffer": index}`.
 | `bus.request`, `bus.event` | Bus deliveries to its client part |
 | `reply` | `{id, ok, data}` or `{id, ok: false, error, status}` for a `call` |
 | `ping` | `{n}`; answer `{t: "pong", n}` |
+| `navigate` | `{target}`: a destination it declared under `navigation` was opened |
+| `back` | `{surface}`: the owner pressed Back on a surface that reported `back: true` |
+| `command`, `app_action`, `toast_action` | `{id}` (and `toast` for a toast action): the owner picked one of its entries |
+| `command_query`, `command_submit` | `{seq, query}` / `{query}`: the owner typed in, or submitted, a search scope it claimed |
+| `slot` | `{slot, owner, context}`: another extension's slot opened, changed or closed (`context: null`) |
+| `canvas`, `resize`, `pointer` | Its overlay: see [Canvas overlay](#canvas-overlay) |
 
 | Extension to shell | Payload |
 | --- | --- |
 | `render` | `{surface, tree}` replaces a surface (`null` clears it) |
 | `patch` | `{surface, ops}`: `set` (merge props, `null` removes one), `replace`, `insert`, `remove`; all or nothing |
-| `call` | `{id, method, path, query?, body?}`: an API call with its credential; at most 64 pending |
+| `call` | `{id, method, path, query?, body?, bytes?}`: an API call with its credential; at most 64 pending. `bytes: true` returns the body as an `ArrayBuffer` |
 | `pong` | `{n}` |
+| `state` | `{surface, dirty?, busy?, back?}`: unsaved work, work in progress, whether Back means something |
+| `show`, `leave`, `focus` | Bring its surface forward, leave it, or focus node `node` in it |
+| `dialog` | `{tree}` opens a modal named by the tree's root `label`; `null` closes it |
+| `toast`, `toast_dismiss` | `{id, title, body?, icon?, duration?, system?, actions?}` (`ui.toasts`), at most three actions |
+| `commands` | `{items: [{id, name, disabled?}]}`, at most 64 (`ui.commands`) |
+| `command_search`, `command_hits` | Claim a search scope; answer a `command_query` with up to six `{id, title, hint?}` |
+| `app_actions` | Up to two top-bar buttons `{id, label, icon?, shortcut?}` (`ui.app_actions`) |
+| `contribute` | `{slot, tree}`: content in another extension's slot (`ui.contribute`) |
+| `download` | `{name, data: {$buffer}}`: offer a file to save |
+| `frame` | `{bitmap: {$buffer}, x?, y?}`: one finished overlay frame, when the overlay runs in frames mode |
 
-Surfaces today are `pane` (declared by `[pane]`) and `settings` (declared by
-`[settings_page]`, shown under the page title with "From *name*"). Other messages in
-the [protocol](ui-model.md#protocol), such as toasts, commands and contributions, arrive
-with the bundled extensions that first need them.
+Surfaces are `pane` (declared by `[pane]`), `settings` (declared by `[settings_page]`,
+shown under the page title with "From *name*") and the dialog. The full protocol is in
+[the design](ui-model.md#protocol).
 
 ### Event stream
 
@@ -242,10 +259,11 @@ Unknown types, props or values reject the message. Strings are always text.
 | Controls | `button` (`press`), `input`, `textarea` (`change`, or `input` after `debounce_ms`), `toggle` (`toggle`), `select` (`change`); a `form` sends `submit` with `{values}` |
 | Collections and states | `list` (static rows), `empty_state`, `loading` |
 | Embeds | `frame` without scripts: `title`, `doc` (at most 8 MiB), `height`, `designed` |
+| More | `list` with virtual rows, `menu_button`, `segmented`, `range`, `secret_field`, `file_picker`, `message_row`, `tabs`, `slot`, `action_ref` and the rest of the [vocabulary](ui-model.md#component-vocabulary) |
 
-Props are listed in the [design](ui-model.md#component-vocabulary); the rest of the
-vocabulary arrives with the bundled extension that needs it. Text fields keep their
-value in the renderer; a `set` of `value` replaces it.
+Props are listed in the [design](ui-model.md#component-vocabulary). Text fields keep
+their value in the renderer. A new `value` replaces it, except a value the field itself
+sent moments ago, which a slow render echoing older typing would otherwise rewind.
 
 A `frame` renders `doc` in `<iframe sandbox="allow-popups allow-popups-to-escape-sandbox">`
 (no scripts, forms or same-origin access) with
@@ -270,9 +288,26 @@ A `frame` renders `doc` in `<iframe sandbox="allow-popups allow-popups-to-escape
 | Pending calls | 64 |
 | Frame document | 8 MiB |
 | Watchdog | Ping every 5 s; stop after two unanswered |
+| Commands, app actions, command hits | 64, 2, 6 |
 
 Browsers cannot cap a Worker's CPU or memory. A client part can slow down or crash the
 window; see [what this does not protect against](ui-model.md#what-this-does-not-protect-against).
+
+### Canvas overlay
+
+An extension with `ui.canvas` and `[overlay] z_index` draws on one `<canvas>` that
+covers the window above the app, at that `z-index`. It takes no clicks
+(`pointer-events: none`) and is hidden from assistive technology. The example is
+`docs/extensions/examples/oneko/`.
+
+| Message | Payload |
+| --- | --- |
+| `canvas` (shell to extension) | `{surface: "overlay", width, height, ratio}` plus `canvas` (an `OffscreenCanvas`, as `{$buffer: 0}`) in Chromium engines, or `mode: "frames"` elsewhere: WebKit accepts a transferred canvas but never shows what a Worker draws on it |
+| `resize` | `{surface: "overlay", width, height, ratio}` when the window changes size |
+| `pointer` | `{x, y, inside}` in CSS pixels, at most once per animation frame |
+| `frame` (extension to shell) | In frames mode, `{bitmap, x?, y?}`: an `ImageBitmap` the shell draws at `x`, `y` (CSS pixels, default 0) in place of the last one, so a small bitmap can stand for the window |
+
+The canvas goes away when the extension stops, is disabled or is removed.
 
 ## Service part
 
@@ -290,11 +325,15 @@ only these, from module `colecto`:
 | --- | --- |
 | `{"event":"bus.request","from","name","payload"}` | A request on its own bus |
 | `{"event":"bus.event","bus","name","payload"}` | An event it subscribes to |
+| `{"event":"mail","account","ids"}` | New mail arrived on `account`; needs `messages.list` |
 
 Service requests use the capability names as operations, plus `settings.read`,
-`bus.request` and `bus.emit`. Identity and account come from the Host invocation, never
+`bus.request`, `bus.emit`, `labels.list` (`messages.list`), `storage.get` and
+`storage.set` (its own key-value storage, no capability; the same values as
+`/extensions/{id}/storage/{key}`, 64 KiB each), and `ai.settings` and `ai.decide`
+(`ai.decide`: one decision against the owner's hourly budget). Identity and account come from the Host invocation, never
 from guest input. Each invocation gets a fresh instance: 32 MiB memory, 1,024 table
-elements, 10,000,000 fuel, eight service requests, 64 KiB per bridge input or output,
+elements, 10,000,000 fuel, 64 service requests, 64 KiB per bridge input or output,
 32 KiB of output, two invocations at once. Disable, removal and reinstall invalidate
 running invocations at their next request. This is an in-process Wasm sandbox, not OS
 isolation, and not a security audit; native mail work it asks for still takes its
@@ -340,8 +379,7 @@ subscribers or names.
 | Answer a request | `POST /bus/replies/{id}` `{data}` after a `bus.request` message | `emit` `{"bus":{"response":…}}` |
 
 A request to an extension with a service part runs that service part; otherwise it goes
-to the extension's client part (or, for bundled extensions not yet on the runtime, its
-Svelte code) through the event stream and waits up to 2 seconds. Only the target may
+to the extension's client part through the event stream and waits up to 2 seconds. Only the target may
 reply, and the first reply wins. Missing buses, failures and unanswered requests all
 return null. Events reach service parts directly and client parts through the event
 stream, if they subscribe.
@@ -359,15 +397,6 @@ Bundled extensions start every name with a whole-number version, `v1/add_button`
 `v1.5/add_button` or a bare `add_button`; third-party extensions are strongly
 encouraged to do the same. The bundled surfaces are listed in
 [Bundled bus surfaces](bundled-bus.md).
-
-### Reader slots
-
-Until the reader moves to the runtime, it offers two bundled-only slots that the shell
-fills with the `ai` extension's Svelte components: `actions` (toolbar, after Reply /
-Reply all / Forward) and `aboveBody` (above the message body). They are props on
-`ui/src/extensions/reader/Reader.svelte`, each a snippet receiving a `ReaderSlot`
-(`ui/src/lib/reader-slots.ts`): `{id, message, content, reply?(body)}`. The
-[contribution slots](ui-model.md#contribution-slots) replace them.
 
 ## Workspace panes
 
@@ -401,7 +430,7 @@ not take labels.
 
 | Principal | Authorization | Reaches |
 | --- | --- | --- |
-| Owner | `Bearer <owner token>` | Everything; bundled Svelte names itself in `x-colecto-extension` and the account in `x-colecto-account` (routing labels, not authentication) |
+| Owner | `Bearer <owner token>` | Everything; the shell names itself (`host`) in `x-colecto-extension` and the account in `x-colecto-account` (routing labels, not authentication) |
 | API key | `Bearer colecto_…` | Mail routes and MCP, within its account and capability grants; never Host controls or direct sending |
 | Extension | `Colecto-Extension <token>` | See [Credentials](#credentials) |
 

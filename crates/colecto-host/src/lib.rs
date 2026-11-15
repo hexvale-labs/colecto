@@ -200,6 +200,10 @@ fn build_app(host: Host, assets: Assets) -> Router {
             axum::routing::post(mint_credential).delete(revoke_credential),
         )
         .route("/extensions/{id}/client", get(client_files))
+        .route(
+            "/extensions/{id}/storage/{key}",
+            get(get_storage).put(put_storage),
+        )
         .route("/extensions/{id}/client/{*path}", get(client_file))
         .route("/extensions/events", axum::routing::post(extension_events))
         .route("/accounts", get(list_accounts).post(upsert_account))
@@ -323,8 +327,20 @@ async fn version() -> Json<serde_json::Value> {
 
 /// Owner only: a newer stable release, or `null`. The UI calls it once per start, and only
 /// when the owner keeps update notifications on, so turning them off means no request.
-async fn latest_release(headers: HeaderMap) -> Result<Json<serde_json::Value>, Failure> {
-    host_grant(&headers)?;
+async fn latest_release(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, Failure> {
+    if let Principal::Extension(token) = &principal {
+        let (id, generation) = caller_extension(&host, token)?;
+        let extensions = host.extensions.lock().map_err(|_| forbidden())?;
+        if !extensions.allows_generation(&id, "", Capability::ReleasesRead, generation) {
+            return Err(forbidden());
+        }
+    } else {
+        host_grant(&headers)?;
+    }
     let latest = tokio::task::spawn_blocking(|| releases::latest(VERSION))
         .await
         .map_err(|_| forbidden())?
@@ -397,9 +413,9 @@ fn grant(
         };
     }
     if let Principal::Extension(token) = principal {
-        // A client part: its credential names the extension; headers name only the account.
+        // A client part: its credential names the extension; headers name only the account,
+        // and work on an account that does not exist fails where it is done, as for the owner.
         let (id, generation) = caller_extension(host, token)?;
-        extension_account(host, headers)?;
         return if host
             .extensions
             .lock()
@@ -561,10 +577,12 @@ async fn review_extension(
 }
 async fn extension_asset(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
     Path((id, name)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, Failure> {
-    host_grant(&headers)?;
+    // The owner, or the extension's own client part (Oneko loads its sprite sheet).
+    own_or_owner(&host, &principal, &headers, &id)?;
     let assets = host
         .extensions
         .lock()
@@ -582,6 +600,41 @@ async fn extension_asset(
         bytes,
     ))
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StorageInput {
+    value: serde_json::Value,
+}
+/// An extension's own store: its client part, or the owner.
+async fn get_storage(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    Path((id, key)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    own_or_owner(&host, &principal, &headers, &id)?;
+    let value = host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .stored(&id, &key);
+    Ok(Json(serde_json::json!({ "value": value })))
+}
+async fn put_storage(
+    State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
+    headers: HeaderMap,
+    Path((id, key)): Path<(String, String)>,
+    Json(input): Json<StorageInput>,
+) -> Result<Json<bool>, Failure> {
+    own_or_owner(&host, &principal, &headers, &id)?;
+    host.extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .store(&id, &key, input.value)
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+    Ok(Json(true))
+}
 /// The owner (the shell), or the client part of extension `id` itself.
 fn own_or_owner(
     host: &Host,
@@ -597,7 +650,7 @@ fn own_or_owner(
 }
 /// The extension a client credential belongs to, while it still runs at the generation the
 /// credential was minted for.
-fn caller_extension(host: &Host, token: &str) -> Result<(String, u64), Failure> {
+pub(crate) fn caller_extension(host: &Host, token: &str) -> Result<(String, u64), Failure> {
     let (id, generation) = host
         .credentials
         .lock()
@@ -833,6 +886,89 @@ async fn remove_extension(
         .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
     Ok(Json(true))
 }
+/// Service operations that are not one capability's mail call: storage, labels and the AI
+/// models. Identity and account come from the invocation.
+fn service_extra(
+    host: &Host,
+    extension: &str,
+    account: &str,
+    epoch: u64,
+    request: &serde_json::Value,
+) -> Option<Result<serde_json::Value, String>> {
+    let operation = request["operation"].as_str()?;
+    let allowed = |capability| {
+        host.extensions
+            .lock()
+            .is_ok_and(|e| e.allows_generation(extension, account, capability, epoch))
+    };
+    let current = || {
+        host.extensions
+            .lock()
+            .is_ok_and(|e| e.generation(extension) == Some(epoch))
+    };
+    Some(match operation {
+        "storage.get" if current() => host
+            .extensions
+            .lock()
+            .map_err(|_| "Extension policy unavailable".to_string())
+            .map(|e| e.stored(extension, request["key"].as_str().unwrap_or_default())),
+        "storage.set" if current() => host
+            .extensions
+            .lock()
+            .map_err(|_| "Extension policy unavailable".to_string())
+            .and_then(|mut e| {
+                e.store(
+                    extension,
+                    request["key"].as_str().unwrap_or_default(),
+                    request["value"].clone(),
+                )
+            })
+            .map(|()| serde_json::Value::Null),
+        "labels.list" if allowed(Capability::MessagesList) => host
+            .accounts
+            .lock()
+            .map_err(|_| "Account service unavailable".to_string())
+            .and_then(|accounts| {
+                accounts
+                    .store(account)
+                    .map_err(|_| "Account unavailable".into())
+            })
+            .and_then(|handle| {
+                let store = handle.try_lock().map_err(|_| "Account busy; try again")?;
+                serde_json::to_value(store.labels().map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())
+            }),
+        "ai.settings" if allowed(Capability::AiDecide) => {
+            serde_json::to_value(host.ai.public_settings()).map_err(|e| e.to_string())
+        }
+        "ai.decide" if allowed(Capability::AiDecide) => {
+            let state = request["state"].as_str().unwrap_or_default().to_owned();
+            let questions: Vec<String> = request["questions"]
+                .as_array()
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|q| q.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if questions.is_empty() || questions.len() > 32 || state.len() > 64 * 1024 {
+                return Some(Err("Invalid decision request".into()));
+            }
+            if !host.ai.take_decision_budget() {
+                return Some(Err("The decision model's hourly budget is used up".into()));
+            }
+            tokio::runtime::Handle::current()
+                .block_on(ai::decide(host, state, &questions))
+                .map_err(|Failure(_, error)| error)
+                .and_then(|answers| serde_json::to_value(answers).map_err(|e| e.to_string()))
+        }
+        "storage.get" | "storage.set" | "labels.list" | "ai.settings" | "ai.decide" => {
+            Err("Capability not granted".into())
+        }
+        _ => return None,
+    })
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ServiceRequest {
@@ -863,6 +999,9 @@ fn extension_service(
         Some("bus.request" | "bus.emit")
     ) {
         return bus::service(host, extension, account, epoch, request);
+    }
+    if let Some(result) = service_extra(host, extension, account, epoch, &request) {
+        return result;
     }
     let request: ServiceRequest =
         serde_json::from_value(request).map_err(|_| "Invalid service request")?;
@@ -949,8 +1088,8 @@ fn extension_service(
             serde_json::to_value(true)
         }
         MessagesOrganize | AppNavigate | ExtensionsBus | UiFrame | UiFrameRemote | UiCommands
-        | UiAppActions | UiToasts | UiContribute | ApprovalsNotify | ReleasesRead | AiText
-        | AiDecide | AiConfigure => {
+        | UiAppActions | UiToasts | UiContribute | UiCanvas | ApprovalsNotify | ReleasesRead
+        | AiText | AiDecide | AiConfigure => {
             return Err("Capability not granted".into());
         }
     };
@@ -1106,16 +1245,10 @@ async fn update_label(
 ) -> Result<Json<std::collections::BTreeMap<String, Vec<String>>>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesLabel)?;
     let Json(input) = input.map_err(|error| Failure(StatusCode::BAD_REQUEST, error.body_text()))?;
-    let ai = host.ai.clone();
-    let unlabeled = input.message_id.clone().filter(|_| input.remove);
     let labels = with_store(host, account.clone(), move |s| {
         s.update_label(&input.name, input.message_id.as_deref(), input.remove)
     })
     .await?;
-    // Auto-labelling never touches a message the owner has unlabelled by hand.
-    if let Some(message) = unlabeled {
-        ai.owner_unlabeled(&account, &message);
-    }
     Ok(Json(labels))
 }
 fn redact_list_bodies(
@@ -1194,9 +1327,14 @@ async fn messages(
 /// Sync mode and progress for every account, also streamed as `sync` events.
 async fn sync_status(
     State(host): State<Host>,
+    axum::Extension(principal): axum::Extension<Principal>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<sync::AccountSync>>, Failure> {
-    host_grant(&headers)?;
+    if matches!(principal, Principal::Extension(_)) {
+        grant(&host, &principal, &headers, Capability::AccountRead)?;
+    } else {
+        host_grant(&headers)?;
+    }
     Ok(Json(
         tokio::task::spawn_blocking(move || sync::statuses(&host))
             .await
