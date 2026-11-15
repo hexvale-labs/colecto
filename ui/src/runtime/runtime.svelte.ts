@@ -44,6 +44,9 @@ function frames() {
   return host;
 }
 
+/** Shell messages that only follow something the owner did, like pressing a button in a surface. */
+const OWNER_ACTIONS = new Set(['command', 'command_submit', 'app_action', 'toast_action', 'back']);
+
 export class ExtensionRuntime {
   readonly id: string;
   readonly name: string;
@@ -152,6 +155,8 @@ export class ExtensionRuntime {
 
   send(message: Record<string, unknown>, buffers: ArrayBuffer[] = []) {
     if (this.status !== 'running') return;
+    // The owner picked one of its commands, actions or toast buttons: it may move focus next.
+    if (OWNER_ACTIONS.has(message.t as string)) this.#lastEvent = performance.now();
     this.#port?.postMessage({ json: JSON.stringify(message), buffers }, buffers);
   }
 

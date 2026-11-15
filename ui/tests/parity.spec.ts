@@ -67,6 +67,8 @@ for (const size of Object.keys(widths) as (keyof typeof widths)[]) {
 
       test('compose', async ({ page }) => {
         await start(page, size, scheme);
+        // The shortcut belongs to the composer's Compose action, which arrives once its Worker runs.
+        await expect(page.getByRole('button', { name: 'Compose', exact: true })).toBeEnabled();
         await page.keyboard.press('c');
         await expect(page.getByRole('region', { name: 'Draft editor' })).toBeVisible();
         await compare(page, id('compose'));

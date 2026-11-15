@@ -519,7 +519,7 @@ string; the JSON refers to them as `{"$buffer": <index>}`.
 | `render` | `{surface, tree}`: replaces the whole surface |
 | `patch` | `{surface, ops: [...]}` |
 | `state` | `{surface, dirty, busy, back}` |
-| `focus` | `{surface, node}`: honoured only within 1 s after an event from that surface, or when the surface first renders |
+| `focus` | `{surface, node}`: honoured only within 1 s after an event from that surface or after the owner picks one of its commands, app actions or toast buttons (or presses Back), or when the surface first renders |
 | `contribute` | `{slot: "<owner>/<name>", tree \| null}` |
 | `dialog` | `{tree \| null}` |
 | `app_actions`, `commands`, `command_search`, `command_hits`, `toast`, `toast_dismiss` | As above |
