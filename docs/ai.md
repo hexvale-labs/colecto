@@ -18,8 +18,9 @@ The Host makes every request; the browser never sees an API key or talks to the
 service. Prompts, mail content, model answers and keys are never logged; a refused
 request logs only its HTTP status. Errors shown to the owner are fixed plain-language
 messages (for example "The AI service rejected the API key."), never the service's own
-response, which could echo the prompt. Requests have a 10-second connect timeout and a
-120-second overall timeout, follow no redirects, and read at most 2 MiB of response.
+response, which could echo the prompt. Requests have a 10-second connect timeout and an
+overall timeout set in Settings → AI → Requests (`timeout_seconds`, 5 to 600, default
+120), which covers summaries, replies and automatic labels alike, follow no redirects, and read at most 2 MiB of response.
 
 ## Settings → AI
 
@@ -97,6 +98,11 @@ End, Escape) offers **Summarize** and, when the composer is on, **Reply**.
   reply** opens the normal reply composer with the draft above the quoted message.
   Notes and the draft stay while the message is open.
 
+Each message's menu in the mailbox (right-click, Shift+F10 or the Menu key) also offers
+**Summarize**, **Draft a reply with AI** and **Check labels again** while AI is on. The
+first two open the message in the reader and then run there. The AI extension adds them
+through the inbox's `v1/add_row_action` and hears the choice on `inbox/v1/row_action`.
+
 The reader does not import the AI extension: AI fills the reader's `reader/v1/actions`
 and `reader/v1/above_body` slots and starts replies with `reader/v1/reply` (see
 [Bundled bus surfaces](extensions/bundled-bus.md)).
@@ -137,6 +143,17 @@ Mail that arrived while the Host was not running is not labelled, because the fi
 refresh after start only sets the baseline. Labels that no longer exist are skipped. A
 failed model request stops model requests for the rest of that event; rules still
 apply. After labelling, it emits `ai/v1/labeled` with `{account}`.
+
+### Checking labels again
+
+**Check labels again** (in a message's menu, and in the reader's AI menu) and **Check mail
+again** under Settings → AI (the newest 1 to 100 saved Inbox
+messages) ask the service part to label messages that were already handled, through
+`ai/v1/reclassify`. This needs AI features on but not the automatic-labels switch. Unlike
+new mail, a check both adds labels that now apply and removes labels that no longer do,
+for labels that have rules, including labels the owner set by hand. The client sends 10
+messages per request (the service takes at most 25), and the same hourly model limit
+applies; messages it could not ask about are counted and reported.
 
 ## HTTP routes
 

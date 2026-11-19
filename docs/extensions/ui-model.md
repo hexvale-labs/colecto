@@ -446,8 +446,8 @@ There is no password input: Colecto never asks for credentials inside extension 
 
 | Type | Props | Events |
 | --- | --- | --- |
-| `list` | `label`, `mode` (`static`: `ul`/`li`; `virtual`), `rows: [{key, kind: "row"\|"heading", node}]`, `selected` (a row key), `selection` (`none`, `single`), `arrived` (row keys to animate in) | `select` with `{key}` |
-| `message_row` | `sender`, `date`, `date_title`, `subject`, `preview`, `unread`, `density` (`full`, `medium`, `compact`) | Inside a `list` row; renders as today's `button.mail-item` with `aria-pressed` |
+| `list` | `label`, `mode` (`static`: `ul`/`li`; `virtual`), `rows: [{key, kind: "row"\|"heading", node}]`, `selected` (a row key), `selection` (`none`, `single`), `arrived` (row keys to animate in), `context_menu` (API 2) | `select` with `{key}`; `context` and `menu` with `{key}` / `{key, item}` |
+| `message_row` | `sender`, `date`, `date_title`, `subject`, `preview`, `unread`, `starred` (API 2), `density` (`full`, `medium`, `compact`) | Inside a `list` row; renders as today's `button.mail-item` with `aria-pressed` |
 
 A `virtual` list renders all rows below 200 and virtualizes above that, measuring one
 row per kind and density. Below the threshold the DOM and accessibility tree match

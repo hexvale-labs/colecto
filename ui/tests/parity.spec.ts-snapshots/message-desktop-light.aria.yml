@@ -25,13 +25,15 @@
 - tabpanel "Mail":
   - search:
     - text: Search Inbox
-    - searchbox "Search Inbox"
+    - textbox "Search Inbox":
+      - /placeholder: Search inbox
   - button "Compose"
   - navigation "Mail folders":
     - button "Inbox"
     - button "Drafts"
     - button "Sent"
-  - group "Filter by label":
+  - group "Filters and labels":
+    - button "Filter"
     - textbox "New label"
     - button "Create label" [disabled]
   - region "Inbox messages":
@@ -41,8 +43,8 @@
       - text: The Colecto team
       - time: Nov 7
       - text: A quieter place for your mail Welcome to Colecto. A little space to read, think, and write. This inbox contains sample mail, so you can explore without connecting an account. Open a message, start a draft, and make yourself at home. Saved drafts stay on this computer, even after you restart the demo. The Colecto team
-    - button "Maya Chen Nov 6 A small plan for the weekend Hey, I found a little bookshop by the river. Coffee, a walk, and no particular agenda? Let me know what you think. Maya" [pressed]:
-      - text: Maya Chen
+    - button "Starred, Maya Chen Nov 6 A small plan for the weekend Hey, I found a little bookshop by the river. Coffee, a walk, and no particular agenda? Let me know what you think. Maya" [pressed]:
+      - text: Starred, Maya Chen
       - time: Nov 6
       - text: A small plan for the weekend Hey, I found a little bookshop by the river. Coffee, a walk, and no particular agenda? Let me know what you think. Maya
     - 'button "Studio North Nov 5 Notes from our last conversation A few things to keep close: • Make room for the work that matters. • Keep the defaults simple. • Leave things better than you found them. See you next week."':
@@ -64,6 +66,7 @@
       - button "Reply"
       - button "Reply all"
       - button "Forward"
+      - button "Starred" [pressed]
     - button "Copy message text": Copy
     - article:
       - heading "A small plan for the weekend" [level=2]

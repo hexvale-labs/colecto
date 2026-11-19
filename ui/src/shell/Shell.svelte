@@ -14,6 +14,7 @@
   import Surface from '../renderer/Surface.svelte';
   import Lifted from '../renderer/Lifted.svelte';
   import ExtensionDialog from './ExtensionDialog.svelte';
+  import ContextMenu from './ContextMenu.svelte';
   import { runtimes } from '../runtime/runtimes.svelte';
   import DockArea, { type PaneInfo } from '../DockArea.svelte';
   import { activate as showPane, defaultLayout, dock, dockEdge, groupOf, parseLayout, reconcile, setVisible, type Edge, type Layout } from '../lib/layout';
@@ -414,6 +415,7 @@
 </div>
 
 {#each runtimes.list.filter(runtime => runtime.dialog) as runtime (runtime.id)}<ExtensionDialog {runtime} />{/each}
+{#each runtimes.list.filter(runtime => runtime.menu?.items) as runtime (runtime.id)}<ContextMenu {runtime} />{/each}
 
 {#if settingsOpen}
   {@const current = settingsPages.find(page => page.id === settingsPage)}

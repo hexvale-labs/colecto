@@ -9,6 +9,17 @@
   `section` with `api_version = 1` is rejected:
   `settings.section needs api_version = 2 or later`.
 - The icon `sparkles`, for AI-assisted actions.
+- Row context menus. A `list` with `context_menu: true` sends
+  `event {kind: "context", value: {key}}` when a row is right-clicked or gets Shift+F10 or
+  the Menu key. The owner answers with
+  `{t: "menu", surface, node, key, items: [{id, label, icon?, danger?, disabled?, checked?, separator?}]}`
+  (at most 24 items, an empty list opens nothing); the shell draws the menu at the pointer
+  or under the row and sends `event {kind: "menu", value: {key, item}}` for the choice. A
+  `menu` that does not answer the latest request is ignored.
+- `message_row` takes `starred` and shows a star.
+- Messages carry `thread`, the provider's conversation id (JMAP `threadId`; for IMAP the
+  first `References` id, else `In-Reply-To`, else the `Message-ID`). It may be empty.
+- The icons `archive`, `eye`, `filter`, `folder`, `star` and `tag`.
 - `menu_button` draws its `icon` before the label, and narrow readers show only the icon,
   like other tools. API 1 accepted the prop but drew nothing.
 

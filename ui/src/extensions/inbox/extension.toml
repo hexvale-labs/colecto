@@ -11,7 +11,7 @@ author = "Colecto"
 icon = "inbox"
 
 [bus]
-subscribe = ["reader/v1/viewing", "reader/v1/labels", "composer/v1/editing", "composer/v1/saved"]
+subscribe = ["reader/v1/viewing", "reader/v1/labels", "composer/v1/editing", "composer/v1/saved", "ai/v1/labeled"]
 
 # Names the generated page in Settings; this extension draws nothing there itself.
 [settings_page]

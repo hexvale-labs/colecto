@@ -13,6 +13,7 @@
     event: (node, kind, value) => runtime.event('dialog', node, kind, value),
     files: (node, files, buffers) => runtime.files('dialog', node, files, buffers),
     may: capability => runtime.capabilities.includes(capability),
+    menu: (node, key, x, y) => runtime.openMenu('dialog', node, key, x, y),
   });
   function open(node: HTMLDialogElement) { node.showModal(); return { destroy() { node.close(); } }; }
   function close() { runtime.dialog = null; runtime.event('dialog', '', 'close'); }

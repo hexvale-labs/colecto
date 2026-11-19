@@ -85,43 +85,81 @@ fn clip(text: &str, chars: usize) -> &str {
         .map_or(text, |(i, _)| &text[..i])
 }
 
+/// Re-decide the labels of these messages now (#95): from a message's menu, or for the newest
+/// mail from Settings → AI. Unlike new mail, labels with rules that no longer match are
+/// removed, and messages checked before are checked again.
+#[derive(Serialize, Deserialize)]
+struct Reclassify {
+    account: String,
+    ids: Vec<String>,
+}
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq)]
+struct Reclassified {
+    /// Messages found and checked.
+    checked: usize,
+    /// Labels added or removed.
+    changed: usize,
+    /// Messages the decision model was not asked about, because this pass's or the
+    /// hour's budget ran out; their model-only labels were left as they were.
+    unanswered: usize,
+}
+colecto_extension::bus_request!(Reclassify => Reclassified, bus = "ai", version = 1, name = "reclassify");
+
+/// At most this many messages per reclassify request; callers batch larger runs.
+const RECLASSIFY_BATCH: usize = 25;
+
 fn on_mail(event: MailEvent, cx: &mut Context) -> Result<()> {
+    classify(&event.account, &event.ids, false, cx).map(|_| ())
+}
+
+fn reclassify(request: Reclassify, cx: &mut Context) -> Result<Reclassified> {
+    let ids: Vec<String> = request.ids.into_iter().take(RECLASSIFY_BATCH).collect();
+    classify(&request.account, &ids, true, cx)
+}
+
+fn classify(account: &str, ids: &[String], force: bool, cx: &mut Context) -> Result<Reclassified> {
+    let mut outcome = Reclassified::default();
     let settings: Settings = cx.call(&json!({"operation": "ai.settings"}))?;
-    if !settings.enabled || !settings.autolabel {
-        return Ok(());
+    // New mail also needs the automatic-labels switch; a reclassify asked for by hand does not.
+    if !settings.enabled || (!force && !settings.autolabel) {
+        return Ok(outcome);
     }
     let rules: BTreeMap<String, LabelRule> = settings
         .labels
-        .get(&event.account)
+        .get(account)
         .cloned()
         .unwrap_or_default()
         .into_iter()
         .filter(|(_, r)| r.enabled && (r.model || !r.rules.is_empty()))
         .collect();
     if rules.is_empty() {
-        return Ok(());
+        return Ok(outcome);
     }
-    // Each message is checked once, so a label the owner removes stays removed.
+    // Each new message is checked once, so a label the owner removes stays removed.
     let key = format!(
         "seen.{}",
-        event
-            .account
+        account
             .chars()
             .filter(|c| c.is_ascii_alphanumeric())
             .take(40)
             .collect::<String>()
     );
     let mut seen: VecDeque<String> = cx.stored(&key)?.unwrap_or_default();
-    let fresh: BTreeSet<String> = event
-        .ids
+    let fresh: BTreeSet<String> = ids
         .iter()
-        .filter(|id| !seen.contains(id))
+        .filter(|id| force || !seen.contains(id))
         .cloned()
         .collect();
     if fresh.is_empty() {
-        return Ok(());
+        return Ok(outcome);
     }
-    seen.extend(fresh.iter().cloned());
+    seen.extend(
+        fresh
+            .iter()
+            .filter(|id| !seen.contains(id))
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
     while seen.len() > SEEN_PER_ACCOUNT {
         seen.pop_front();
     }
@@ -157,22 +195,30 @@ fn on_mail(event: MailEvent, cx: &mut Context) -> Result<()> {
         })
         .collect();
     let mut budget = DECISIONS_PER_PASS;
-    let mut changed = false;
     for message in &messages {
-        let mut apply = BTreeSet::new();
+        outcome.checked += 1;
+        let has = |name: &String| {
+            existing
+                .get(name)
+                .is_some_and(|ids| ids.contains(&message.id))
+        };
+        // Labels decided for this message: name → whether it applies.
+        let mut decided: BTreeMap<String, bool> = BTreeMap::new();
         let mut ask = Vec::new();
         for (name, res) in &compiled {
-            if existing
-                .get(*name)
-                .is_some_and(|ids| ids.contains(&message.id))
-            {
+            if !force && has(name) {
                 continue;
             }
             if matches_any(res, message) {
-                apply.insert((*name).clone());
+                decided.insert((*name).clone(), true);
             } else if rules[*name].model {
                 ask.push(*name);
+            } else {
+                decided.insert((*name).clone(), false);
             }
+        }
+        if !ask.is_empty() && budget == 0 {
+            outcome.unanswered += 1;
         }
         if !ask.is_empty() && budget > 0 {
             budget -= 1;
@@ -198,30 +244,38 @@ fn on_mail(event: MailEvent, cx: &mut Context) -> Result<()> {
             ) {
                 Ok(answers) => {
                     for (name, p) in ask.iter().zip(answers) {
-                        if p.is_some_and(|p| p >= settings.decision.threshold) {
-                            apply.insert((*name).clone());
-                        }
+                        decided.insert(
+                            (*name).clone(),
+                            p.is_some_and(|p| p >= settings.decision.threshold),
+                        );
                     }
                 }
                 // The Host reports why; stop asking for this pass.
-                Err(_) => budget = 0,
+                Err(_) => {
+                    budget = 0;
+                    outcome.unanswered += 1;
+                }
             }
         }
-        for name in apply {
-            if cx.label(&name, Some(&message.id), false).is_ok() {
-                changed = true;
+        for (name, apply) in decided {
+            // New mail only ever adds; a reclassify also takes away what no longer applies.
+            if apply == has(&name) || (!apply && !force) {
+                continue;
+            }
+            if cx.label(&name, Some(&message.id), !apply).is_ok() {
+                outcome.changed += 1;
             }
         }
     }
-    if changed {
+    if outcome.changed > 0 {
         cx.emit(&Labeled {
-            account: event.account,
+            account: account.to_owned(),
         })?;
     }
-    Ok(())
+    Ok(outcome)
 }
 
-colecto_extension::export! { mail: on_mail }
+colecto_extension::export! { mail: on_mail, requests: [reclassify] }
 
 #[cfg(test)]
 mod tests {
@@ -301,6 +355,70 @@ mod tests {
         let (calls, _) = run(settings(false), Some(0.9));
         assert!(labeled(&calls).is_empty());
         assert!(!calls.iter().any(|c| c["operation"] == "messages.list"));
+    }
+
+    #[test]
+    fn reclassify_adds_what_matches_now_and_removes_what_no_longer_does() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let calls = log.clone();
+        let mut config = settings(true);
+        // Asked for by hand, so it runs with automatic labels off too.
+        config["autolabel"] = json!(false);
+        let mut host = TestHost::new(move |request| {
+            calls.borrow_mut().push(request.clone());
+            match request["operation"].as_str() {
+                Some("ai.settings") => Ok(config.clone()),
+                // Both were checked before; a reclassify checks them again.
+                Some("storage.get") => Ok(json!(["1", "2"])),
+                Some("storage.set") | Some("bus.emit") => Ok(Value::Null),
+                Some("messages.list") => Ok(json!([
+                    {"id": "1", "sender": "Shop", "address": "shop@example.test", "subject": "Your receipt", "body": "Thanks"},
+                    {"id": "2", "sender": "Ada", "address": "ada@example.test", "subject": "Lunch?", "body": "Friday"},
+                ])),
+                Some("labels.list") => Ok(json!({"Receipts": ["2"], "Friends": []})),
+                Some("ai.decide") => Ok(json!([0.2])),
+                Some("messages.label") => Ok(json!({})),
+                _ => Err("Capability not granted".into()),
+            }
+        });
+        let outcome = host
+            .with(|cx| {
+                reclassify(
+                    Reclassify {
+                        account: "a".into(),
+                        ids: vec!["1".into(), "2".into()],
+                    },
+                    cx,
+                )
+            })
+            .unwrap();
+        let changes: Vec<(String, String, bool)> = log
+            .borrow()
+            .iter()
+            .filter(|c| c["operation"] == "messages.label")
+            .map(|c| {
+                (
+                    c["label"]["name"].as_str().unwrap().into(),
+                    c["label"]["message_id"].as_str().unwrap().into(),
+                    c["label"]["remove"].as_bool().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            changes,
+            [
+                ("Receipts".into(), "1".into(), false),
+                ("Receipts".into(), "2".into(), true)
+            ]
+        );
+        assert_eq!(
+            outcome,
+            Reclassified {
+                checked: 2,
+                changed: 2,
+                unanswered: 0
+            }
+        );
     }
 
     #[test]

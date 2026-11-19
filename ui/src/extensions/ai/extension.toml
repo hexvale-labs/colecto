@@ -8,9 +8,10 @@ description = "Optional summaries, drafted replies and automatic labels using AI
 author = "Colecto"
 
 # Settings → AI lists the account's labels, so the client part reloads them when Mail or the
-# reader changes them. The service part has no handler for these events and ignores them.
+# reader changes them, and it offers entries in Mail's message menu (`row_action`, `ready`).
+# The service part has no handler for these events and ignores them.
 [bus]
-subscribe = ["inbox/v1/labels", "reader/v1/labels"]
+subscribe = ["inbox/v1/labels", "reader/v1/labels", "inbox/v1/ready", "inbox/v1/row_action"]
 
 [settings_page]
 title = "AI"

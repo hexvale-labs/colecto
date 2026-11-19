@@ -108,7 +108,7 @@ pub struct LabelRule {
     pub rules: Vec<Rule>,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(default, deny_unknown_fields)]
 pub struct AiSettings {
     pub enabled: bool,
@@ -117,7 +117,22 @@ pub struct AiSettings {
     pub autolabel: bool,
     /// Account id → local label name → rule.
     pub labels: BTreeMap<String, BTreeMap<String, LabelRule>>,
+    /// How long one request to either service may take, connecting included (#92).
+    pub timeout_seconds: u16,
 }
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            text: TextModel::default(),
+            decision: DecisionModel::default(),
+            autolabel: false,
+            labels: BTreeMap::new(),
+            timeout_seconds: 120,
+        }
+    }
+}
+const TIMEOUT_SECONDS: std::ops::RangeInclusive<u16> = 5..=600;
 
 fn bad(message: impl Into<String>) -> Failure {
     Failure(StatusCode::BAD_REQUEST, message.into())
@@ -185,6 +200,13 @@ fn validate(settings: &AiSettings) -> Result<(), String> {
             return Err("Model names must be at most 200 characters.".into());
         }
     }
+    if !TIMEOUT_SECONDS.contains(&settings.timeout_seconds) {
+        return Err(format!(
+            "The timeout must be between {} and {} seconds.",
+            TIMEOUT_SECONDS.start(),
+            TIMEOUT_SECONDS.end()
+        ));
+    }
     if !(16..=32_000).contains(&settings.text.max_tokens) {
         return Err("Max tokens must be between 16 and 32000.".into());
     }
@@ -241,7 +263,6 @@ impl Ai {
         })?;
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(120))
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| "Cannot start the AI client")?;
@@ -343,14 +364,22 @@ async fn post_json(
     body: serde_json::Value,
 ) -> Result<serde_json::Value, Failure> {
     let secret = key(host, key_name)?;
-    let mut request = host.ai.client.post(url).json(&body);
+    let timeout = host.ai.settings().timeout_seconds;
+    let mut request = host
+        .ai
+        .client
+        .post(url)
+        .timeout(Duration::from_secs(timeout.into()))
+        .json(&body);
     if let Some(secret) = secret.as_ref() {
         request = request.bearer_auth(secret.as_str());
     }
     drop(secret);
     let mut response = request.send().await.map_err(|error| {
         if error.is_timeout() {
-            unavailable("The AI service did not answer in time. Try again.")
+            unavailable(&format!(
+                "The AI service did not answer within {timeout} seconds. Try again, or allow more time in Settings → AI."
+            ))
         } else {
             unavailable("Cannot reach the AI service. Check the base URL and your connection.")
         }
@@ -914,6 +943,7 @@ mod tests {
             subject: "Your invoice".into(),
             body: "Total due".into(),
             date: String::new(),
+            thread: String::new(),
         };
         let rule = |field, p: &str| vec![(field, compile(p).unwrap())];
         assert!(matches_any(&rule(Field::Sender, "@SHOP\\.test$"), &message));
@@ -929,6 +959,12 @@ mod tests {
         assert!(validate(&settings).is_ok());
         settings.decision.threshold = 1.5;
         assert!(validate(&settings).is_err());
+        settings.decision.threshold = 0.7;
+        for (seconds, ok) in [(4, false), (5, true), (600, true), (601, false)] {
+            settings.timeout_seconds = seconds;
+            assert_eq!(validate(&settings).is_ok(), ok, "{seconds} s");
+        }
+        settings.timeout_seconds = 120;
         settings.decision.threshold = 0.7;
         settings.text.base_url = "ftp://x.test".into();
         assert!(validate(&settings).is_err());

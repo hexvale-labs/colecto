@@ -3,7 +3,20 @@
   // row is in the DOM; above that only the rows near the viewport are, so thousands stay smooth.
   import type { Snippet } from 'svelte';
   import type { Row } from '../runtime/protocol';
-  let { rows, selected, arrived, onselect, empty }: { rows: Row[]; selected?: string; arrived: string[]; onselect: (key: string) => void; empty: Snippet } = $props();
+  import Icon from '../Icon.svelte';
+  let { rows, selected, arrived, onselect, onmenu, empty }: { rows: Row[]; selected?: string; arrived: string[]; onselect: (key: string) => void; onmenu?: (key: string, x: number, y: number) => void; empty: Snippet } = $props();
+  // Right-click or long-press, and the Menu key or Shift+F10 on a focused row, open its menu.
+  function context(event: MouseEvent, key: string) {
+    if (!onmenu) return;
+    event.preventDefault();
+    onmenu(key, event.clientX, event.clientY);
+  }
+  function menuKey(event: KeyboardEvent, key: string) {
+    if (!onmenu || !(event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) return;
+    event.preventDefault();
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    onmenu(key, rect.left + 24, rect.bottom - 8);
+  }
   const THRESHOLD = 200;
   const OVERSCAN = 12;
   let viewport = $state<HTMLElement>();
@@ -46,8 +59,8 @@
   {:else}
     {@const node = item.node as Record<string, string | boolean | undefined>}
     {@const order = arrived.indexOf(item.key)}
-    <button class="mail-item" class:arrived={order >= 0} style:--arrival={order >= 0 ? order : undefined} class:selected={selected === item.key} class:unread={node.unread} aria-pressed={selected === item.key} disabled={!!node.disabled} use:measure={'row'} onclick={() => onselect(item.key)}>
-      <span class="item-sender">{node.sender || 'Unknown sender'}</span>
+    <button class="mail-item" class:arrived={order >= 0} style:--arrival={order >= 0 ? order : undefined} class:selected={selected === item.key} class:unread={node.unread} aria-pressed={selected === item.key} disabled={!!node.disabled} use:measure={'row'} onclick={() => onselect(item.key)} oncontextmenu={(event) => context(event, item.key)} onkeydown={(event) => menuKey(event, item.key)}>
+      <span class="item-sender">{#if node.starred}<span class="item-star" title="Starred"><Icon name="star" size={12} /><span class="sr-only">Starred, </span></span>{/if}{node.sender || 'Unknown sender'}</span>
       {#if node.date}<time class="item-date" title={node.date_title as string}>{node.date}</time>{/if}
       <span class="item-subject">{node.subject || '(No subject)'}</span>
       <span class="item-preview">{node.preview || 'No preview'}</span>

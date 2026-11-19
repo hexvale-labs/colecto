@@ -80,7 +80,7 @@ test('feels like an app: chrome is not selectable, mail is, and images do not dr
   expect(await select('.list-footer')).toBe('none');
   expect(await select('.dock-tab')).toBe('none');
   expect(await select('.letter-body')).toBe('text');
-  expect(await select('input[type=search]')).not.toBe('none');
+  expect(await select('.mail-search textarea')).not.toBe('none');
   const dragged = await page.locator('.brand-mark').evaluate(image => !image.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true })));
   expect(dragged).toBe(true);
   // The reader can copy the message text.
