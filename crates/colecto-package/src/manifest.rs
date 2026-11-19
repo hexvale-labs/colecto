@@ -89,6 +89,9 @@ pub fn parse_any_version(source: &str) -> Result<ExtensionManifest, String> {
     {
         return Err("[overlay] needs ui.canvas and a z_index from 1 to 10000".into());
     }
+    if version < 2 && manifest.settings.iter().any(|s| s.section.is_some()) {
+        return Err("settings.section needs api_version = 2 or later".into());
+    }
     if let Some(page) = &manifest.settings_page {
         if page.title.trim().is_empty() || page.title.len() > 32 {
             return Err("settings_page.title must be 1–32 bytes".into());
@@ -173,6 +176,7 @@ pub const CORE_SETTINGS_TITLES: &[&str] = &[
     "API keys",
     "Send approvals",
     "Appearance",
+    "Notifications",
 ];
 
 /// Destinations an extension can own with `navigation`; Settings pages stay core.
@@ -182,6 +186,7 @@ pub const NAVIGATION_OWNED: &[&str] = &["inbox", "drafts", "sent", "compose"];
 pub const ICONS: &[&str] = &[
     "account",
     "alert",
+    "archive",
     "attach",
     "back",
     "bell",
@@ -193,6 +198,9 @@ pub const ICONS: &[&str] = &[
     "download",
     "drafts",
     "extension",
+    "eye",
+    "filter",
+    "folder",
     "forward",
     "image",
     "inbox",
@@ -214,6 +222,9 @@ pub const ICONS: &[&str] = &[
     "shield",
     "sidebar",
     "sort",
+    "sparkles",
+    "star",
+    "tag",
     "text",
     "trash",
 ];
@@ -253,5 +264,23 @@ mod tests {
             ICONS.len(),
             "protocol.ts and manifest.rs list the same icons"
         );
+    }
+    #[test]
+    fn settings_sections_need_api_2() {
+        let manifest = |version: u32, section: &str| {
+            format!(
+                "id = \"x\"\nname = \"X\"\napi_version = {version}\ncapabilities = []\ndescription = \"d\"\nauthor = \"a\"\n\n[[settings]]\nkey = \"k\"\nlabel = \"K\"\ntype = \"toggle\"\ndefault = true\n{section}"
+            )
+        };
+        assert_eq!(parse(&manifest(1, "")).err(), None);
+        assert_eq!(
+            parse(&manifest(1, "section = \"appearance\"")).unwrap_err(),
+            "settings.section needs api_version = 2 or later"
+        );
+        assert!(parse(&manifest(2, "section = \"notifications\"")).is_ok());
+        // Sections that hold credentials, connections or keys take no extension settings.
+        for core in ["accounts", "servers", "api-keys", "extensions"] {
+            assert!(parse(&manifest(2, &format!("section = \"{core}\""))).is_err());
+        }
     }
 }

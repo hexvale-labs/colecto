@@ -84,6 +84,23 @@ struct Host {
     ai: Arc<ai::Ai>,
     sync: Arc<sync::SyncState>,
     credentials: Arc<Mutex<credentials::Credentials>>,
+    /// Open Colecto windows (shell event streams). While one is open, the background
+    /// notifier leaves new-mail notifications to it.
+    windows: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// Counts an open window for as long as its event stream lives.
+struct Window(Arc<std::sync::atomic::AtomicUsize>);
+impl Window {
+    fn open(count: &Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self(count.clone())
+    }
+}
+impl Drop for Window {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 struct Failure(StatusCode, String);
@@ -785,14 +802,15 @@ async fn extension_events(
     }
     let receiver = host.events.subscribe();
     let tokens = input.tokens;
+    let window = Window::open(&host.windows);
     let stream = futures_util::stream::unfold(
-        (host, receiver, tokens, true),
-        |(host, mut receiver, tokens, first)| async move {
+        (host, receiver, tokens, true, window),
+        |(host, mut receiver, tokens, first, window)| async move {
             if first {
                 let event = Event::default().event("ready").data("{}");
                 return Some((
                     Ok::<_, std::convert::Infallible>(event),
-                    (host, receiver, tokens, false),
+                    (host, receiver, tokens, false, window),
                 ));
             }
             loop {
@@ -814,7 +832,7 @@ async fn extension_events(
                 let event = Event::default()
                     .event(name)
                     .data(serde_json::json!({ "to": to, "data": value }).to_string());
-                return Some((Ok(event), (host, receiver, tokens, false)));
+                return Some((Ok(event), (host, receiver, tokens, false, window)));
             }
         },
     );
@@ -2025,6 +2043,7 @@ mod extension_service_tests {
             execution: Arc::new(tokio::sync::Semaphore::new(2)),
             sync: Arc::default(),
             credentials: Arc::default(),
+            windows: Arc::default(),
         };
         let epoch = host
             .extensions

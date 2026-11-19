@@ -6,7 +6,6 @@ test('connection controls handle service states and long socket paths on a phone
   await page.route('**/api/v1/upstream', route => route.fulfill({ json: { upstream: { address: `unix:${socket}`, token_file: '/home/aleksandra/.local/state/colecto/owner-token' } } }));
   await page.route('**/api/v1/services', route => route.fulfill({ json: {
     daemon: { installed: true, active: false, enabled: true, supported: true, socket, version: '0.2.0', update_to: '0.3.0' },
-    notifications: { installed: false, active: false, enabled: false, supported: true, socket },
   } }));
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -14,10 +13,7 @@ test('connection controls handle service states and long socket paths on a phone
   await expect(page.getByText('Background mail service')).toBeVisible();
   await expect(page.getByText(`unix:${socket}`)).toBeVisible();
   await expect(page.getByText('Stopped', { exact: true })).toBeVisible();
-  await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
   await expect(page.getByRole('switch', { name: 'Start Mail service on login' })).toBeChecked();
-  // Not yet installed: the choice is kept for the install, defaulting to on.
-  await expect(page.getByRole('switch', { name: 'Start Desktop notifications on login' })).toBeChecked();
   await expect(page.getByText('v0.2.0', { exact: true })).toBeVisible();
   expect(await page.locator('.settings-page').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
   await page.route('**/api/v1/services/daemon', route => route.fulfill({ status: 400, json: { error: 'This unit was not written by Colecto' } }));
@@ -30,6 +26,24 @@ test('connection controls handle service states and long socket paths on a phone
   expect(sent).toEqual({ action: 'update' });
 });
 
+test('connected to a remote server, the background service relays its notifications', async ({ page }) => {
+  await page.route('**/api/v1/upstream', route => route.fulfill({ json: { upstream: { address: 'https://mail.example.org', token_file: '/home/me/.local/share/colecto/upstream-token' } } }));
+  await page.route('**/api/v1/services', route => route.fulfill({ json: {
+    daemon: { installed: false, active: false, enabled: false, supported: true, relay: true },
+  } }));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Connection', exact: true }).click();
+  await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Shows desktop notifications for new mail from your server/)).toBeVisible();
+  // Not yet installed: the choice is kept for the install, defaulting to on.
+  await expect(page.getByRole('switch', { name: 'Start Notifications on login' })).toBeChecked();
+  let sent: unknown;
+  await page.route('**/api/v1/services/daemon', route => { sent = route.request().postDataJSON(); return route.fulfill({ json: true }); });
+  await page.getByRole('button', { name: 'Install' }).click();
+  expect(sent).toEqual({ action: 'install', autostart: true });
+});
+
 // Regression: a background service that could not restart after an update left the app on
 // "Mail workspace disabled" with only an Extensions button, and no way back to Connection.
 test('an unreachable mail service gets a recovery screen that reconnects on its own', async ({ page }) => {
@@ -40,7 +54,6 @@ test('an unreachable mail service gets a recovery screen that reconnects on its 
   await page.route('**/api/v1/upstream', route => route.fulfill({ json: { upstream: { address: `unix:${socket}`, token_file: '/home/user/.local/state/colecto/owner-token' } } }));
   await page.route('**/api/v1/services', route => route.fulfill({ json: {
     daemon: { installed: true, active: false, enabled: true, supported: true, socket, version: '0.4.0', update_to: '0.4.1' },
-    notifications: { installed: false, active: false, enabled: false, supported: true, socket },
   } }));
   let sent: unknown;
   await page.route('**/api/v1/services/daemon', route => { sent = route.request().postDataJSON(); up = true; return route.fulfill({ json: true }); });

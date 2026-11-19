@@ -14,6 +14,7 @@
   import Surface from '../renderer/Surface.svelte';
   import Lifted from '../renderer/Lifted.svelte';
   import ExtensionDialog from './ExtensionDialog.svelte';
+  import ContextMenu from './ContextMenu.svelte';
   import { runtimes } from '../runtime/runtimes.svelte';
   import DockArea, { type PaneInfo } from '../DockArea.svelte';
   import { activate as showPane, defaultLayout, dock, dockEdge, groupOf, parseLayout, reconcile, setVisible, type Edge, type Layout } from '../lib/layout';
@@ -22,6 +23,7 @@
   import ExtensionSettings from './ExtensionSettings.svelte';
   import AccountSettings from '../AccountSettings.svelte';
   import { applyTypography, DEFAULT_FONT, DEFAULT_TEXT_SIZE } from '../lib/typography';
+  import { applySpacing, NO_SPACING, type TextSpacing } from '../lib/text-spacing.svelte';
   import { hostService, accountOn, subscribeEvents, type AccountInfo, type ExtensionState, type NotificationPreferences, type PreferencesInput, type SecurityInfo } from '../lib/api';
   import type { Workspace } from '../App.svelte';
   import ToastSettings from '../ToastSettings.svelte';
@@ -77,13 +79,16 @@
   let accent = $state<string | null>(null);
   let font = $state(DEFAULT_FONT);
   let textSize = $state(DEFAULT_TEXT_SIZE);
+  let spacing = $state<TextSpacing>({ ...NO_SPACING });
   $effect(() => { void applyTypography(font, textSize).then(() => runtimes.refreshTheme()); });
+  $effect(() => { applySpacing(spacing); });
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); runtimes.refreshTheme(); });
   $effect(() => { notificationPosition.value = notificationPrefs.position; });
   function savePreferences(input: PreferencesInput) {
     if (input.accent !== undefined) accent = input.accent || null;
     if (input.font) font = input.font;
     if (input.font_size) textSize = input.font_size;
+    if (input.text_spacing) spacing = input.text_spacing;
     if (input.notifications) notificationPrefs = input.notifications;
     void hostService.savePreferences(input).catch(e => notify({ title: 'Could not save your preference', body: (e as Error).message }));
   }
@@ -193,11 +198,16 @@
     navCollapsed = !navCollapsed;
     try { localStorage.setItem(NAV_KEY, navCollapsed ? '1' : '0'); } catch { /* Kept for this session. */ }
   }
-  // Enabled extensions that declare settings or a settings page each get a section.
-  let extensionPages = $derived(extensionStates.filter(e => e.enabled && (e.manifest.settings?.length || (e.manifest.settings_page && e.manifest.client))));
+  // Enabled extensions get a section of their own for settings that name no core section, or
+  // for a page they draw (a settings page and no declared settings).
+  let extensionPages = $derived(extensionStates.filter(e => e.enabled && (e.manifest.settings?.some(setting => !setting.section) || (e.manifest.settings_page && e.manifest.client && !e.manifest.settings?.length))));
+  /** Extensions placing settings in a core section (API 2), bundled ones first. */
+  const contributors = (section: 'appearance' | 'notifications') => extensionStates
+    .filter(e => e.enabled && e.manifest.settings?.some(setting => setting.section === section))
+    .sort((a, b) => Number(b.bundled) - Number(a.bundled));
   let currentExtension = $derived(extensionPages.find(e => `extension:${e.manifest.id}` === settingsPage));
   // Bundled sections keep the order the owner knows; third-party ones get their own group.
-  const builtInOrder = ['accounts', 'extension:inbox', 'appearance', 'extension:notifications', 'extension:reader', 'servers', 'extensions', 'extension:ai', 'api-keys', 'send-approvals'];
+  const builtInOrder = ['accounts', 'extension:inbox', 'appearance', 'notifications', 'extension:reader', 'servers', 'extensions', 'extension:ai', 'api-keys', 'send-approvals'];
   type NavEntry = { id: SettingsPage; name: string; icon?: IconName; extension?: ExtensionState };
   let builtIn = $derived.by((): NavEntry[] => {
     const entries: NavEntry[] = [
@@ -266,22 +276,29 @@
   let appActions = $derived(runtimes.list.flatMap(runtime => runtime.appActions.map(action => ({ runtime, action }))));
   let topActions = $derived(appActions.filter(({ runtime, action }) => !runtimes.refs[`${runtime.id}/${action.id}`]));
   function runAction(runtime: (typeof appActions)[number]['runtime'], id: string) { if (leaveSettings()) runtime.send({ t: 'app_action', id }); }
+  /** A destination's icon: its folder, or the Settings section's own icon in the sidebar. */
+  function destinationIcon(target: Destination): IconName {
+    const place = resolve(target);
+    if ('compose' in place) return 'compose';
+    if ('folder' in place) return place.folder.toLowerCase() as IconName;
+    return builtIn.find(entry => entry.id === place.settings)?.icon ?? 'settings';
+  }
   let commands: Command[] = $derived(([
     ...destinations.filter(destination => !destination.target.startsWith('settings/') ? owner(destination.target) : true)
-      .map(destination => ({ id: destination.target, name: destination.name, run: () => go(destination.target) })),
+      .map(destination => ({ id: destination.target, name: destination.name, icon: destinationIcon(destination.target), run: () => go(destination.target) })),
     ...runtimes.list.flatMap(runtime => runtime.commands.map(command => ({ id: `${runtime.id}:${command.id}`, name: command.name, disabled: command.disabled,
       run: () => { if (leaveSettings()) runtime.send({ t: 'command', id: command.id }); } }))),
     ...panes.flatMap(pane => [
-      ...(['left', 'right', 'top', 'bottom'] as Edge[]).map(edge => ({ id: `edge-${pane.id}-${edge}`, name: `Layout: Dock ${pane.title} along the ${edge} edge`, run: () => { commitLayout(dockEdge(layout, pane.id, edge)); focus = pane.id; }, disabled: settingsOpen || compact })),
-      ...panes.filter(other => other.id !== pane.id && shownPane(other.id) && groupOf(layout, other.id) !== groupOf(layout, pane.id)).map(other => ({ id: `tab-${pane.id}-${other.id}`, name: `Layout: Put ${pane.title} in a tab beside ${other.title}`, run: () => { const group = groupOf(layout, other.id); if (group) commitLayout(dock(layout, pane.id, group.id, 'center')); }, disabled: settingsOpen || compact })),
-      { id: `show-${pane.id}`, name: `Layout: ${shownPane(pane.id) ? 'Hide' : 'Show'} ${pane.title}`, run: () => commitLayout(setVisible(layout, pane.id, !shownPane(pane.id))), disabled: settingsOpen },
+      ...(['left', 'right', 'top', 'bottom'] as Edge[]).map(edge => ({ id: `edge-${pane.id}-${edge}`, icon: 'layout', name: `Layout: Dock ${pane.title} along the ${edge} edge`, run: () => { commitLayout(dockEdge(layout, pane.id, edge)); focus = pane.id; }, disabled: settingsOpen || compact })),
+      ...panes.filter(other => other.id !== pane.id && shownPane(other.id) && groupOf(layout, other.id) !== groupOf(layout, pane.id)).map(other => ({ id: `tab-${pane.id}-${other.id}`, icon: 'layout', name: `Layout: Put ${pane.title} in a tab beside ${other.title}`, run: () => { const group = groupOf(layout, other.id); if (group) commitLayout(dock(layout, pane.id, group.id, 'center')); }, disabled: settingsOpen || compact })),
+      { id: `show-${pane.id}`, icon: 'layout', name: `Layout: ${shownPane(pane.id) ? 'Hide' : 'Show'} ${pane.title}`, run: () => commitLayout(setVisible(layout, pane.id, !shownPane(pane.id))), disabled: settingsOpen },
     ]),
-    { id: 'layout-reset', name: 'Layout: Reset to default', run: () => commitLayout(defaultLayout()), disabled: settingsOpen || compact },
-    ...accounts.filter(account => isOn(account.id)).map(account => ({ id: `account-${account.id}`, name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
-    ...withPanes.filter(extension => !extension.bundled).map(extension => ({ id: `extension-${extension.manifest.id}`, name: `Open extension: ${extension.manifest.name}`, run: () => { if (leaveSettings()) activate(paneOf(extension.manifest.id)); } })),
+    { id: 'layout-reset', icon: 'layout', name: 'Layout: Reset to default', run: () => commitLayout(defaultLayout()), disabled: settingsOpen || compact },
+    ...accounts.filter(account => isOn(account.id)).map(account => ({ id: `account-${account.id}`, icon: 'account', name: `Switch account: ${account.settings?.name || account.settings?.address || 'Demo account'}`, run: () => selectAccount(account.id) })),
+    ...withPanes.filter(extension => !extension.bundled).map(extension => ({ id: `extension-${extension.manifest.id}`, icon: 'extension', name: `Open extension: ${extension.manifest.name}`, run: () => { if (leaveSettings()) activate(paneOf(extension.manifest.id)); } })),
   ] as Command[]).map(command => ({ ...command, disabled: command.disabled || busy || !initialized })).concat(
     // Outside the busy check: reloading is the way out when the app is stuck.
-    { id: 'reload', name: 'Reload the app', run: reloadApp, disabled: false },
+    { id: 'reload', name: 'Reload the app', icon: 'refresh', run: reloadApp, disabled: false },
   ));
   // Mail matching what the owner types comes from the extension that searches mail.
   let searcher = $derived(runtimes.list.find(runtime => runtime.searchScope === 'mail'));
@@ -331,6 +348,7 @@
       savedLayout = parseLayout(saved?.workspace); layoutReady = true;
       accent = saved?.accent ?? null;
       font = saved?.font || DEFAULT_FONT; textSize = saved?.font_size || DEFAULT_TEXT_SIZE;
+      spacing = { ...NO_SPACING, ...saved?.text_spacing };
       if (saved?.notifications) notificationPrefs = saved.notifications;
       accountsEnabled = saved?.accounts_enabled ?? {};
     });
@@ -397,6 +415,7 @@
 </div>
 
 {#each runtimes.list.filter(runtime => runtime.dialog) as runtime (runtime.id)}<ExtensionDialog {runtime} />{/each}
+{#each runtimes.list.filter(runtime => runtime.menu?.items) as runtime (runtime.id)}<ContextMenu {runtime} />{/each}
 
 {#if settingsOpen}
   {@const current = settingsPages.find(page => page.id === settingsPage)}
@@ -435,7 +454,13 @@
               <section class="settings-section" aria-labelledby="extension-page-title"><header class="section-head"><h2 id="extension-page-title">{currentExtension.manifest.settings_page.title}</h2><p class="extension-from">From {pageRuntime.name}</p></header><Surface runtime={pageRuntime} surface="settings" /></section>
             {:else if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
           {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} pane={{ shown: shownPane('accounts'), toggle: (on) => workspace.toggle('accounts', on) }} enabled={isOn} ontoggle={toggleAccount} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => settingsBusy = value} />
-          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences}><ToastSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} /></AppearanceSettings>
+          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} {spacing} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences}>{#each contributors('appearance') as extension (extension.manifest.id)}<ExtensionSettings manifest={extension.manifest} section="appearance" bundled={extension.bundled} />{/each}</AppearanceSettings>
+          {:else if settingsPage === 'notifications'}
+            <section class="settings-section" aria-labelledby="notifications-title">
+              <header class="section-head"><h2 id="notifications-title">Notifications</h2><p>Choose what Colecto tells you about, where it shows notifications and whether they reach your desktop.</p></header>
+              {#each contributors('notifications') as extension (extension.manifest.id)}<ExtensionSettings manifest={extension.manifest} section="notifications" bundled={extension.bundled} />{/each}
+              <ToastSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
+            </section>
           {:else if settingsPage === 'servers'}<ServerSettings />
           {:else if settingsPage === 'send-approvals'}<SendApprovals requestId={reviewRequest} />
           {:else if settingsPage === 'api-keys'}<ApiKeys {accounts} />

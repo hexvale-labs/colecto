@@ -469,34 +469,42 @@ fn quote(value: &str) -> Result<String, String> {
             .replace('$', "$$")
     ))
 }
-fn unit(name: &str, command: &[String]) -> Result<String, String> {
-    let mut args = command.to_vec();
-    if name == "notifications" {
-        if args.last().is_some_and(|a| a == "daemon") {
-            args.pop();
-        }
-        args.push("notify".into());
+/// An `Environment=` line. Unlike `ExecStart=`, systemd expands no `$` variables here,
+/// only `%` specifiers.
+fn environment(key: &str, value: &str) -> Result<String, String> {
+    if value.chars().any(|c| c.is_control()) {
+        return Err("Service settings contain control characters".into());
     }
-    let exec = args
+    Ok(format!(
+        "Environment=\"{key}={}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('%', "%%")
+    ))
+}
+/// The one background service. Normally it is the mail service, which also shows desktop
+/// notifications; while this app uses a remote server (`relay`), that server syncs the mail
+/// and the service only shows its notifications.
+fn unit(command: &[String], relay: Option<&Upstream>) -> Result<String, String> {
+    let exec = command
         .iter()
         .map(|s| quote(s))
         .collect::<Result<Vec<_>, _>>()?
         .join(" ");
-    let environment = if name == "daemon" {
-        "Environment=COLECTO_SOCKET=%t/colecto/mail.sock\nRuntimeDirectory=colecto\nRuntimeDirectoryMode=0700\nEnvironment=COLECTO_DATA_DIR=%h/.local/state/colecto\nEnvironmentFile=-%h/.config/colecto/daemon.env"
-    } else {
-        "EnvironmentFile=-%h/.config/colecto/notifications.env\nEnvironment=COLECTO_PUBLIC_ORIGIN=unix:%t/colecto/mail.sock\nEnvironment=COLECTO_TOKEN_FILE=%h/.local/state/colecto/owner-token"
-    };
-    let (ordering, target) = if name == "daemon" {
-        (
-            "After=network-online.target\nWants=network-online.target",
-            "default.target",
-        )
-    } else {
-        (
-            "PartOf=graphical-session.target\nAfter=graphical-session.target",
-            "graphical-session.target",
-        )
+    let (description, environment) = match relay {
+        Some(remote) => (
+            "Colecto notifications from a remote server",
+            format!(
+                "{}\n{}",
+                environment("COLECTO_RELAY_ORIGIN", &remote.address)?,
+                environment("COLECTO_TOKEN_FILE", &remote.token_file.to_string_lossy())?
+            ),
+        ),
+        None => (
+            "Colecto mail service",
+            "Environment=COLECTO_SOCKET=%t/colecto/mail.sock\nRuntimeDirectory=colecto\nRuntimeDirectoryMode=0700\nEnvironment=COLECTO_DATA_DIR=%h/.local/state/colecto".into(),
+        ),
     };
     // An AppImage mounts itself through the setuid `fusermount` helper, which
     // NoNewPrivileges disables: the runtime then exits 127 with "open dir error" on
@@ -507,9 +515,39 @@ fn unit(name: &str, command: &[String]) -> Result<String, String> {
         "NoNewPrivileges=true\n"
     };
     Ok(format!(
-        "# Managed by Colecto\n{VERSION_MARKER}{version}\n[Unit]\nDescription=Colecto {name}\n{ordering}\n\n[Service]\nType=simple\nExecStart={exec}\n{environment}\nUMask=0077\nRestart=on-failure\nRestartSec=5\n{hardening}\n[Install]\nWantedBy={target}\n",
+        "# Managed by Colecto\n# Do not edit: Colecto rewrites this file when it updates the service.\n# Put your own settings in ~/.config/colecto/daemon.env instead.\n{VERSION_MARKER}{version}\n[Unit]\nDescription={description}\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={exec}\n{environment}\nEnvironmentFile=-%h/.config/colecto/daemon.env\nUMask=0077\nRestart=on-failure\nRestartSec=5\n{hardening}\n[Install]\nWantedBy=default.target\n",
         version = crate::VERSION
     ))
+}
+/// Colecto 0.6 and earlier installed notifications as a second unit. The mail service now
+/// shows them itself, so a Colecto-managed notifier left from then is removed at startup.
+pub(crate) async fn retire_notifier(control: Control) {
+    if !cfg!(target_os = "linux") || !control.local || control.command.is_none() {
+        return;
+    }
+    let Ok(directory) = config_home() else {
+        return;
+    };
+    let path = directory.join("systemd/user/colecto-notifications.service");
+    if !path.exists() {
+        return;
+    }
+    if let Err(error) = managed(&path) {
+        tracing::info!(%error, "Leaving colecto-notifications.service alone");
+        return;
+    }
+    let _ = control
+        .run(&["disable", "--now", "colecto-notifications.service"])
+        .await;
+    match std::fs::remove_file(&path) {
+        Ok(()) => {
+            let _ = control.run(&["daemon-reload"]).await;
+            tracing::info!(
+                "Removed colecto-notifications.service; the mail service shows notifications now"
+            );
+        }
+        Err(error) => tracing::warn!(%error, "Could not remove colecto-notifications.service"),
+    }
 }
 /// Whether `path` is an AppImage, by its magic bytes ("AI" and the type at offset 8 of the
 /// ELF header), because AppImage managers rename the file.
@@ -581,13 +619,8 @@ async fn systemctl(args: &[&str]) -> Result<bool, String> {
 }
 /// Confirm a service that systemd just started is still running. With `Restart=on-failure`
 /// a unit whose executable cannot start loops forever while `start` reports success, so
-/// watch it briefly: the daemon until its socket answers, the notifier for a moment.
-async fn started(control: &Control, name: &str, filename: &str) -> Result<(), String> {
-    let socket = if name == "daemon" {
-        socket_path()
-    } else {
-        None
-    };
+/// watch it briefly: the mail service until its socket answers, a relay for a moment.
+async fn started(control: &Control, filename: &str, socket: Option<PathBuf>) -> Result<(), String> {
     let deadline = tokio::time::Instant::now()
         + if socket.is_some() {
             RESTART_GRACE
@@ -617,33 +650,37 @@ async fn service_request(control: &Control, request: Request) -> Result<Response
         if request.method() != Method::GET {
             return Err("User services are supported only on Linux".into());
         }
-        let status = serde_json::json!({"installed":false,"enabled":false,"active":false,"supported":false,"reason":"User services are supported only on Linux"});
-        return Ok(
-            Json(serde_json::json!({"daemon":status,"notifications":status})).into_response(),
-        );
+        let status = serde_json::json!({"installed":false,"enabled":false,"active":false,"supported":false,"relay":false,"reason":"User services are supported only on Linux"});
+        return Ok(Json(serde_json::json!({ "daemon": status })).into_response());
     }
     let supported = cfg!(target_os = "linux")
         && control.command.is_some()
         && control.run(&["show-environment"]).await.unwrap_or(false);
     let directory = config_home()?.join("systemd/user");
+    let filename = "colecto-daemon.service";
+    let path = directory.join(filename);
+    // Switching this app to a remote server makes the unit it would write a relay, so an
+    // installed mail service is offered as an update and follows the switch.
+    let relay = control
+        .upstream
+        .lock()
+        .unwrap()
+        .clone()
+        .filter(|upstream| upstream.address.starts_with("https://"));
     if request.method() == Method::GET && request.uri().path() == "/api/v1/services" {
-        let mut values = serde_json::Map::new();
-        for name in ["daemon", "notifications"] {
-            let unit_name = format!("colecto-{name}.service");
-            let text = std::fs::read_to_string(directory.join(&unit_name)).ok();
-            let version = text.as_deref().and_then(|t| {
-                t.lines()
-                    .find_map(|l| l.strip_prefix(VERSION_MARKER))
-                    .map(str::to_owned)
-            });
-            let expected = control.command.as_ref().map(|c| unit(name, c));
-            let update = match (&text, expected) {
-                (Some(text), Some(Ok(expected))) if supported => update_to(text, &expected),
-                _ => None,
-            };
-            values.insert(name.into(), serde_json::json!({"installed":text.is_some(),"version":version,"update_to":update,"enabled":supported && control.run(&["is-enabled", &unit_name]).await.unwrap_or(false),"active":supported && control.run(&["is-active", &unit_name]).await.unwrap_or(false),"supported":supported,"reason":if supported {None} else {Some("Local systemd user manager or service executable unavailable")},"socket":socket_path().map(|p| p.to_string_lossy().into_owned()),"token_file":std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/colecto/owner-token"))}));
-        }
-        return Ok(Json(values).into_response());
+        let text = std::fs::read_to_string(&path).ok();
+        let version = text.as_deref().and_then(|t| {
+            t.lines()
+                .find_map(|l| l.strip_prefix(VERSION_MARKER))
+                .map(str::to_owned)
+        });
+        let expected = control.command.as_ref().map(|c| unit(c, relay.as_ref()));
+        let update = match (&text, expected) {
+            (Some(text), Some(Ok(expected))) if supported => update_to(text, &expected),
+            _ => None,
+        };
+        let status = serde_json::json!({"installed":text.is_some(),"version":version,"update_to":update,"enabled":supported && control.run(&["is-enabled", filename]).await.unwrap_or(false),"active":supported && control.run(&["is-active", filename]).await.unwrap_or(false),"supported":supported,"relay":relay.is_some(),"reason":if supported {None} else {Some("Local systemd user manager or service executable unavailable")},"socket":socket_path().map(|p| p.to_string_lossy().into_owned()),"token_file":std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/colecto/owner-token"))});
+        return Ok(Json(serde_json::json!({ "daemon": status })).into_response());
     }
     if !supported {
         return Err("User services unavailable".into());
@@ -651,21 +688,13 @@ async fn service_request(control: &Control, request: Request) -> Result<Response
     if request.method() != Method::POST {
         return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
     }
-    let name = request
-        .uri()
-        .path()
-        .strip_prefix("/api/v1/services/")
-        .ok_or("Unknown service")?
-        .to_owned();
-    if !["daemon", "notifications"].contains(&name.as_str()) {
+    if request.uri().path() != "/api/v1/services/daemon" {
         return Err("Unknown service".into());
     }
     let bytes = axum::body::to_bytes(request.into_body(), 4096)
         .await
         .map_err(|e| e.to_string())?;
     let input: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    let filename = format!("colecto-{name}.service");
-    let path = directory.join(&filename);
     managed(&path)?;
     let action = input["action"].as_str().ok_or("Missing action")?;
     if action != "install" && !path.exists() {
@@ -677,14 +706,17 @@ async fn service_request(control: &Control, request: Request) -> Result<Response
         "install" => {
             let autostart = input["autostart"].as_bool().ok_or("Missing autostart")?;
             std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
-            write_unit(&path, &unit(&name, control.command.as_ref().unwrap())?)?;
+            write_unit(
+                &path,
+                &unit(control.command.as_ref().unwrap(), relay.as_ref())?,
+            )?;
             if !control.run(&["daemon-reload"]).await? {
                 return Err("systemctl daemon-reload failed".into());
             }
             if autostart {
-                vec!["enable", "--now", &filename]
+                vec!["enable", "--now", filename]
             } else {
-                vec!["start", &filename]
+                vec!["start", filename]
             }
         }
         "autostart" => vec![
@@ -693,32 +725,40 @@ async fn service_request(control: &Control, request: Request) -> Result<Response
             } else {
                 "disable"
             },
-            &filename,
+            filename,
         ],
         // Rewrites the unit for this Colecto and its executable. Only a running service is
         // restarted, so it picks up the new binary; reenable moves links if WantedBy changed.
         "update" => {
-            running = control.run(&["is-active", &filename]).await?;
-            let enabled = control.run(&["is-enabled", &filename]).await?;
-            write_unit(&path, &unit(&name, control.command.as_ref().unwrap())?)?;
+            running = control.run(&["is-active", filename]).await?;
+            let enabled = control.run(&["is-enabled", filename]).await?;
+            write_unit(
+                &path,
+                &unit(control.command.as_ref().unwrap(), relay.as_ref())?,
+            )?;
             if !control.run(&["daemon-reload"]).await? {
                 return Err("systemctl daemon-reload failed".into());
             }
-            if enabled && !control.run(&["reenable", &filename]).await? {
+            if enabled && !control.run(&["reenable", filename]).await? {
                 return Err("systemctl reenable failed".into());
             }
-            vec!["try-restart", &filename]
+            vec!["try-restart", filename]
         }
-        "start" => vec!["start", &filename],
-        "stop" => vec!["stop", &filename],
-        "uninstall" => vec!["disable", "--now", &filename],
+        "start" => vec!["start", filename],
+        "stop" => vec!["stop", filename],
+        "uninstall" => vec!["disable", "--now", filename],
         _ => return Err("Unknown action".into()),
     };
     if !control.run(&args).await? {
         return Err("systemctl operation failed".into());
     }
     if running {
-        started(control, &name, &filename).await?;
+        started(
+            control,
+            filename,
+            if relay.is_some() { None } else { socket_path() },
+        )
+        .await?;
     }
     if action == "uninstall" {
         std::fs::remove_file(path).map_err(|e| e.to_string())?;
@@ -734,16 +774,28 @@ mod tests {
     #[test]
     fn generated_units() {
         let command = vec!["/opt/My App/colecto".into(), "daemon".into()];
-        let daemon = unit("daemon", &command).unwrap();
+        let daemon = unit(&command, None).unwrap();
+        assert!(daemon.starts_with("# Managed by Colecto\n# Do not edit"));
         assert!(daemon.contains("ExecStart=\"/opt/My App/colecto\" \"daemon\""));
         assert!(daemon.contains("RuntimeDirectoryMode=0700"));
-        let notify = unit("notifications", &command).unwrap();
-        assert!(notify.contains("\"notify\""));
-        assert!(!notify.contains("\"daemon\""));
-        assert!(notify.contains("unix:%t/colecto/mail.sock"));
-        assert!(notify.contains("WantedBy=graphical-session.target"));
         assert!(daemon.contains(&format!("\n# Colecto-Version: {}\n", crate::VERSION)));
         assert!(daemon.contains("NoNewPrivileges=true"));
+        assert!(daemon.contains("WantedBy=default.target"));
+        assert!(!daemon.contains("RELAY"));
+        // While the app uses a remote server, the same unit only relays its notifications.
+        let remote = Upstream {
+            address: "https://mail.example.org".into(),
+            token_file: "/home/me/50% \"off\"/upstream-token".into(),
+        };
+        let relay = unit(&command, Some(&remote)).unwrap();
+        assert!(relay.contains("Environment=\"COLECTO_RELAY_ORIGIN=https://mail.example.org\""));
+        assert!(
+            relay.contains(
+                r#"Environment="COLECTO_TOKEN_FILE=/home/me/50%% \"off\"/upstream-token""#
+            )
+        );
+        assert!(!relay.contains("COLECTO_SOCKET"));
+        assert_eq!(update_to(&daemon, &relay), Some(crate::VERSION));
     }
     /// Regression: an AppImage cannot mount itself under NoNewPrivileges, so a unit for one
     /// failed on every start (exit 127, "open dir error") after Update switched to it.
@@ -755,24 +807,22 @@ mod tests {
         std::fs::write(&image, b"\x7fELF\x02\x01\x01\x00AI\x02\x00\x00rest").unwrap();
         let binary = dir.path().join("colecto");
         std::fs::write(&binary, b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00rest").unwrap();
-        for name in ["daemon", "notifications"] {
-            let command = |path: &Path| vec![path.to_string_lossy().into_owned(), "daemon".into()];
-            assert!(
-                !unit(name, &command(&image))
-                    .unwrap()
-                    .contains("NoNewPrivileges")
-            );
-            assert!(
-                unit(name, &command(&binary))
-                    .unwrap()
-                    .contains("NoNewPrivileges=true")
-            );
-        }
+        let command = |path: &Path| vec![path.to_string_lossy().into_owned(), "daemon".into()];
+        assert!(
+            !unit(&command(&image), None)
+                .unwrap()
+                .contains("NoNewPrivileges")
+        );
+        assert!(
+            unit(&command(&binary), None)
+                .unwrap()
+                .contains("NoNewPrivileges=true")
+        );
         assert!(!appimage(&dir.path().join("missing")));
     }
     #[test]
     fn unit_updates() {
-        let current = unit("daemon", &["/usr/bin/colecto".into(), "daemon".into()]).unwrap();
+        let current = unit(&["/usr/bin/colecto".into(), "daemon".into()], None).unwrap();
         assert_eq!(update_to(&current, &current), None);
         // Units from before versioning, older versions and moved executables are offered.
         let legacy = current.replace(&format!("# Colecto-Version: {}\n", crate::VERSION), "");
@@ -792,15 +842,15 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut control = Control::open(directory.path(), true, None).unwrap();
         control.runner = |args| Box::pin(async move { Ok(args[0] != "is-active") });
-        let error = started(&control, "notifications", "colecto-notifications.service")
+        let error = started(&control, "colecto-daemon.service", None)
             .await
             .unwrap_err();
         assert!(
-            error.contains("journalctl --user -u colecto-notifications.service"),
+            error.contains("journalctl --user -u colecto-daemon.service"),
             "{error}"
         );
         control.runner = |_| Box::pin(async { Ok(true) });
-        started(&control, "notifications", "colecto-notifications.service")
+        started(&control, "colecto-daemon.service", None)
             .await
             .expect("a service that keeps running is fine");
     }

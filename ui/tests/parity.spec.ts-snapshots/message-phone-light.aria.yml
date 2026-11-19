@@ -15,13 +15,17 @@
     - button "Reply"
     - button "Reply all"
     - button "Forward"
+    - button "Starred" [pressed]
   - button "Copy message text"
   - article:
     - heading "A small plan for the weekend" [level=2]
     - strong: Maya Chen
     - text: maya@example.test
     - time: /Friday, November 6, \d+/
-    - text: Hey, I found a little bookshop by the river. Coffee, a walk, and no particular agenda? Let me know what you think. Maya
+    - paragraph: Hey,
+    - paragraph: I found a little bookshop by the river. Coffee, a walk, and no particular agenda?
+    - paragraph: Let me know what you think.
+    - paragraph: Maya
 - navigation "Mail folders":
   - button "Inbox"
   - button "Drafts"

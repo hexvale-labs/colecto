@@ -11,6 +11,8 @@ export interface AiSettings {
   autolabel: boolean;
   /** Account id → local label name → rule. */
   labels: Record<string, Record<string, LabelRule>>;
+  /** One request to either service, connecting included: 5 to 600 seconds. */
+  timeout_seconds: number;
 }
 export interface SettingsView { settings: AiSettings; keys: { text: boolean; decision: boolean } }
 export interface Preview { errors: (string | null)[]; checked: number; count: number; matches: { subject: string; sender: string }[] }

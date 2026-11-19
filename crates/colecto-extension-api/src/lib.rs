@@ -41,6 +41,10 @@ pub struct Message {
     pub subject: String,
     pub body: String,
     pub date: String,
+    /// The conversation this message belongs to (API 2): JMAP's `threadId`, or for IMAP the
+    /// first `References` id, else `In-Reply-To`, else its own `Message-ID`. Empty when unknown.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub thread: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -393,6 +397,14 @@ pub struct SettingOption {
     pub value: String,
     pub label: String,
 }
+/// A core Settings section an extension setting may appear in instead of the extension's
+/// own page (API 2). Sections that hold credentials, connections or keys accept none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SettingSection {
+    Appearance,
+    Notifications,
+}
 /// The control an owner uses for one extension setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -422,6 +434,9 @@ pub struct ExtensionSetting {
     pub unit: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<Vec<SettingOption>>,
+    /// Show this setting in a core Settings section rather than the extension's own page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<SettingSection>,
 }
 impl ExtensionSetting {
     pub fn accepts(&self, value: &serde_json::Value) -> bool {

@@ -5,6 +5,7 @@ import type { IconName } from '../Icon.svelte';
 export const settingsPages = [
   { id: 'accounts', name: 'Accounts', icon: 'account' },
   { id: 'appearance', name: 'Appearance', icon: 'palette' },
+  { id: 'notifications', name: 'Notifications', icon: 'bell' },
   { id: 'servers', name: 'Connection', icon: 'server' },
   { id: 'extensions', name: 'Extensions', icon: 'extension' },
   { id: 'api-keys', name: 'API keys', icon: 'key' },
@@ -17,7 +18,6 @@ export type Folder = 'Inbox' | 'Drafts' | 'Sent';
 /** Settings sections that bundled extensions draw, by their old page name. */
 const extensionPages = {
   mail: { extension: 'inbox', name: 'Mail' },
-  notifications: { extension: 'notifications', name: 'Notifications' },
   privacy: { extension: 'reader', name: 'Privacy' },
   ai: { extension: 'ai', name: 'AI' },
 } as const;

@@ -13,6 +13,7 @@
     event: (node, kind, value) => runtime.event('dialog', node, kind, value),
     files: (node, files, buffers) => runtime.files('dialog', node, files, buffers),
     may: capability => runtime.capabilities.includes(capability),
+    menu: (node, key, x, y) => runtime.openMenu('dialog', node, key, x, y),
   });
   function open(node: HTMLDialogElement) { node.showModal(); return { destroy() { node.close(); } }; }
   function close() { runtime.dialog = null; runtime.event('dialog', '', 'close'); }
@@ -32,4 +33,8 @@
 <style>
   .x-dialog-head { align-items: center; padding-bottom: 0; }
   .x-dialog-source { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); font-weight: 560; }
+  /* An extension's dialog is usually one form, so the body's gap would not reach its fields
+     and the controls sat flush against each other (#86). A heading keeps its lead-in close. */
+  .sheet-body > :global(form) { display: grid; gap: 16px; }
+  .sheet-body > :global(form > :is(h2, h3) + .x-text) { margin-top: -10px; }
 </style>

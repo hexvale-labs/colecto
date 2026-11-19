@@ -329,6 +329,7 @@ mod tests {
                 execution: Arc::new(tokio::sync::Semaphore::new(2)),
                 sync: Arc::default(),
                 credentials: Arc::default(),
+                windows: Arc::default(),
             },
             dir,
         )

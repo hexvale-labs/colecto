@@ -33,6 +33,15 @@
     clearTimeout(timer);
     timer = setTimeout(() => emit('input', { value }), p<number>('debounce_ms') ?? 0);
   }
+  /** Fit a textarea's height to its text, without a scrollbar. */
+  function grow(field: HTMLTextAreaElement) {
+    const fit = () => { field.style.height = 'auto'; field.style.height = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`; };
+    const observer = new ResizeObserver(fit);
+    observer.observe(field);
+    field.addEventListener('input', fit);
+    queueMicrotask(fit);
+    return { destroy() { observer.disconnect(); field.removeEventListener('input', fit); } };
+  }
   function controlled(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
     field.value = value;
     return {
@@ -117,6 +126,7 @@
   {@const preset = p<string>('preset')}
   <fieldset class={preset === 'chips' ? 'message-labels' : preset === 'compose_fields' ? 'compose-fields' : 'settings-group'} disabled={p('disabled')}>
     {#if p('legend')}<legend class={p('legend_hidden') ? 'sr-only' : 'group-label'}>{p('legend')}</legend>{/if}
+    {#if preset === 'chips'}<span class="labels-mark" aria-hidden="true"><Icon name="tag" size={14} /></span>{/if}
     {@render children()}
   </fieldset>
 {:else if node.type === 'grid'}
@@ -147,7 +157,9 @@
   {:else if preset === 'list_status'}
     <span class="list-status" class:offline={p('tone') === 'danger'} aria-live="polite" title={p('title')}><span class="status-text">{spans?.[0]?.text ?? p('text')}</span>{#if spans?.[1]?.text}<span class="status-detail">{spans[1].text}</span>{/if}</span>
   {:else if preset === 'body'}
-    <div class="letter-body">{p('text')}</div>
+    <!-- Blank lines become paragraphs, so paragraph spacing can widen them; by default the
+         gap is one line, as before. -->
+    <div class="letter-body">{#each String(p('text') ?? '').split(/\n[ \t]*\n/) as paragraph, index (index)}<p>{paragraph}</p>{/each}</div>
   {:else if preset === 'note'}
     <p class="content-note" role={p('role')}>{p('text')}</p>
   {:else if preset === 'error'}
@@ -193,21 +205,25 @@
   {@const variant = p<string>('variant') ?? 'secondary'}
   {@const iconOnly = p('icon_only') || variant === 'icon' || variant === 'chip_remove' || variant === 'plain_remove' || variant === 'compose_icon'}
   {@const icon = typeof p('copy') === 'string' && copied !== null ? (copied ? 'check' : 'copy') : p<IconName>('icon')}
-  <button type={p('submit') ? 'submit' : 'button'} class="{classes[variant]}{p('icon') === 'back' && variant === 'icon' ? ' back' : ''}{p('icon') === 'refresh' && variant === 'icon' ? ' refresh' : ''}{p('push') ? (typeof p('copy') === 'string' ? ' copy-tool push' : ' push') : typeof p('copy') === 'string' ? ' copy-tool' : ''}" class:spinning={p('busy')} disabled={p('disabled')} aria-pressed={p('pressed')} aria-label={iconOnly || p('title') ? p('label') : undefined} title={p('title')} data-command={node.id} onclick={press}>
+  <button type={p('submit') ? 'submit' : 'button'} class="{classes[variant]}{p('icon') === 'back' && variant === 'icon' ? ' back' : ''}{p('icon') === 'refresh' && variant === 'icon' ? ' refresh' : ''}{p('push') ? (typeof p('copy') === 'string' ? ' copy-tool push' : ' push') : typeof p('copy') === 'string' ? ' copy-tool' : ''}" class:spinning={p('busy')} data-icon={p('icon')} disabled={p('disabled')} aria-pressed={p('pressed')} aria-label={iconOnly || p('title') ? p('label') : undefined} title={p('title')} data-command={node.id} onclick={press}>
     {#if icon && variant !== 'primary'}<Icon name={icon} size={variant === 'icon' && p('icon') === 'back' ? 18 : variant === 'icon' && p('icon') === 'refresh' ? 15 : variant === 'chip_remove' || variant === 'plain_remove' ? 12 : undefined} />{/if}
     {#if !iconOnly}{#if p('live')}<span aria-live="polite">{typeof p('copy') === 'string' ? (copied === null ? 'Copy' : copied ? 'Copied' : 'Copy failed') : p('label')}</span>{:else if variant === 'primary' || variant === 'secondary' || variant === 'text' || variant === 'chip'}{p('label')}{:else}<span>{p('label')}</span>{/if}{#if p('detail')}<small>{p('detail')}</small>{/if}{/if}
     {#if icon && variant === 'primary'}<Icon name={icon} size={14} />{/if}
   </button>
 {:else if node.type === 'menu_button'}
-  <MenuButton label={p<string>('label')} items={p('items')} disabled={p('disabled')} onselect={(item) => emit('select', { item })} />
+  <MenuButton label={p<string>('label')} icon={p<IconName>('icon')} items={p('items')} disabled={p('disabled')} onselect={(item) => emit('select', { item })} />
 {:else if node.type === 'action_ref'}
   <ActionRef action={p<string>('action')} labelled={p<boolean>('labelled')} />
 {:else if node.type === 'input'}
   {#if p('kind') === 'search' && p('label_hidden')}
     <Icon name="search" />
     <label class="sr-only" for={fieldId}>{p('label')}</label>
-    <input id={fieldId} data-node={node.id} type="search" use:controlled={p<string>('value') ?? ''} placeholder={p('placeholder')} maxlength={p('maxlength')} enterkeyhint={p('enterkeyhint')} autocapitalize={p('autocapitalize')} disabled={p('disabled')}
-      oninput={(event) => typed(event.currentTarget.value)} onchange={(event) => { if (p('report') !== 'input') emit('change', { value: event.currentTarget.value }); }} />
+    <!-- A one-line field that grows to show a long query instead of scrolling sideways (#103).
+         Enter still searches, and line breaks never reach the value. -->
+    <textarea id={fieldId} data-node={node.id} rows="1" use:controlled={p<string>('value') ?? ''} use:grow placeholder={p('placeholder')} maxlength={p('maxlength')} enterkeyhint={p('enterkeyhint')} autocapitalize={p('autocapitalize')} spellcheck="false" disabled={p('disabled')}
+      onkeydown={(event) => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }}
+      oninput={(event) => { const field = event.currentTarget; if (/[\r\n]/.test(field.value)) field.value = field.value.replace(/[\r\n]+/g, ' '); typed(field.value); }}
+      onchange={(event) => { if (p('report') !== 'input') emit('change', { value: event.currentTarget.value }); }}></textarea>
   {:else if p('preset') === 'chip'}
     <input id={fieldId} data-node={node.id} aria-label={p('label')} placeholder={p('placeholder')} maxlength={p('maxlength')} use:controlled={p<string>('value') ?? ''} disabled={p('disabled')} oninput={(event) => typed(event.currentTarget.value)} />
   {:else if p('preset') === 'row'}
@@ -268,7 +284,7 @@
   <SecretField label={p<string>('label')} target={p<'ai.text' | 'ai.decision'>('target')} saved={p<boolean>('saved')} onsaved={(saved) => emit('saved', { saved })} />
 {:else if node.type === 'list'}
   {#if p('mode') === 'virtual'}
-    <List rows={p<Row[]>('rows')} selected={p<string>('selected')} arrived={p<string[]>('arrived') ?? []} onselect={(key) => emit('select', { key })} empty={children} />
+    <List rows={p<Row[]>('rows')} selected={p<string>('selected')} arrived={p<string[]>('arrived') ?? []} onselect={(key) => emit('select', { key })} onmenu={p('context_menu') && node.id && surface.menu ? (key, x, y) => surface.menu!(node.id!, key, x, y) : undefined} empty={children} />
   {:else}
     <ul class="x-list" aria-label={p('label')}>{#each p<Row[]>('rows') as row (row.key)}<li data-kind={row.kind}><Self node={row.node} /></li>{/each}</ul>
   {/if}
@@ -313,8 +329,8 @@
   .x-stack[data-scroll='y'] { overflow-y: auto; min-height: 0; }
   .x-stack[data-scroll='x'] { overflow-x: auto; }
   .x-group { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .x-heading { color: var(--ink); letter-spacing: -0.01em; }
-  .x-text { color: var(--ink); font-size: calc(14px * var(--text-scale)); line-height: 1.55; overflow-wrap: anywhere; }
+  .x-heading { color: var(--ink); letter-spacing: calc(-0.01em + var(--letter-spacing)); }
+  .x-text { color: var(--ink); font-size: calc(14px * var(--text-scale)); line-height: calc(1.55 * var(--line-scale)); overflow-wrap: anywhere; }
   .x-text[data-size='sm'] { font-size: calc(12.5px * var(--text-scale)); }
   .x-text[data-tone='muted'] { color: var(--ink-3); }
   .x-text[data-tone='danger'] { color: var(--danger); }
@@ -336,7 +352,7 @@
   button small { color: var(--ink-3); font-weight: 450; }
   .x-hinted { flex-wrap: wrap; }
   .x-hinted label { position: relative; flex: 1 1 auto; justify-content: center; padding: 0 8px; }
-  .tip { position: absolute; bottom: calc(100% + 8px); left: 50%; z-index: 1; width: max-content; max-width: 280px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--float); color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); line-height: 1.4; white-space: normal; text-align: center; pointer-events: none; visibility: hidden; opacity: 0; transform: translate(-50%, 2px); transition: opacity 120ms ease, transform 120ms var(--ease-out), visibility 0s 120ms; }
+  .tip { position: absolute; bottom: calc(100% + 8px); left: 50%; z-index: 1; width: max-content; max-width: 280px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--float); color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); line-height: calc(1.4 * var(--line-scale)); white-space: normal; text-align: center; pointer-events: none; visibility: hidden; opacity: 0; transform: translate(-50%, 2px); transition: opacity 120ms ease, transform 120ms var(--ease-out), visibility 0s 120ms; }
   @media (hover: hover) and (pointer: fine) { .x-hinted label:hover .tip { visibility: visible; opacity: 1; transform: translate(-50%, 0); transition-delay: 350ms; } }
   .x-hinted label:has(input:focus-visible) .tip { visibility: visible; opacity: 1; transform: translate(-50%, 0); transition-delay: 0ms; }
   .x-hinted label:first-child .tip { left: 0; transform: translate(0, 2px); }

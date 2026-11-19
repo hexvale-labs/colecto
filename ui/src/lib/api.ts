@@ -1,7 +1,8 @@
 // Version 1 wire contracts mirror colecto-extension-api. Rust validates all input.
+import type { TextSpacing } from './text-spacing.svelte';
 import type { Discovery } from './discovery';
 export type Labels = Record<string, string[]>;
-export interface Message { seen: boolean; flagged: boolean; id: string; sender: string; address: string; subject: string; body: string; date: string }
+export interface Message { seen: boolean; flagged: boolean; id: string; sender: string; address: string; subject: string; body: string; date: string; thread?: string }
 export interface MailSnapshot { folder: string; messages: Message[]; fetched_at: number | null }
 export class ServiceError extends Error { constructor(message: string, readonly category: string, readonly status?: number) { super(message); this.name = 'ServiceError'; } }
 export interface Draft { id: string; recipient: string; cc?: string; subject: string; body: string; in_reply_to?: string; references?: string; forward_of?: string }
@@ -13,7 +14,7 @@ export interface MailItem { id: string; name: string; subject: string; preview: 
 export interface AccountSettings { name: string; address: string; protocol: 'imap' | 'jmap'; imap_host: string; imap_port: number; smtp_host: string; smtp_port: number; username: string; session_url: string; imap_starttls?: boolean; tls_certificate?: string }
 export interface AccountInfo { id: string; settings: AccountSettings | null; connected: boolean; configured: boolean }
 /** `version` is the Colecto that wrote the unit; `update_to` is set when this app can rewrite it. */
-export interface BackgroundService { installed: boolean; version?: string | null; update_to?: string | null; enabled: boolean; active: boolean; supported: boolean; reason?: string | null; socket?: string | null; token_file?: string | null }
+export interface BackgroundService { installed: boolean; version?: string | null; update_to?: string | null; enabled: boolean; active: boolean; supported: boolean; reason?: string | null; socket?: string | null; token_file?: string | null; relay?: boolean }
 export interface Upstream { address: string; token_file: string }
 /** A socket names its daemon's token file; a remote origin sends its access token once. */
 export type UpstreamInput = { address: string; token_file: string } | { address: string; token?: string };
@@ -71,7 +72,7 @@ export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right'
 export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner; updates: boolean }
 /** Message list rows: two lines with a preview, a shorter version, or one line. */
 export type ListDensity = 'full' | 'medium' | 'compact';
-export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; notifications: NotificationPreferences; remote_images: boolean; list_density: ListDensity; date_groups: boolean; notified_release: string | null; accounts_enabled: Record<string, boolean>; onboarded: boolean; prefetch: PrefetchPreferences }
+export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; text_spacing: TextSpacing; notifications: NotificationPreferences; remote_images: boolean; list_density: ListDensity; date_groups: boolean; notified_release: string | null; accounts_enabled: Record<string, boolean>; onboarded: boolean; prefetch: PrefetchPreferences }
 /** A stable release newer than the running build, from the Host's cached GitHub check. */
 export interface LatestRelease { current: string; latest: { version: string; url: string } | null }
 /** Accounts the owner never switched use this: the demo account starts off, every other account on. */
@@ -98,8 +99,8 @@ export const hostService = {
   disconnect: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}/disconnect`, {}),
   security: () => request<SecurityInfo>('host', 'demo', '/security'),
   /** Linux user services this app can install (local service only). */
-  services: () => request<Record<'daemon' | 'notifications', BackgroundService>>('host', 'demo', '/services'),
-  serviceAction: (name: 'daemon' | 'notifications', input: { action: 'install'; autostart: boolean } | { action: 'autostart'; enabled: boolean } | { action: 'start' | 'stop' | 'uninstall' | 'update' }) => request<boolean>('host', 'demo', `/services/${name}`, input),
+  services: () => request<Record<'daemon', BackgroundService>>('host', 'demo', '/services'),
+  serviceAction: (name: 'daemon', input: { action: 'install'; autostart: boolean } | { action: 'autostart'; enabled: boolean } | { action: 'start' | 'stop' | 'uninstall' | 'update' }) => request<boolean>('host', 'demo', `/services/${name}`, input),
   /** The daemon (socket or remote origin) this app forwards to, or null for its built-in service. */
   upstream: async () => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream')).upstream,
   setUpstream: async (value: UpstreamInput | null) => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream', value, 'PUT')).upstream,
@@ -218,5 +219,5 @@ export function subscribeEvents(onevent: EventListener): () => void {
   };
 }
 
-export interface ExtensionSetting { key: string; label: string; description?: string; type: "toggle" | "range" | "choice" | "text"; default: boolean | number | string; min?: number; max?: number; step?: number; unit?: string; options?: {value: string; label: string}[] }
+export interface ExtensionSetting { key: string; label: string; description?: string; type: "toggle" | "range" | "choice" | "text"; default: boolean | number | string; min?: number; max?: number; step?: number; unit?: string; options?: {value: string; label: string}[]; section?: 'appearance' | 'notifications' }
 export interface ExtensionSettings { schema: ExtensionSetting[]; values: Record<string, boolean | number | string> }

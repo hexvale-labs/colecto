@@ -81,6 +81,7 @@ just install browsers # install the test browsers once
 just test browser     # browser flows and a real Host restart
 just test native      # desktop window smoke test (Linux, needs xvfb)
 just test jmap        # send/receive/search/attachments against a real JMAP server (Docker)
+just test mail        # the same over IMAP and SMTP (GreenMail in Docker, ports 3993 and 465)
 just perf-check       # verification plus three recorded resource runs
 ```
 
@@ -164,8 +165,13 @@ it by hand from the Actions tab (**Release → Run workflow**): it builds everyt
 publishes nothing. Tick **artifacts** to download the installers from the run; only tag
 runs and runs with that box ticked upload them, so the other runs cannot be failed
 by an outage of GitHub's artifact service. If a tag run fails on an upload, use
-**Re-run failed jobs**: the build caches make the rerun quick. Nothing is code-signed; see
-[installing](install.md). Release notes come from `.github/release-notes/<tag>.md`
+**Re-run failed jobs**: the build caches make the rerun quick. Desktop installers are not
+code-signed; see [installing](install.md). Android APKs are signed with the project key
+in the `ANDROID_KEYSTORE_BASE64` (a base64 PKCS12 keystore, key alias `colecto`) and
+`ANDROID_KEYSTORE_PASSWORD` secrets, so each release installs over the last. Tag runs
+fail without them; other runs fall back to a throwaway key. The maintainer keeps the
+only backup of that key: an APK signed with a different key cannot update an installed
+app. Release notes come from `.github/release-notes/<tag>.md`
 when that file exists. When the `AUR_SSH_PRIVATE_KEY` secret is set, the release also
 updates the `colecto`, `colecto-bin` and `colecto-git` AUR packages (see
 `packaging/aur/README.md`).
@@ -241,7 +247,7 @@ from scratch.
   the newest Rust and Bun package cache of each kind per branch and deletes the ones superseded
   by a newer toolchain or lockfile. GitHub also evicts anything unused for
   7 days, which is why `release.yml` runs twice a week.
-- `just test jmap` runs workspace-wide (`cargo test --test jmap_server`), not with
+- `just test jmap` and `just test mail` run workspace-wide (`cargo test --test jmap_server`), not with
   `-p colecto-core`: selecting one package changes dependency features and would
   rebuild dozens of crates the shared cache already holds.
 - `.github/actions/apt-install` times a small download from each Ubuntu mirror and

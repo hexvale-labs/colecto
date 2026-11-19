@@ -41,10 +41,10 @@ const shape = (props: Record<string, Check>, required: string[] = []): Check => 
   && required.every(key => key in (value as object));
 
 // The closed icon set of API 1; `crates/colecto-package/src/manifest.rs` lists the same names.
-export const ICONS = ['account', 'alert', 'attach', 'back', 'bell', 'check', 'close', 'compose', 'copy', 'cpu',
-  'download', 'drafts', 'extension', 'forward', 'image', 'inbox', 'info', 'key', 'layout', 'mail', 'next',
+export const ICONS = ['account', 'alert', 'archive', 'attach', 'back', 'bell', 'check', 'close', 'compose', 'copy', 'cpu',
+  'download', 'drafts', 'extension', 'eye', 'filter', 'folder', 'forward', 'image', 'inbox', 'info', 'key', 'layout', 'mail', 'next',
   'palette', 'pencil', 'plus', 'refresh', 'reply', 'replyAll', 'search', 'sent', 'server', 'settings', 'shield',
-  'sidebar', 'sort', 'text', 'trash'] as const satisfies readonly IconName[];
+  'sidebar', 'sort', 'sparkles', 'star', 'tag', 'text', 'trash'] as const satisfies readonly IconName[];
 const icon = oneOf(...ICONS);
 const tone = oneOf('default', 'muted', 'danger', 'ok');
 const span = shape({ text, style: oneOf('plain', 'strong', 'code', 'kbd', 'muted') }, ['text']);
@@ -87,8 +87,8 @@ export const VOCABULARY: Record<string, Spec> = {
   file_picker: { props: { ...control, label, icon, multiple: bool } , required: ['label'] },
   secret_field: { props: { label, target: oneOf('ai.text', 'ai.decision'), saved: bool }, required: ['label', 'target'] },
   // Children are what a virtual list shows while it has no rows (loading, empty, searching).
-  list: { container: true, props: { label, rows: () => true, selected: label, selection: oneOf('none', 'single'), mode: oneOf('static', 'virtual'), arrived: list(label, 64) }, required: ['rows'] },
-  message_row: { props: { sender: text, date: label, date_title: text, subject: text, preview: text, unread: bool, disabled: bool } },
+  list: { container: true, props: { label, rows: () => true, selected: label, selection: oneOf('none', 'single'), mode: oneOf('static', 'virtual'), arrived: list(label, 64), context_menu: bool }, required: ['rows'] },
+  message_row: { props: { sender: text, date: label, date_title: text, subject: text, preview: text, unread: bool, starred: bool, disabled: bool } },
   empty_state: { props: { title: label, text, hint: list(span, 16), image: oneOf('colecto'), preset: oneOf('list', 'welcome', 'error') }, nodes: ['actions'] },
   loading: { props: { text: label } },
   skeleton: { props: { lines: int(1, 6) } },
@@ -159,6 +159,7 @@ export type Outgoing =
   | { t: 'leave'; surface: string }
   | { t: 'focus'; surface: string; node: string }
   | { t: 'dialog'; tree: Node | null }
+  | { t: 'menu'; surface: string; node: string; key: string; items: MenuItem[] }
   | { t: 'contribute'; slot: string; tree: Node | null }
   | { t: 'commands'; items: { id: string; name: string; disabled?: boolean }[] }
   | { t: 'command_search'; scope: string }
@@ -166,6 +167,10 @@ export type Outgoing =
   | { t: 'app_actions'; items: { id: string; label: string; icon?: IconName; shortcut?: string; disabled?: boolean }[] }
   | { t: 'download'; name: string; data: { $buffer: number } }
   | { t: 'frame'; bitmap: { $buffer: number }; x?: number; y?: number };
+
+/** One entry of a row's context menu (API 2); `separator` draws a line before it. */
+export interface MenuItem { id: string; label: string; icon?: IconName; danger?: boolean; disabled?: boolean; checked?: boolean; separator?: boolean }
+const menuItem = shape({ id: label, label, icon, danger: bool, disabled: bool, checked: bool, separator: bool }, ['id', 'label']);
 
 export interface ToastAction { id: string; label: string; primary?: boolean; navigate?: string; account?: string; reject_send?: string; review_send?: string; url?: string }
 const toastAction = shape({ id: label, label, primary: bool, navigate: str(64), account: str(128), reject_send: str(128), review_send: str(128), url: (value: unknown) => typeof value === 'string' && value.length <= 2048 && /^https:\/\//.test(value) }, ['id', 'label']);
@@ -206,6 +211,9 @@ export function checkOutgoing(message: unknown, surfaces: readonly string[]): Ou
       return m as Outgoing;
     case 'dialog':
       if (m.tree !== null) checkTree(m.tree);
+      return m as Outgoing;
+    case 'menu':
+      if (!shape({ t: () => true, surface: label, node: nodeId, key: label, items: list(menuItem, 24) }, ['surface', 'node', 'key', 'items'])(m) || !surfaces.includes(m.surface as string)) fail('Invalid menu');
       return m as Outgoing;
     case 'contribute':
       if (typeof m.slot !== 'string' || !/^[a-z0-9-]+\/v[1-9][0-9]*\/[a-z0-9_-]{1,48}$/.test(m.slot)) fail('Invalid slot');

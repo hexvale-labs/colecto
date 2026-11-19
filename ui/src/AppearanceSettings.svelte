@@ -2,10 +2,19 @@
   import Icon from './Icon.svelte';
   import Select from './Select.svelte';
   import { bundledFonts, canListAllFonts, familyOf, listAllFonts, loadBundled, probeSystemFonts, textSizes } from './lib/typography';
-  let { value, font, textSize, onchange, ontypography, children }: {
-    value: string | null; font: string; textSize: number;
-    onchange: (accent: string) => void; ontypography: (change: { font?: string; font_size?: number }) => void; children?: import('svelte').Snippet;
+  import type { TextSpacing } from './lib/text-spacing.svelte';
+  let { value, font, textSize, spacing, onchange, ontypography, children }: {
+    value: string | null; font: string; textSize: number; spacing: TextSpacing;
+    onchange: (accent: string) => void; ontypography: (change: { font?: string; font_size?: number; text_spacing?: TextSpacing }) => void; children?: import('svelte').Snippet;
   } = $props();
+  // More room around letters, words, lines and paragraphs helps many readers with dyslexia.
+  const spacings: { key: keyof TextSpacing; name: string; text: string }[] = [
+    { key: 'letter', name: 'Letter spacing', text: 'Space between characters.' },
+    { key: 'word', name: 'Word spacing', text: 'Space between words.' },
+    { key: 'line', name: 'Line height', text: 'Space between lines.' },
+    { key: 'paragraph', name: 'Paragraph spacing', text: 'Space between paragraphs, in mail and descriptions.' },
+  ];
+  const steps = ['Normal', 'More', 'Most'];
   let systemFonts = $state(probeSystemFonts());
   let fontNote = $state('');
   let fontOptions = $derived([
@@ -39,11 +48,11 @@
 
 <section class="settings-section" aria-labelledby="appearance-title">
   <header class="section-head"><h2 id="appearance-title">Appearance</h2>
-  <p>Colecto stays dark. Choose how text looks, the accent used for selection, focus and primary buttons, and where notifications appear.</p></header>
+  <p>Colecto stays dark. Choose how text looks, the accent used for selection, focus and primary buttons, and how the message list is laid out.</p></header>
   <div class="settings-group">
     <h3 class="group-label">Text</h3>
     <div class="setting">
-      <div class="setting-text"><h3 id="font-title">Font</h3><p>Bundled fonts work offline on every device. System fonts must be installed where you use Colecto.</p></div>
+      <div class="setting-text"><h4 id="font-title">Font</h4><p>Bundled fonts work offline on every device. System fonts must be installed where you use Colecto.</p></div>
       <div class="font-picker">
         <Select label="Interface font" value={font} options={fontOptions} onopen={() => void loadBundled().catch(() => {})} onchange={(next) => ontypography({ font: next })}>
           {#snippet trigger(current)}<span class="font-current" style:font-family={familyOf(current?.value ?? font)}>{current?.label ?? font}</span>{/snippet}
@@ -54,18 +63,27 @@
     </div>
     <fieldset class="setting setting-row">
       <legend class="sr-only">Text size</legend>
-      <div class="setting-text"><h3>Text size</h3><p>Scales text across the app. Spacing stays compact.</p></div>
+      <div class="setting-text"><h4>Text size</h4><p>Scales text across the app.</p></div>
       <div class="segmented text-sizes">
         {#each textSizes as item (item.size)}
           <label title={`${item.name}, ${item.size}px`}><input type="radio" name="text-size" checked={textSize === item.size} onchange={() => ontypography({ font_size: item.size })} /><span class="sample" style:font-size={`${item.size + 1}px`} aria-hidden="true">Aa</span><span class="sr-only">{item.name}</span></label>
         {/each}
       </div>
     </fieldset>
+    {#each spacings as item (item.key)}
+      <fieldset class="setting setting-row">
+        <legend class="sr-only">{item.name}</legend>
+        <div class="setting-text"><h4>{item.name}</h4><p>{item.text}</p></div>
+        <div class="segmented">
+          {#each steps as step, index (step)}<label><input type="radio" name={`spacing-${item.key}`} checked={spacing[item.key] === index} onchange={() => ontypography({ text_spacing: { ...spacing, [item.key]: index } })} />{step}</label>{/each}
+        </div>
+      </fieldset>
+    {/each}
   </div>
   <div class="settings-group">
     <h3 class="group-label">Colour</h3>
     <div class="setting">
-      <div class="setting-text"><h3 id="accent-title">Accent</h3><p>Used for selection, focus and primary buttons. Pick a preset or any colour.</p></div>
+      <div class="setting-text"><h4 id="accent-title">Accent</h4><p>Used for selection, focus and primary buttons. Pick a preset or any colour.</p></div>
       <div class="swatches" role="radiogroup" aria-labelledby="accent-title">
         {#each presets as preset (preset.color)}
           <label class="swatch" style:--swatch={preset.color} title={preset.name}>

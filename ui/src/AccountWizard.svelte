@@ -329,9 +329,9 @@
   .lookup strong { color: var(--ink); font-weight: 560; }
   .lookup .text-button { margin-left: auto; flex-shrink: 0; }
   .spinner { flex-shrink: 0; width: 15px; height: 15px; border: 2px solid var(--line); border-top-color: var(--mint); border-radius: 50%; animation: spin 700ms linear infinite; }
-  .lookup-hint { margin-top: -6px; line-height: 1.5; }
+  .lookup-hint { margin-top: -6px; line-height: calc(1.5 * var(--line-scale)); }
   .manual { justify-self: start; }
-  .found-note, .limit-note { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border-radius: 10px; font-size: calc(13px * var(--text-scale)); line-height: 1.5; overflow-wrap: anywhere; animation: note-in 260ms var(--ease-out) both; }
+  .found-note, .limit-note { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border-radius: 10px; font-size: calc(13px * var(--text-scale)); line-height: calc(1.5 * var(--line-scale)); overflow-wrap: anywhere; animation: note-in 260ms var(--ease-out) both; }
   .found-note { background: var(--select); color: var(--ink-2); }
   .found-note :global(.icon) { margin-top: 2px; color: var(--mint); }
   .found-note strong, .limit-note strong { color: var(--ink); font-weight: 600; }
@@ -357,7 +357,7 @@
   .review-label { color: var(--ink-3); font-size: calc(12px * var(--text-scale)); }
   .review-value { color: var(--ink); font-size: calc(14px * var(--text-scale)); font-weight: 560; overflow-wrap: anywhere; }
   .review-meta { color: var(--ink-2); font-size: calc(12.5px * var(--text-scale)); font-variant-numeric: tabular-nums; }
-  .review-warn { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; color: oklch(0.85 0.1 75); font-size: calc(12.5px * var(--text-scale)); line-height: 1.45; }
+  .review-warn { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; color: oklch(0.85 0.1 75); font-size: calc(12.5px * var(--text-scale)); line-height: calc(1.45 * var(--line-scale)); }
   .review-warn :global(.icon) { margin-top: 2px; }
   .review-list .text-button, .review-identity .text-button { flex-shrink: 0; }
   @media (max-width: 520px) {

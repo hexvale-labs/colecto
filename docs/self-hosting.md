@@ -35,8 +35,9 @@ last command prints it; keep it somewhere safe, like a password manager.
 - **Browser:** open `https://mail.example.org` and paste the access token.
 - **Colecto app:** open **Settings → Servers**, enter `https://mail.example.org`,
   then paste the access token.
-- **Desktop notifications on Linux:** run `colecto-daemon notify` with
-  `COLECTO_PUBLIC_ORIGIN` and `COLECTO_TOKEN_FILE`; see [remote HTTPS deployment](#remote-https-deployment).
+- **Desktop notifications on Linux:** with the app connected to the server, install
+  the background service in **Settings → Connection**; it relays the server's
+  notifications. See [desktop notifications](#desktop-notifications).
 
 Then add your mail accounts in **Settings → Accounts**.
 
@@ -251,38 +252,56 @@ Set the same environment and executable in an OpenRC service or another init
 system. The supervisor owns restart policy; never launch two instances against
 one data directory.
 
-### Desktop notifications from a remote daemon
+### Desktop notifications
 
-The optional Linux desktop session agent connects to the remote event stream;
-it does not establish additional upstream provider connections or store mail
-credentials:
+One process handles both mail and desktop notifications. On Linux, the daemon shows a
+generic "New mail" notification (no sender, subject or body) while no Colecto window
+is open; an open window shows its own, richer one. Notifications go to the
+freedesktop `org.freedesktop.Notifications` D-Bus service, so `notify-send` is not
+needed. They follow the **New mail** switch in Settings → Notifications.
+
+| Mode | When | What runs |
+| --- | --- | --- |
+| Mail service | The daemon listens on a Unix socket (`COLECTO_SOCKET`) and a session bus is reachable (`DBUS_SESSION_BUS_ADDRESS` or `$XDG_RUNTIME_DIR/bus`) | Syncing, the API, and a notifier thread reading the daemon's own event stream through that socket |
+| Relay | `COLECTO_RELAY_ORIGIN` is set | Only the notifier, reading a remote daemon's event stream; no mail is synced or stored locally |
+| Server | TCP listener, no session bus, or `COLECTO_NOTIFICATIONS=off` | Syncing and the API only |
+
+Relay mode needs `COLECTO_RELAY_ORIGIN` (the remote daemon's `https://` origin) and
+`COLECTO_TOKEN_FILE` (an owner-only file holding its access token):
 
 ```sh
-COLECTO_PUBLIC_ORIGIN=https://mail.example.org \
+COLECTO_RELAY_ORIGIN=https://mail.example.org \
 COLECTO_TOKEN_FILE="$HOME/.config/colecto/access-token" \
-./target/debug/colecto-daemon notify
+./target/debug/colecto-daemon
 ```
 
-It requires `notify-send` and the logged-in desktop notification service. Run
-it in the user's graphical session, not as a root system service. It reconnects
-with capped exponential backoff, reloads the token file on reconnect, and shows
-generic notifications without sender, subject or body. The optional
-`colecto-notifications.service` user unit reads
-`~/.config/colecto/notifications.env` and follows `graphical-session.target`.
-That file sets the public origin and absolute token-file path.
+Settings → Connection writes these two settings into the unit itself while the app is
+connected to a remote server (see [below](#install-background-services-from-the-app)).
+The notifier reconnects with capped exponential backoff and reloads the token file on
+reconnect. A failed notification (for example before the desktop session has
+started) is logged and does not drop the event stream. To decide whether a window is
+open, the Host counts open shell event streams (`POST /api/v1/extensions/events`) and
+adds `windows` to each `mail` event on `GET /api/v1/events`. In relay mode that is any
+window connected to the remote server, on any device.
+
+In 0.6 and earlier the notifier was a separate `colecto notify` command and
+`colecto-notifications.service` unit. The command now exits with a message pointing
+to relay mode, and the app removes a Colecto-managed `colecto-notifications.service`
+(disable, stop, delete, `daemon-reload`) the first time it starts. A unit without the
+`# Managed by Colecto` marker is left alone.
 
 `GET /api/v1/events` is an authenticated SSE stream requiring Host capability
 headers and an explicit owner bearer. Cookie-only streaming is rejected; use
 a streaming HTTP client that can attach Authorization, not a cookie-dependent
 browser EventSource or a token in the URL. It starts with `ready`, then emits `mail` with `{account, ids}` for
-newly observed inbox IDs, `approval` with `{id, account, from, subject}` when automation
+newly observed inbox IDs and `windows` (open Colecto windows), `approval` with `{id, account, from, subject}` when automation
 requests a send, `navigate` with `{target, account}` from MCP `app.navigate`, and `resync`
 if a slow subscriber misses events. Mail events follow polling and, where the provider
 supports it, IMAP IDLE or JMAP push, so new mail usually appears within seconds. The
 web client subscribes with `fetch` and shows these as in-app notifications. The
 stream is bounded and has no historical replay. Desktop notifications may be
 missed during disconnection; opening the client fetches the current mail state.
-The agent deliberately ignores initial `ready` and does not notify for old mail.
+The notifier deliberately ignores initial `ready` and does not notify for old mail.
 
 ### Release check
 
@@ -443,12 +462,17 @@ holding the account registry lock; retry after the mail operation finishes.
 
 ## Install background services from the app
 
-Settings → Connection offers Mail service and Desktop notifications on Linux when
-`systemctl --user` is available. Install starts a user unit; Start on login enables
-it. Stop leaves the unit installed; Uninstall disables, stops and removes it.
+Settings → Connection offers one background service on Linux when `systemctl --user`
+is available: `colecto-daemon.service`, the mail service with desktop notifications, or
+a relay of a remote server's notifications while the app is connected to one (see
+[desktop notifications](#desktop-notifications)). Switching servers changes the unit
+the app would write, so an installed service is offered as an update. Install starts
+the user unit; Start on login enables it. Stop leaves the unit installed; Uninstall disables, stops and removes it.
 Generated units live in `$XDG_CONFIG_HOME/systemd/user` (default
 `~/.config/systemd/user`). Colecto refuses to modify units without the exact
 `# Managed by Colecto` marker, including distribution-installed units without it.
+Generated units also say not to edit them, because Update rewrites them; settings go in
+`~/.config/colecto/daemon.env`.
 Commands run without a shell with a ten-second timeout; errors leave the current
 unit available for inspection and retry.
 
@@ -466,7 +490,7 @@ differs from the one this app would write:
 | Written by a newer Colecto | `null`, so an older app never downgrades it |
 
 Settings → Connection shows the version and an Update button when `update_to` is set.
-`POST /api/v1/services/{daemon|notifications}` with `{"action":"update"}` rewrites the
+`POST /api/v1/services/daemon` with `{"action":"update"}` rewrites the
 unit (temporary file, then rename), runs `daemon-reload`, `reenable` when the unit was
 enabled (so a changed `WantedBy` target moves its link), then `try-restart`. A running
 service restarts on the new executable and briefly drops connections; a stopped one
@@ -494,15 +518,13 @@ local control fits: Update the mail service (when `update_to` is set), Start it 
 installed but not running), or switching the app back to its own built-in service.
 
 The executable is `$APPIMAGE` when set, otherwise the running executable. The app
-supports `colecto daemon` and `colecto notify`, so installation does not require a
-separate daemon binary. Keep that executable at its installed location. Units use
-optional environment files `~/.config/colecto/daemon.env` and `notifications.env`.
-The daemon uses `%t/colecto/mail.sock`, a private runtime directory, and
-`%h/.local/state/colecto`. The notifier connects to that socket and reads its
-`owner-token` file directly; no token is copied into a unit or passed as an argument.
-The notifier follows `graphical-session.target`; desktop notifications also require
-`notify-send` and a desktop notification bus. If `daemon.env` overrides the data
-directory, set the corresponding `COLECTO_TOKEN_FILE` in `notifications.env` too.
+supports `colecto daemon`, so installation does not require a separate daemon binary.
+Keep that executable at its installed location. The unit reads the optional
+environment file `~/.config/colecto/daemon.env` and starts with `default.target`. The
+mail service uses `%t/colecto/mail.sock`, a private runtime directory, and
+`%h/.local/state/colecto`; its notifier reads `owner-token` from the data directory, so
+no token is copied into the unit. A relay unit names the app's `upstream-token` file
+instead, never the token itself.
 
 After installing the mail service, Settings → Connection fills in its address
 (`unix:/absolute/socket/path`) and waits for you to open it, because accounts and drafts

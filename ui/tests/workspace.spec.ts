@@ -135,9 +135,9 @@ test('command runner opens by keyboard, filters actions and searches drafts', as
   // Switching folders rebuilds the search field, so type once Drafts is shown.
   await expect(page.getByRole('navigation', { name: 'Mail folders' }).getByRole('button', { name: /Drafts/ })).toHaveAttribute('aria-current', 'page');
   // Search follows typing; there is nothing to submit.
-  await page.getByRole('searchbox').fill('absent words');
+  await page.getByRole('textbox', { name: /^Search / }).fill('absent words');
   await expect(page.getByText('No matching messages')).toBeVisible();
-  await page.getByRole('searchbox').fill('local note');
+  await page.getByRole('textbox', { name: /^Search / }).fill('local note');
   await expect(page.getByRole('button', { name: /Find this local note/ })).toBeVisible();
 });
 
@@ -188,7 +188,7 @@ test('search command keeps focus and send command uses the existing send flow', 
   await page.getByRole('combobox', { name: 'Search commands' }).fill('Search emails');
   await expect(page.getByRole('option', { name: 'Search emails', exact: true })).toBeVisible();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('searchbox')).toBeFocused();
+  await expect(page.getByRole('textbox', { name: /^Search / })).toBeFocused();
   await page.getByRole('button', { name: 'Compose', exact: true }).click();
   await page.getByLabel('To', { exact: true }).fill('maya@example.test');
   await page.getByLabel('Subject', { exact: true }).fill('Command send');
@@ -473,4 +473,54 @@ test('a pane menu without room stays inside the window instead of scrolling the 
   const box = (await menu.boundingBox())!;
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(440);
+});
+
+// Regression (#98): a hidden pane could only come back from Settings, which nothing pointed to.
+test('a hidden pane comes back from any pane’s menu', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Arrange Accounts' }).click();
+  await page.getByRole('option', { name: 'Hide this pane' }).click();
+  await expect(page.getByRole('tab', { name: 'Accounts' })).toHaveCount(0);
+  await page.getByRole('button', { name: /^Arrange/ }).first().click();
+  await page.getByRole('option', { name: 'Show Accounts' }).click();
+  await expect(page.getByRole('tab', { name: 'Accounts' })).toBeVisible();
+  await page.getByRole('button', { name: /^Arrange/ }).first().click();
+  await expect(page.getByRole('option', { name: 'Show Accounts' })).toHaveCount(0);
+});
+
+// #95, #111: a message's menu stars it, and moving it to the Trash takes it off the list.
+test('a message’s menu stars it and moves it to the Trash, by mouse or keyboard', async ({ page }) => {
+  await page.goto('/');
+  const row = page.getByRole('button', { name: /Studio North/ });
+  await row.click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Message actions' });
+  await expect(menu.getByRole('menuitem').first()).toBeFocused();
+  await menu.getByRole('menuitem', { name: 'Star', exact: true }).click();
+  await expect(row.getByText('Starred,')).toBeAttached();
+  await row.focus();
+  await page.keyboard.press('Shift+F10');
+  await expect(menu.getByRole('menuitem', { name: 'Remove star' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(row).toBeFocused();
+  await row.click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Move to Trash' }).click();
+  await expect(page.getByRole('button', { name: /Studio North/ })).toHaveCount(0);
+});
+
+// #103: filters run on the mail service and show as chips that can be removed.
+test('search filters narrow the list and come off again', async ({ page }) => {
+  await page.goto('/');
+  const rows = page.locator('.mail-item');
+  await expect(rows.first()).toBeVisible();
+  const all = await rows.count();
+  await page.getByRole('button', { name: 'Filter' }).click();
+  await page.getByRole('menuitem', { name: 'Starred' }).click();
+  await expect(page.getByRole('textbox', { name: 'Search Inbox' })).toHaveValue('is:starred');
+  // The demo marks one message starred.
+  await expect(rows).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Remove filter Starred' }).click();
+  await expect(page.getByRole('textbox', { name: 'Search Inbox' })).toHaveValue('');
+  await expect(rows).toHaveCount(all);
 });

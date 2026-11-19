@@ -44,7 +44,7 @@ async function forget() {
 
 function contribute() {
   const current = summaryOf();
-  app.send({ t: 'contribute', slot: 'reader/v1/actions', tree: on() && message ? { type: 'menu_button', id: 'ai-menu', label: 'AI', items: [{ id: 'summarize', label: 'Summarize' }, { id: 'reply', label: 'Reply' }] } : null });
+  app.send({ t: 'contribute', slot: 'reader/v1/actions', tree: on() && message ? { type: 'menu_button', id: 'ai-menu', label: 'AI', icon: 'sparkles', items: [{ id: 'summarize', label: 'Summarize' }, { id: 'reply', label: 'Reply' }, { id: 'reclassify', label: 'Check labels again' }] } : null });
   app.send({ t: 'contribute', slot: 'reader/v1/above_body', tree: on() && message && (current.text !== null || current.busy || current.error) ? { type: 'section', preset: 'summary', labelled_by: 'summary-title', busy: current.busy, children: [
     { type: 'stack', direction: 'row', justify: 'between', align: 'center', children: [
       { type: 'heading', id: 'summary-title', level: 3, text: 'Summary' },
@@ -65,8 +65,13 @@ app.on('slot', slot => {
   message = context && typeof context.message_id === 'string' ? { account: context.account ?? account(), id: context.message_id } : null;
   replying = false; draft = ''; notes = '';
   contribute(); void loadSummary();
+  if (pending && message && pending.id === message.id && pending.account === message.account) runPending(pending.action);
 });
-app.when('ai-menu', 'select', ({ item }) => { if (item === 'summarize') void summarize(); else if (item === 'reply') { replying = true; renderDialog(); } });
+app.when('ai-menu', 'select', ({ item }) => {
+  if (item === 'summarize') void summarize();
+  else if (item === 'reply') { replying = true; renderDialog(); }
+  else if (item === 'reclassify' && message) void reclassify([message.id]).catch(() => {});
+});
 app.when('regenerate', 'press', () => void summarize());
 app.when('forget', 'press', () => void forget());
 
@@ -124,6 +129,64 @@ app.on('event', event => {
   if (event.surface === 'dialog' && event.kind === 'submit' && node.startsWith('rule-form-')) void saveEditor();
 });
 
+// ---- Checking labels again (#95) ----
+
+interface Reclassified { checked: number; changed: number; unanswered: number }
+const bulk = { count: 50, busy: false, note: '', failed: false };
+const BATCH = 10;
+/** Run the service part's `v1/reclassify` over these messages, a batch at a time. */
+async function reclassify(ids: string[], progress?: (done: number) => void) {
+  const total: Reclassified = { checked: 0, changed: 0, unanswered: 0 };
+  for (let at = 0; at < ids.length; at += BATCH) {
+    const result = await bus.request<Reclassified>('ai', 'v1/reclassify', { account: account(), ids: ids.slice(at, at + BATCH) });
+    if (!result) throw new Error('The AI extension did not answer. Try again.');
+    total.checked += result.checked; total.changed += result.changed; total.unanswered += result.unanswered;
+    progress?.(Math.min(ids.length, at + BATCH));
+  }
+  return total;
+}
+const summary = (result: Reclassified) => `Checked ${result.checked} message${result.checked === 1 ? '' : 's'}; ${result.changed} label${result.changed === 1 ? '' : 's'} changed.${result.unanswered ? ` The decision model did not see ${result.unanswered}, because its limit was reached; try again later.` : ''}`;
+async function reclassifyNewest() {
+  bulk.busy = true; bulk.failed = false; bulk.note = 'Finding your newest messages…'; renderSettings();
+  try {
+    const cached = await call<{ messages: { id: string }[] }>('GET', '/messages/cache', { query: { folder: 'inbox' } });
+    const ids = cached.messages.slice(0, bulk.count).map(item => item.id);
+    if (!ids.length) { bulk.note = 'Your Inbox has no saved messages yet. Open it once, then try again.'; return; }
+    const result = await reclassify(ids, done => { bulk.note = `Checked ${done} of ${ids.length}…`; renderSettings(); });
+    bulk.note = summary(result);
+  } catch (e) { bulk.failed = true; bulk.note = (e as Error).message; }
+  finally { bulk.busy = false; renderSettings(); }
+}
+
+// Entries in each message's menu in the mailbox, offered through its bus while AI is on.
+const rowActions = [
+  { id: 'summarize', label: 'Summarize', icon: 'sparkles' },
+  { id: 'reply', label: 'Draft a reply with AI', icon: 'reply' },
+  { id: 'reclassify', label: 'Check labels again', icon: 'tag' },
+];
+async function registerActions() {
+  if (!view) return;
+  if (on()) for (const action of rowActions) await bus.request('inbox', 'v1/add_row_action', action).catch(() => null);
+  else await bus.request('inbox', 'v1/remove_row_action', {}).catch(() => null);
+}
+/** A menu entry that needs the reader runs once the reader shows that message. */
+let pending: { action: string; account: string; id: string } | null = null;
+bus.listen('inbox/v1/ready', () => void registerActions());
+bus.listen('inbox/v1/row_action', payload => {
+  if (payload?.extension !== 'ai' || typeof payload.message_id !== 'string' || payload.account !== account() || !on()) return;
+  const id = payload.message_id as string;
+  if (payload.action === 'reclassify') { void reclassify([id]).catch(() => {}); return; }
+  if (payload.action !== 'summarize' && payload.action !== 'reply') return;
+  if (message?.id === id) { runPending(payload.action); return; }
+  pending = { action: payload.action, account: payload.account, id };
+  void bus.request('inbox', 'v1/open', { account: payload.account, message_id: id });
+});
+function runPending(action: string) {
+  pending = null;
+  if (action === 'summarize') void summarize();
+  else { replying = true; renderDialog(); }
+}
+
 // ---- Settings ----
 
 const efforts: { value: string; label: string }[] = [{ value: 'default', label: 'Default' }, { value: 'none', label: 'None' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }];
@@ -133,8 +196,11 @@ const rules = () => view?.settings.labels[account()] ?? {};
 async function load() {
   try { view = await call<SettingsView>('GET', '/ai/settings'); error = ''; }
   catch (e) { error = (e as Error).message; }
+  await loadLabels();
+  renderSettings(); contribute(); void loadSummary(); void registerActions();
+}
+async function loadLabels() {
   try { accountLabels = Object.keys(await call<Record<string, string[]>>('GET', '/labels')); } catch { accountLabels = []; }
-  renderSettings(); contribute(); void loadSummary();
 }
 // Settings save as they change. A failed save reloads what the Host kept.
 async function save(change: (draft: AiSettings) => void) {
@@ -171,6 +237,12 @@ function renderSettings() {
     ...(error ? [{ type: 'text', preset: 'error', text: error } as Node] : []),
     ...(!settings ? (error ? [] : [{ type: 'text', preset: 'note', role: 'status', text: 'Loading…' } as Node]) : [
       { type: 'fieldset', children: [{ type: 'toggle', id: 'enabled', label: 'Use AI features', description: 'Turns on summaries, drafted replies and automatic labels. Off by default.', checked: settings.enabled }] },
+      { type: 'fieldset', legend: 'Requests', disabled: !settings.enabled, children: [
+        { type: 'grid', columns: 'form', children: [
+          { type: 'input', id: 'timeout', kind: 'number', label: 'Timeout in seconds', min: 5, max: 600, step: 1, value: String(settings.timeout_seconds) },
+        ] },
+        { type: 'text', tone: 'muted', size: 'sm', text: 'How long Colecto waits for either service before giving up, for summaries, replies and automatic labels.' },
+      ] },
       { type: 'fieldset', legend: 'Text model', disabled: !settings.enabled, children: [
         { type: 'text', tone: 'muted', size: 'sm', text: 'Writes summaries and replies. Works with any service that offers an OpenAI-compatible chat completions API, including ones on your own computer.' },
         { type: 'grid', columns: 'form', children: [
@@ -202,15 +274,28 @@ function renderSettings() {
           { type: 'toggle', id: `rule.${index}`, label: `Label ${name} automatically`, label_hidden: true, checked: !!rules()[name]?.enabled, disabled: !settings.autolabel },
         ] } })) },
       ] },
+      { type: 'fieldset', legend: 'Check mail again', disabled: !settings.enabled || bulk.busy, children: [
+        { type: 'text', tone: 'muted', size: 'sm', text: 'Runs your label rules again on the newest messages in your Inbox: labels that now match are added, and labels with rules that no longer match are removed. Labels without rules stay as they are. The decision model answers at most 10 messages at a time and has an hourly limit.' },
+        { type: 'grid', columns: 'form', children: [
+          { type: 'input', id: 'bulk-count', kind: 'number', label: 'Newest messages', min: 1, max: 100, step: 1, value: String(bulk.count) },
+        ] },
+        { type: 'stack', direction: 'row', gap: 12, align: 'center', wrap: true, children: [
+          { type: 'button', id: 'bulk-run', variant: 'secondary', label: bulk.busy ? 'Checking…' : 'Check again', busy: bulk.busy, disabled: bulk.busy || !accountLabels.length },
+          ...(bulk.note ? [{ type: 'text', role: 'status', size: 'sm', tone: bulk.failed ? 'danger' : 'muted', text: bulk.note } as Node] : []),
+        ] },
+      ] },
     ]),
   ] });
 }
 
 const saveText = (apply: (draft: AiSettings, value: string) => void) => ({ value }: { value: string }) => void save(draft => apply(draft, value.trim()));
-app.when('enabled', 'toggle', ({ checked }) => void save(draft => { draft.enabled = checked; }));
+app.when('enabled', 'toggle', ({ checked }) => void save(draft => { draft.enabled = checked; }).then(registerActions));
+app.when('bulk-count', 'change', ({ value }) => { bulk.count = Math.min(100, Math.max(1, Math.round(Number(value)) || 1)); renderSettings(); });
+app.when('bulk-run', 'press', () => void reclassifyNewest());
 app.when('text-url', 'change', saveText((draft, value) => { draft.text.base_url = value; }));
 app.when('text-model', 'change', saveText((draft, value) => { draft.text.model = value; }));
 app.when('text-tokens', 'change', saveText((draft, value) => { draft.text.max_tokens = Math.round(Number(value)); }));
+app.when('timeout', 'change', saveText((draft, value) => { draft.timeout_seconds = Math.round(Number(value)); }));
 app.when('decision-url', 'change', saveText((draft, value) => { draft.decision.base_url = value; }));
 app.when('decision-model', 'change', saveText((draft, value) => { draft.decision.model = value; }));
 app.when('effort', 'change', ({ value }) => void save(draft => { draft.text.effort = value === 'default' ? null : value as Effort; }));
@@ -270,7 +355,7 @@ function renderEditor() {
     { type: 'fieldset', legend: 'Decision model', children: [
       { type: 'toggle', id: 'rule-model', style: 'checkbox', label: 'Also ask the decision model about mail no rule matched', checked: rule.model },
       ...(rule.model && !view?.settings.decision.model ? [{ type: 'text', tone: 'muted', size: 'sm', text: 'Set up the decision model on the AI page first.' } as Node] : []),
-      { type: 'textarea', id: 'rule-description', label: 'What belongs under this label? Optional, helps the model', rows: 2, maxlength: 500, placeholder: 'e.g. receipts and order confirmations from shops', value: rule.description, report: 'input' },
+      { type: 'textarea', id: 'rule-description', label: 'What belongs under this label? Optional, helps the model', rows: 2, maxlength: 500, placeholder: 'e.g. receipts and order confirmations from shops', value: rule.description, report: 'input', disabled: !rule.model },
     ] },
     { type: 'stack', gap: 6, children: [
       { type: 'heading', level: 3, text: 'Test with your Inbox' },
@@ -291,7 +376,8 @@ async function saveEditor() {
 }
 const edit = (change: () => void, redraw = true) => { change(); if (redraw) { editorEpoch++; renderEditor(); } schedulePreview(); };
 app.when('rule-enabled', 'toggle', ({ checked }) => edit(() => { rule.enabled = checked; }, false), 'dialog');
-app.when('rule-model', 'toggle', ({ checked }) => edit(() => { rule.model = checked; }, false), 'dialog');
+// Redrawn in place (same form id), so the checkbox keeps focus while the description follows it.
+app.when('rule-model', 'toggle', ({ checked }) => { edit(() => { rule.model = checked; }, false); renderEditor(); }, 'dialog');
 app.when('rule-description', 'input', ({ value }) => { rule.description = value; }, 'dialog');
 app.when('add-rule', 'press', () => edit(() => { rule.rules.push({ field: 'any', pattern: '' }); }), 'dialog');
 app.when('cancel-rule', 'press', () => { editing = null; app.send({ t: 'dialog', tree: null }); }, 'dialog');
@@ -306,3 +392,7 @@ app.on('event', event => {
 
 app.on('start', () => void load());
 app.on('account', () => void load());
+// Labels made after Settings → AI loaded would otherwise be missing from it (#101).
+for (const source of ['inbox/v1/labels', 'reader/v1/labels', 'ai/v1/labeled']) {
+  bus.listen(source, payload => { if (payload?.account === account()) void loadLabels().then(renderSettings); });
+}

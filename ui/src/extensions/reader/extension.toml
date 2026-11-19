@@ -10,7 +10,7 @@ author = "Colecto"
 icon = "mail"
 
 [bus]
-subscribe = ["inbox/v1/selected", "inbox/v1/listed", "inbox/v1/labels"]
+subscribe = ["inbox/v1/selected", "inbox/v1/listed", "inbox/v1/labels", "ai/v1/labeled"]
 
 # Names the generated page in Settings; this extension draws nothing there itself.
 [settings_page]

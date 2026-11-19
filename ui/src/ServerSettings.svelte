@@ -3,18 +3,18 @@
   import Icon from './Icon.svelte';
   import { hostService, setAccessToken } from './lib/api';
   import type { BackgroundService, Upstream, UpstreamInput } from './lib/api';
-  type Name = 'daemon' | 'notifications';
-  const about: Record<Name, { title: string; text: string; icon: 'server' | 'bell' }> = {
-    daemon: { title: 'Mail service', text: 'Keeps syncing mail when the app is closed. The app connects to it through a private local socket.', icon: 'server' },
-    notifications: { title: 'Desktop notifications', text: 'Shows a desktop notification for new mail from the background service.', icon: 'bell' },
-  };
+  type Name = 'daemon';
   let services = $state<Partial<Record<Name, BackgroundService>>>({});
+  // While this app uses a remote server, the background service only relays its notifications.
+  const about = $derived(services.daemon?.relay
+    ? { title: 'Notifications', text: 'Shows desktop notifications for new mail from your server while Colecto is closed. Your server keeps syncing the mail.', icon: 'bell' as const }
+    : { title: 'Mail service', text: 'Keeps syncing mail and shows desktop notifications for new mail while Colecto is closed. The app connects to it through a private local socket.', icon: 'server' as const });
   let upstream = $state<Upstream | null>(null);
   // Only this app's own service answers /upstream; a remote daemon refuses it.
   let local = $state(false);
   let loaded = $state(false);
   let busy = $state<Name | 'switch' | null>(null);
-  let autostart = $state<Record<Name, boolean>>({ daemon: true, notifications: true });
+  let autostart = $state(true);
   let address = $state('');
   let token = $state('');
   // The desktop app reaches a remote daemon through its own Host, which keeps mail ready locally.
@@ -45,7 +45,7 @@
       notice = done;
       // A fresh mail service is ready to use: offer its socket instead of switching on the spot,
       // because its accounts are separate from this app's.
-      if (name === 'daemon' && input.action === 'install' && socketAddress) {
+      if (input.action === 'install' && !services.daemon?.relay && socketAddress) {
         address = socketAddress; await tick(); addressField?.focus();
         notice = 'Mail service installed. Its address is filled in below; open it when you are ready.';
       }
@@ -98,36 +98,32 @@
 
     {#if loaded && local && supported}
       <section class="settings-card" aria-labelledby="background-title">
-        <h2 id="background-title">Background services</h2>
-        <p>Run Colecto as systemd user services, whichever way you installed it.</p>
-        <ul class="service-list">
-          {#each (['daemon', 'notifications'] as Name[]) as name (name)}
-            {@const service = services[name]}
-            {#if service?.supported}
-              {@const state = status(service)}
-              <li class="service-row">
-                <span class="service-icon" aria-hidden="true"><Icon name={about[name].icon} size={18} /></span>
-                <div class="service-text">
-                  <span class="service-title"><strong>{about[name].title}</strong><span class="service-pill {state.tone}">{state.text}</span>{#if service.installed && service.version}<span class="service-version">v{service.version}</span>{/if}</span>
-                  <span class="service-about">{about[name].text}</span>
-                </div>
-                <div class="service-controls">
-                  <label class="switch" title="Start when you log in"><span>Start on login</span><input type="checkbox" role="switch" aria-label={`Start ${about[name].title} on login`} checked={service.installed ? service.enabled : autostart[name]} disabled={busy !== null} onchange={(event) => { const on = event.currentTarget.checked; if (service.installed) void act(name, { action: 'autostart', enabled: on }); else autostart[name] = on; }} /></label>
-                  {#if !service.installed}
-                    <button class="primary" disabled={busy !== null} onclick={() => act(name, { action: 'install', autostart: autostart[name] }, `${about[name].title} installed.`)}>{busy === name ? 'Installing…' : 'Install'}</button>
-                  {:else}
-                    {#if service.update_to}
-                      {@const target = service.update_to}
-                      <button class="secondary" disabled={busy !== null} aria-label={`Update ${about[name].title} to version ${target}`} title={`Rewrite the service for Colecto ${target}${service.active ? ' and restart it' : ''}`} onclick={() => act(name, { action: 'update' }, `${about[name].title} updated to version ${target}${service.active ? ' and restarted' : ''}.`)}>{busy === name ? 'Updating…' : 'Update'}</button>
-                    {/if}
-                    <button class="icon-button" disabled={busy !== null} aria-label={`${service.active ? 'Stop' : 'Start'} ${about[name].title}`} title={service.active ? 'Stop' : 'Start'} onclick={() => act(name, { action: service.active ? 'stop' : 'start' })}><Icon name={service.active ? 'stop' : 'play'} size={16} /></button>
-                    <button class="icon-button remove" disabled={busy !== null} aria-label={`Uninstall ${about[name].title}`} title="Uninstall" onclick={() => { if (window.confirm(`Uninstall ${about[name].title}? It stops now and no longer starts on login. Its saved mail is kept.`)) void act(name, { action: 'uninstall' }, `${about[name].title} uninstalled.`); }}><Icon name="trash" size={16} /></button>
-                  {/if}
-                </div>
-              </li>
-            {/if}
-          {/each}
-        </ul>
+        <h2 id="background-title">Background service</h2>
+        <p>Run Colecto as a systemd user service, whichever way you installed it.</p>
+        {#if services.daemon?.supported}
+          {@const service = services.daemon}
+          {@const state = status(service)}
+          <div class="service-list service-row">
+            <span class="service-icon" aria-hidden="true"><Icon name={about.icon} size={18} /></span>
+            <div class="service-text">
+              <span class="service-title"><strong>{about.title}</strong><span class="service-pill {state.tone}">{state.text}</span>{#if service.installed && service.version}<span class="service-version">v{service.version}</span>{/if}</span>
+              <span class="service-about">{about.text}</span>
+            </div>
+            <div class="service-controls">
+              <label class="switch" title="Start when you log in"><span>Start on login</span><input type="checkbox" role="switch" aria-label={`Start ${about.title} on login`} checked={service.installed ? service.enabled : autostart} disabled={busy !== null} onchange={(event) => { const on = event.currentTarget.checked; if (service.installed) void act('daemon', { action: 'autostart', enabled: on }); else autostart = on; }} /></label>
+              {#if !service.installed}
+                <button class="primary" disabled={busy !== null} onclick={() => act('daemon', { action: 'install', autostart }, `${about.title} installed.`)}>{busy === 'daemon' ? 'Installing…' : 'Install'}</button>
+              {:else}
+                {#if service.update_to}
+                  {@const target = service.update_to}
+                  <button class="secondary" disabled={busy !== null} aria-label={`Update ${about.title} to version ${target}`} title={`Rewrite the service for Colecto ${target} and this connection${service.active ? ', then restart it' : ''}`} onclick={() => act('daemon', { action: 'update' }, `${about.title} updated to version ${target}${service.active ? ' and restarted' : ''}.`)}>{busy === 'daemon' ? 'Updating…' : 'Update'}</button>
+                {/if}
+                <button class="icon-button" disabled={busy !== null} aria-label={`${service.active ? 'Stop' : 'Start'} ${about.title}`} title={service.active ? 'Stop' : 'Start'} onclick={() => act('daemon', { action: service.active ? 'stop' : 'start' })}><Icon name={service.active ? 'stop' : 'play'} size={16} /></button>
+                <button class="icon-button remove" disabled={busy !== null} aria-label={`Uninstall ${about.title}`} title="Uninstall" onclick={() => { if (window.confirm(`Uninstall ${about.title}? It stops now and no longer starts on login. Its saved mail is kept.`)) void act('daemon', { action: 'uninstall' }, `${about.title} uninstalled.`); }}><Icon name="trash" size={16} /></button>
+              {/if}
+            </div>
+          </div>
+        {/if}
         {#if services.daemon?.installed && services.daemon.active && !upstream && socketAddress && address !== socketAddress}
           <p class="hint">The mail service keeps its own accounts. <button class="text-button inline" disabled={busy !== null} onclick={() => { address = socketAddress; void tick().then(() => addressField?.focus()); }}>Fill in its address</button></p>
         {/if}

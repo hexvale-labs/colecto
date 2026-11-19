@@ -485,9 +485,30 @@ impl Session<'_> {
 
     fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
         let mailbox = self.mailbox(folder)?;
+        // Conditions in one object all apply; a repeated one (two `from:`) needs an explicit AND.
         let mut filter = json!({"inMailbox":mailbox});
-        if !search.is_empty() {
-            filter["text"] = json!(search);
+        let conditions = crate::search::Query::parse(search).jmap();
+        let repeated = conditions.iter().enumerate().any(|(index, condition)| {
+            condition.as_object().is_some_and(|c| {
+                c.keys().any(|key| {
+                    conditions[..index]
+                        .iter()
+                        .any(|earlier| earlier.get(key).is_some())
+                })
+            })
+        });
+        if repeated {
+            let mut all = vec![filter];
+            all.extend(conditions);
+            filter = json!({"operator":"AND","conditions":all});
+        } else {
+            for condition in conditions {
+                if let Some(condition) = condition.as_object() {
+                    for (key, value) in condition {
+                        filter[key] = value.clone();
+                    }
+                }
+            }
         }
         // shortcut: latest 100 messages only; add changes/pagination before full sync.
         // One request: Email/get takes the ids straight from the query's result.
@@ -500,7 +521,7 @@ impl Session<'_> {
             (
                 "Email/get",
                 json!({"#ids":{"resultOf":"0","name":"Email/query","path":"/ids"},
-                "properties":["id","from","subject","receivedAt","textBody","bodyValues","keywords"],
+                "properties":["id","threadId","from","subject","receivedAt","textBody","bodyValues","keywords"],
                 "fetchTextBodyValues":true,"maxBodyValueBytes":100000}),
             ),
         ])?;
@@ -714,6 +735,7 @@ fn parse_message(value: &Value) -> Result<Message, Error> {
         address,
         subject: value["subject"].as_str().unwrap_or_default().to_owned(),
         date: value["receivedAt"].as_str().unwrap_or_default().to_owned(),
+        thread: value["threadId"].as_str().unwrap_or_default().to_owned(),
         body: if body.is_empty() {
             "This message has no plain-text part. Open it to read the HTML version.".into()
         } else {

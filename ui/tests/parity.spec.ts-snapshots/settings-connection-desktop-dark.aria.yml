@@ -27,20 +27,13 @@
       - heading "Current service" [level=2]
       - strong: This app
       - text: /Connected http:\/\/\d+\.\d+\.0\.1:\d+/
-    - region "Background services":
-      - heading "Background services" [level=2]
-      - paragraph: Run Colecto as systemd user services, whichever way you installed it.
-      - list:
-        - listitem:
-          - strong: Mail service
-          - text: Not installed Keeps syncing mail when the app is closed. The app connects to it through a private local socket. Start on login
-          - switch "Start Mail service on login" [checked]
-          - button "Install"
-        - listitem:
-          - strong: Desktop notifications
-          - text: Not installed Shows a desktop notification for new mail from the background service. Start on login
-          - switch "Start Desktop notifications on login" [checked]
-          - button "Install"
+    - region "Background service":
+      - heading "Background service" [level=2]
+      - paragraph: Run Colecto as a systemd user service, whichever way you installed it.
+      - strong: Mail service
+      - text: Not installed Keeps syncing mail and shows desktop notifications for new mail while Colecto is closed. The app connects to it through a private local socket. Start on login
+      - switch "Start Mail service on login" [checked]
+      - button "Install"
     - region "Use another server":
       - heading "Use another server" [level=2]
       - paragraph: Connect to a daemon by its HTTPS address and access token. Mail you open is kept on this computer too, so it stays quick on a slow connection. A local mail service is reached through its socket, as unix:/path/to/mail.sock.

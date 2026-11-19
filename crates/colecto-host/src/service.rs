@@ -251,6 +251,9 @@ impl MailService {
             policy.local && !policy.daemon_socket,
             policy.service_command.clone(),
         )?;
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(crate::services::retire_notifier(control.clone()));
+        }
         let mut policy = policy;
         if policy.token.is_none() {
             policy.token = Some(Arc::new(Zeroizing::new(
@@ -308,8 +311,10 @@ impl MailService {
             ai,
             sync: Arc::default(),
             credentials: Arc::default(),
+            windows: Arc::default(),
         };
         let stream_events = events.clone();
+        let windows = host.windows.clone();
         let (closing, stopped) = tokio::sync::watch::channel(false);
         let router = build_app(host.clone(), assets)
             .merge(
@@ -322,11 +327,12 @@ impl MailService {
                 get(move |headers: axum::http::HeaderMap| {
                     let receiver = stream_events.subscribe();
                     let stopped = stopped.clone();
+                    let windows = windows.clone();
                     async move {
                         crate::host_grant(&headers)?;
                         let stream = futures_util::stream::unfold(
-                            (receiver, stopped, true),
-                            |(mut receiver, mut stopped, first)| async move {
+                            (receiver, stopped, true, windows),
+                            |(mut receiver, mut stopped, first, windows)| async move {
                                 if *stopped.borrow() {
                                     return None;
                                 }
@@ -335,7 +341,7 @@ impl MailService {
                                         Ok::<_, Infallible>(
                                             Event::default().event("ready").data("{}"),
                                         ),
-                                        (receiver, stopped, false),
+                                        (receiver, stopped, false, windows),
                                     ));
                                 }
                                 let event = tokio::select! {
@@ -344,14 +350,30 @@ impl MailService {
                                 };
                                 match event {
                                     Ok((_, data)) if data.is_empty() => None,
-                                    Ok((name, data)) => Some((
-                                        Ok(Event::default().event(name).data(data)),
-                                        (receiver, stopped, false),
-                                    )),
+                                    Ok((name, data)) => {
+                                        // Notifiers skip mail that an open window already shows.
+                                        let data = match serde_json::from_str::<serde_json::Value>(
+                                            &data,
+                                        ) {
+                                            Ok(mut value)
+                                                if name == "mail" && value.is_object() =>
+                                            {
+                                                value["windows"] = windows
+                                                    .load(std::sync::atomic::Ordering::Relaxed)
+                                                    .into();
+                                                value.to_string()
+                                            }
+                                            _ => data,
+                                        };
+                                        Some((
+                                            Ok(Event::default().event(name).data(data)),
+                                            (receiver, stopped, false, windows),
+                                        ))
+                                    }
                                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                                         Some((
                                             Ok(Event::default().event("resync").data("{}")),
-                                            (receiver, stopped, false),
+                                            (receiver, stopped, false, windows),
                                         ))
                                     }
                                     Err(_) => None,

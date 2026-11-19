@@ -71,7 +71,7 @@
   .onboarding-card.wide :global(.sheet-body) { max-height: min(560px, calc(100dvh - 220px)); }
   h1 { font-size: calc(26px * var(--text-scale)); font-stretch: 106%; outline: none; }
   .wide h1 { font-size: calc(19px * var(--text-scale)); }
-  .lede { max-width: 38ch; color: var(--ink-2); line-height: 1.55; }
+  .lede { max-width: 38ch; color: var(--ink-2); line-height: calc(1.55 * var(--line-scale)); }
   .lede strong { color: var(--ink); font-weight: 600; }
   .mark-wrap { position: relative; margin-bottom: 6px; }
   .mark { display: block; border-radius: 16px; animation: float 6s ease-in-out infinite; }
@@ -91,7 +91,7 @@
   .steps li.current { color: var(--ink-2); }
   .steps li.current::before { background: var(--mint); }
   .account-head { display: flex; align-items: flex-start; gap: 8px; padding: 18px 20px 4px 12px; }
-  .account-head p { margin-top: 4px; color: var(--ink-2); font-size: calc(13.5px * var(--text-scale)); line-height: 1.5; }
+  .account-head p { margin-top: 4px; color: var(--ink-2); font-size: calc(13.5px * var(--text-scale)); line-height: calc(1.5 * var(--line-scale)); }
   .done-mark { width: 64px; height: 64px; margin-bottom: 6px; fill: none; stroke: var(--mint); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
   .done-mark .ring { stroke-dasharray: 176; stroke-dashoffset: 176; opacity: 0.45; animation: draw 700ms var(--ease-out) forwards; }
   .done-mark .tick { stroke-dasharray: 40; stroke-dashoffset: 40; animation: draw 420ms var(--ease-out) 380ms forwards; }
