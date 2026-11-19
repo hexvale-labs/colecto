@@ -20,6 +20,7 @@ pub struct Preferences {
     pub accent: Option<String>,
     pub font: Option<String>,
     pub font_size: Option<u8>,
+    pub text_spacing: TextSpacing,
     pub notifications: Notifications,
     notification_position_chosen: bool,
     /// Load remote images in HTML mail without asking. Off by default: they can track opens.
@@ -46,6 +47,7 @@ impl Default for Preferences {
             accent: None,
             font: None,
             font_size: None,
+            text_spacing: TextSpacing::default(),
             notifications: Notifications::default(),
             notification_position_chosen: false,
             remote_images: false,
@@ -98,6 +100,19 @@ impl Default for Prefetch {
         }
     }
 }
+/// Extra space around text, which helps many readers with dyslexia more than a special
+/// font does. Each is a step from 0 (as designed) to [`MAX_SPACING_STEP`]; the UI maps the
+/// steps to lengths, the largest matching WCAG 1.4.12 (Text Spacing).
+#[derive(Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(default, deny_unknown_fields)]
+pub struct TextSpacing {
+    pub letter: u8,
+    pub word: u8,
+    pub line: u8,
+    pub paragraph: u8,
+}
+pub const MAX_SPACING_STEP: u8 = 2;
+
 /// A refresh lists at most this many messages, so prefetch can reach no further.
 pub const MAX_PREFETCH_COUNT: u16 = colecto_core::MAX_LIST_MESSAGES as u16;
 
@@ -150,6 +165,7 @@ pub struct PreferencesInput {
     pub accent: Option<String>,
     pub font: Option<String>,
     pub font_size: Option<u8>,
+    pub text_spacing: Option<TextSpacing>,
     pub notifications: Option<Notifications>,
     pub remote_images: Option<bool>,
     pub accounts_enabled: Option<BTreeMap<String, bool>>,
@@ -203,6 +219,20 @@ fn validate(preferences: &Preferences) -> Result<(), String> {
         .is_some_and(|size| !(13..=18).contains(&size))
     {
         return Err("Font size must be between 13 and 18".into());
+    }
+    let spacing = preferences.text_spacing;
+    if [
+        spacing.letter,
+        spacing.word,
+        spacing.line,
+        spacing.paragraph,
+    ]
+    .iter()
+    .any(|step| *step > MAX_SPACING_STEP)
+    {
+        return Err(format!(
+            "Text spacing steps must be between 0 and {MAX_SPACING_STEP}"
+        ));
     }
     if preferences
         .notified_release
@@ -280,6 +310,9 @@ impl PreferenceStore {
         if let Some(size) = input.font_size {
             next.font_size = Some(size);
         }
+        if let Some(spacing) = input.text_spacing {
+            next.text_spacing = spacing;
+        }
         if let Some(notifications) = input.notifications {
             next.notification_position_chosen |=
                 notifications.position != next.notifications.position;
@@ -329,6 +362,7 @@ mod tests {
             serde_json::json!({"font":"Arial; color:red"}),
             serde_json::json!({"font_size":12}),
             serde_json::json!({"font_size":19}),
+            serde_json::json!({"text_spacing":{"letter":3}}),
         ] {
             assert!(
                 store
@@ -336,6 +370,12 @@ mod tests {
                     .is_err()
             );
         }
+        assert!(
+            serde_json::from_value::<PreferencesInput>(
+                serde_json::json!({"text_spacing":{"lines":1}})
+            )
+            .is_err()
+        );
         for font in ["mona", "inter", "geist", "plex", "atkinson", "Segoe UI"] {
             store
                 .update(
@@ -344,9 +384,26 @@ mod tests {
                 )
                 .unwrap();
         }
+        store
+            .update(
+                serde_json::from_value(
+                    serde_json::json!({"text_spacing":{"letter":2,"word":1,"line":2}}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
         let restored = PreferenceStore::open(db).unwrap();
         assert_eq!(restored.get().font.as_deref(), Some("Segoe UI"));
         assert_eq!(restored.get().font_size, Some(18));
+        assert_eq!(
+            restored.get().text_spacing,
+            TextSpacing {
+                letter: 2,
+                word: 1,
+                line: 2,
+                paragraph: 0
+            }
+        );
     }
     #[test]
     fn list_and_update_preferences_default_validate_and_persist() {

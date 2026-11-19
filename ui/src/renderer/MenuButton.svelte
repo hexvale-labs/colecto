@@ -1,7 +1,8 @@
 <script lang="ts">
   // A button that opens a short menu, keyboard operable like the app's other menus.
   import { tick } from 'svelte';
-  let { label, items, disabled = false, onselect }: { label: string; items: { id: string; label: string; disabled?: boolean }[]; disabled?: boolean; onselect: (item: string) => void } = $props();
+  import Icon, { type IconName } from '../Icon.svelte';
+  let { label, icon, items, disabled = false, onselect }: { label: string; icon?: IconName; items: { id: string; label: string; disabled?: boolean }[]; disabled?: boolean; onselect: (item: string) => void } = $props();
   const id = `menu-${Math.random().toString(36).slice(2)}`;
   let open = $state(false);
   let button = $state<HTMLButtonElement>();
@@ -28,9 +29,9 @@
 </script>
 
 <div class="x-menu">
-  <button bind:this={button} class="tool x-menu-tool" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} {disabled}
+  <button bind:this={button} class="tool x-menu-tool" aria-label={label} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} {disabled}
     onclick={() => open ? hide() : void show()}
-    onkeydown={(event) => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); void show(event.key === 'ArrowDown' ? 'first' : 'last'); } }}>{label}</button>
+    onkeydown={(event) => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); void show(event.key === 'ArrowDown' ? 'first' : 'last'); } }}>{#if icon}<Icon name={icon} />{/if}<span>{label}</span></button>
   {#if open}
     <div class="select-scrim" aria-hidden="true" onpointerdown={() => hide(false)}></div>
     <div bind:this={menu} {id} class="select-menu below x-menu-list" role="menu" tabindex="-1" aria-label={label} out:leave onkeydown={keydown}>
@@ -41,8 +42,8 @@
 
 <style>
   .x-menu { position: relative; display: flex; }
-  /* Narrow readers turn tools into icons; this one has no icon, so its word stays. */
-  .x-menu-tool { width: auto !important; padding: 0 11px !important; }
+  /* Narrow readers turn tools into icons; without one, the word stays. */
+  .x-menu-tool:not(:has(svg)) { width: auto !important; padding: 0 11px !important; }
   .x-menu-list { left: auto; right: 0; min-width: 160px; transform-origin: top right; }
   .x-menu-list button { display: flex; align-items: center; width: 100%; padding: 7px 10px; border-radius: 8px; font-size: calc(13.5px * var(--text-scale)); text-align: left; transition: background-color 90ms ease, transform 120ms var(--ease-out); }
   .x-menu-list button:focus-visible { background: var(--raise); outline: none; }

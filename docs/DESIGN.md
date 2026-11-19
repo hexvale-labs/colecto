@@ -54,14 +54,19 @@ the window's outer 14 px docks along that whole edge. Splitting keeps dividing, 
 column can hold three panes and the main area can become a 2 × 2 grid. The tab strip's
 menu and `Layout:` palette commands do the same from the keyboard. Drag a separator to
 resize, or focus it and use the arrow keys (Shift for bigger steps); double-click
-evens out the two sides. Hide or show panes from the menu, the palette or
-Settings → Extensions. The layout is an owner preference in the Host's database, so
+evens out the two sides. Hide a pane from its menu; every pane's menu then lists it
+under **Hidden panes** to show it again (`Show <pane>`), as do the palette and
+Settings → Extensions. Palette entries carry an icon for what they do (the folder, the
+Settings section's own icon, layout, account, reload); extension commands show a neutral
+⌘ mark. The layout is an owner preference in the Host's database, so
 it follows you between devices. Panes stay mounted while they move or sit behind
 another tab, so rearranging never loses a draft.
 
 Every setting has a name and a one-line description. A settings page reads in four steps:
 the page title, a group label, the setting's name, then its muted description. Only those
-first three carry weight; everything else is regular text. Shared classes in `style.css` give
+first three carry weight, and each step is clearly smaller than the one before: the group
+label (17 px, a full-width hairline under it) must never be mistaken for a setting's name
+(14 px). Everything else is regular text. Shared classes in `style.css` give
 every page the same rhythm, and new pages (built-in or extension) use them:
 
 | Class | Use |
@@ -70,8 +75,8 @@ every page the same rhythm, and new pages (built-in or extension) use them:
 | `.settings-group` | A group of settings, separated from the next by space; `.group-label` (an `h3` or a fieldset `legend`) names it, and an optional `p` after the label describes it |
 | `.setting` | One setting; a wide control (picker, slider, drop zone) sits under its text |
 | `.setting.setting-row` | Text on the left, the control (switch, segmented control) on the right; under 520 px a segmented control drops below the text |
-| `.setting-text` | The setting's name (`h3`) and description (`p`) |
-| `.settings-list` | A list of things (accounts, extensions, keys, requests); the only place hairlines appear |
+| `.setting-text` | The setting's name (`h3` on a page without groups, `h4` inside a group) and description (`p`) |
+| `.settings-list` | A list of things (accounts, extensions, keys, requests); with group labels, the only place hairlines appear |
 
 `.settings-card` is the older name for `.settings-group`, still used by the Accounts and
 Connection pages.
@@ -160,7 +165,8 @@ the shell itself uses media queries.
 
 ## Surfaces
 
-Not everything deserves a card. Settings groups are separated by space, not lines;
+Not everything deserves a card. Settings groups are separated by space, with a hairline
+under each group label;
 extensions, keys and accounts are rows of a list with a hairline between them, and notes
 sit directly on the page. Rounded, raised
 surfaces are kept for things that float (menus, the palette, dialogs) and for small
@@ -237,6 +243,11 @@ as soon as its body arrives, after a skeleton; it never waits for the frame's `l
 event, which waits for every remote image and can hang on a slow server. List and folder changes do
 not animate. `prefers-reduced-motion` removes every transition.
 
+Nothing animates forever unless work is in progress (spinners, skeletons, the syncing
+pulse), and nothing that content scrolls or moves under uses `backdrop-filter`. Both
+keep the page repainting, which WebKitGTK, the engine of the Linux app, turns into brief
+stutters elsewhere; the reader toolbar is solid for that reason.
+
 ## Feels native
 
 Colecto is an app window, not a page. The document never scrolls; every scroll area ends
@@ -253,7 +264,7 @@ Copy buttons sit in the reader toolbar and the composer footer.
 
 In-app notifications cover new mail and automation waiting for send approval. Each has
 a close button; approvals carry Approve, Reject and Review and stay until acted on, while
-others leave after six seconds unless hovered or focused. Owners can turn them off
+others leave after six seconds unless hovered or focused. Owners set all of this in Settings → Notifications: they can turn them off
 entirely or by type, choose one of eight positions on a drawn window (corners and edge
 midpoints, never a screenshot), and opt into desktop notifications, which only fire while
 Colecto is in the background. In the desktop app the webview grants the notification
@@ -286,7 +297,7 @@ while a file is dragged anywhere over the page) and scrollbars are themed from t
 
 `--status-online` is a calm green independent of the configurable accent. Connected
 account dots use it with a subtle 2400 ms expanding ring (scale 1 to 2.4, opacity
-0.5 to 0). Disconnected dots stay neutral. Reduced motion disables the ring.
+0.5 to 0) that plays three times when the dot turns on, then rests. Disconnected dots stay neutral. Reduced motion disables the ring.
 
 Desktop message tabs share the dock header with the Reader tab; its drag handle,
 arrange menu and pane semantics remain available. Compact mode keeps message tabs
@@ -310,6 +321,24 @@ cannot list installed fonts without asking (WebKit cannot at all), so System sho
 common families `probeSystemFonts()` in `lib/typography.ts` finds by measuring text;
 where the Local Font Access API exists, **List all installed fonts** asks for the full list.
 
+Appearance → Text also offers letter, word, line and paragraph spacing, each Normal,
+More or Most, because more room around each character helps many readers with dyslexia
+where special fonts do not. The steps live in `lib/text-spacing.svelte.ts` and set
+`--letter-spacing`, `--word-spacing`, `--line-scale` and `--paragraph-gap` on the root:
+
+| Setting | More | Most (WCAG 1.4.12) | Applied to |
+| --- | --- | --- | --- |
+| Letter spacing | +0.06em | +0.12em | All text; designed tracking is added to, not replaced |
+| Word spacing | +0.08em | +0.16em | All text |
+| Line height | ×1.15 | ×1.3 | Every unitless `line-height`, written `calc(n * var(--line-scale))`; single-line chrome at `1` stays |
+| Paragraph spacing | +0.5em | +1em | Blank-line paragraphs in plain mail and `p` in HTML mail |
+
+New styles follow the same pattern: scale a unitless line height by `--line-scale` and add
+`--letter-spacing` to any explicit tracking. Sealed mail frames cannot see the variables,
+so `frameSpacing()` writes the same values into each frame; mail with its own design keeps
+its line heights. The owner preference is `text_spacing: {letter, word, line, paragraph}`,
+each step 0 to 2.
+
 Text size is four steps (13, 14, 16 and 18 px; 14 is the design size), shown as "Aa"
 samples. On a touch screen (`pointer: coarse`) every step reads larger by 18/14, so the
 default there is the desktop's largest size and the steps above it go further; the saved
@@ -323,7 +352,8 @@ characters) and `font_size` (13 to 18).
 
 ## Message list
 
-Settings → Appearance → Message list chooses the density and whether date headings show.
+Settings → Appearance → Mail chooses the density and whether date headings show. The inbox
+extension owns these settings and places them in Appearance (`section = "appearance"`).
 
 | Preference | Values | Default | Effect |
 | --- | --- | --- | --- |

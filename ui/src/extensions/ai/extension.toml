@@ -1,6 +1,6 @@
 id = "ai"
 name = "AI"
-api_version = 1
+api_version = 2
 client = "client/main.js"
 service = "service.wasm"
 capabilities = ["messages.read", "messages.list", "messages.label", "ai.text", "ai.decide", "ai.configure", "ui.contribute", "extensions.bus"]

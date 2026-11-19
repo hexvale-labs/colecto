@@ -355,6 +355,7 @@ invalid defaults reject the manifest.
 | `step` | Optional positive finite range increment (control hint) |
 | `unit` | Optional range suffix, at most 8 UTF-8 bytes |
 | `options` | Choice only: 2–8 distinct string `value` and nonempty `label` pairs |
+| `section` | Optional, API 2: `appearance` or `notifications`. Shows the setting in that core Settings section instead of the extension's own page |
 
 `GET /api/v1/extensions/{id}/settings` returns `{schema, values}`; `PUT` takes a partial
 `{key: value}` object, and unknown keys or invalid values reject the whole update. The
@@ -365,6 +366,24 @@ parts read them with `{"operation":"settings.read"}`.
 
 Without `[settings_page]`, an extension with settings gets a generated page in Settings:
 bundled ones in the Built-in group, installed ones under Extensions.
+
+### Placing settings in a core section
+
+From API 2, a setting with `section` appears in that core section, grouped under a
+heading with the extension's `settings_page.title` (or its name) and, for an installed
+extension, "From <name>". Only Appearance and Notifications accept settings; sections
+that hold credentials, connections, keys or other extensions do not. Values, events and
+`settings.read` work the same wherever a setting is shown.
+
+| The extension declares | Settings shows |
+| --- | --- |
+| Settings without `section` | Its own page (generated, or drawn with `[settings_page]`) |
+| Only settings with `section` | No page of its own, just its groups in those sections |
+| `[settings_page]`, a client part and no settings | Its own page, drawn by the extension |
+
+Choose the section by what the setting changes, not by which extension owns it: how
+things look belongs in Appearance (the bundled Mail puts List density and Date headings
+there), and what to be notified about belongs in Notifications.
 
 ## Extension bus
 
@@ -402,7 +421,8 @@ encouraged to do the same. The bundled surfaces are listed in
 
 Bundled `inbox` and `reader` and every enabled extension with `[pane]` get a pane in the
 workspace, next to the core Accounts pane (the account switcher), which is shell UI, not
-an extension: hide it from its tab's menu or Settings → Accounts → **Accounts pane**.
+an extension: hide it from its tab's menu or Settings → Accounts → **Accounts pane**, and
+show it again from any pane's menu (**Hidden panes**), the palette or that setting.
 Settings → Extensions turns an extension on or off and, for those with a pane, chooses
 whether it shows. A newly installed pane joins the reader's group; drag its tab anywhere.
 The layout and hidden panes are owner preferences stored by the Host. Panes are never

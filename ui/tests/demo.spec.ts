@@ -226,7 +226,7 @@ test('extension controls expose TOML metadata, and the workspace itself is not a
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
   await openExtensions(page);
-  await expect(page.getByRole('group', { name: 'Mail', exact: true }).getByText('By Colecto · API 1')).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Mail', exact: true }).getByText('By Colecto · API 2')).toBeVisible();
   // The mail workspace and the account switcher are core UI: nothing here turns them off.
   await expect(page.getByRole('group', { name: 'Mail workspace' })).toHaveCount(0);
   await expect(page.getByRole('group', { name: 'Account switcher' })).toHaveCount(0);

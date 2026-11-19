@@ -34,6 +34,14 @@ Start with [docs/README.md](docs/README.md) (index, technologies, where files li
   use whole-number versions only, listed in
   [docs/extensions/bundled-bus.md](docs/extensions/bundled-bus.md).
 
+## Where settings go
+
+- Put a setting in the Settings section that matches what it changes, not the extension
+  that owns it. Everything about how Colecto looks (text, colour, density, layout of
+  lists and panes) goes in **Appearance**; what to be notified about and how goes in
+  **Notifications**. Extensions place settings there with `section` (API 2, see
+  [docs/extensions/README.md](docs/extensions/README.md#placing-settings-in-a-core-section)).
+
 ## Extension API versions
 
 - Every change to what extensions can rely on adds one sequential API version (1, 2,

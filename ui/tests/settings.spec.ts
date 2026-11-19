@@ -27,9 +27,9 @@ test('notifications show above Settings, with their actions starting from the le
   await page.goto('/');
   const request = page.getByRole('alertdialog', { name: 'Automation wants to send a message' });
   await expect(request).toBeVisible();
-  // Where toasts appear (and the test toast) is part of Appearance; the toast surface is core UI.
-  const settings = await openSettings(page, 'Appearance');
-  await expect(settings.getByRole('heading', { name: 'Appearance', level: 2 })).toBeVisible();
+  // Where toasts appear (and the test toast) is in the core Notifications section.
+  const settings = await openSettings(page, 'Notifications');
+  await expect(settings.getByRole('heading', { name: 'Notifications', level: 2 })).toBeVisible();
   expect(await onTop(page, '.toast')).toBe(true);
   // A notification that arrives while Settings is open is on top too.
   await settings.getByRole('button', { name: 'Show a test notification' }).click();
@@ -112,8 +112,8 @@ test('the message list has three densities and optional date headings', async ({
   await expect(page.locator('.day').first()).toBeVisible();
   const height = async () => (await row.boundingBox())!.height;
   const full = await height();
-  // List density and date headings belong to the mailbox: Settings → Mail.
-  const settings = await openSettings(page, 'Mail');
+  // The mailbox places list density and date headings in Settings → Appearance (API 2 `section`).
+  const settings = await openSettings(page, 'Appearance');
   await settings.locator('.segmented label', { hasText: 'Medium' }).click();
   await expect.poll(height).toBeLessThan(full);
   const medium = await height();
@@ -127,7 +127,7 @@ test('the message list has three densities and optional date headings', async ({
   await expect(page.locator('.mailbox')).toHaveAttribute('data-density', 'compact');
   await expect(page.locator('.mail-item').first()).toBeVisible();
   await expect(page.locator('.day')).toHaveCount(0);
-  const again = await openSettings(page, 'Mail');
+  const again = await openSettings(page, 'Appearance');
   await again.getByRole('checkbox', { name: 'Date headings' }).check();
   await again.locator('.segmented label', { hasText: 'Full' }).click();
   await expect(page.locator('.day').first()).toBeAttached();
@@ -164,4 +164,22 @@ test('a newer release is announced once, and never checked when turned off', asy
   } finally {
     await savePreferences(page, { notifications: defaultNotifications });
   }
+});
+
+test('text spacing widens letters, words, lines and paragraphs and is kept', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Appearance', exact: true }).click();
+  const root = (name: string) => page.evaluate(variable => document.documentElement.style.getPropertyValue(variable), name);
+  await page.getByRole('group', { name: 'Letter spacing' }).getByText('Most').click();
+  await page.getByRole('group', { name: 'Line height' }).getByText('More').click();
+  await expect.poll(() => root('--letter-spacing')).toBe('0.12em');
+  await expect.poll(() => root('--line-scale')).toBe('1.15');
+  await page.reload();
+  await expect.poll(() => root('--letter-spacing')).toBe('0.12em');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Appearance', exact: true }).click();
+  await expect(page.getByRole('group', { name: 'Line height' }).getByRole('radio', { name: 'More' })).toBeChecked();
+  for (const name of ['Letter spacing', 'Line height']) await page.getByRole('group', { name }).getByText('Normal').click();
+  await expect.poll(() => root('--letter-spacing')).toBe('0em');
 });

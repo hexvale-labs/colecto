@@ -44,7 +44,7 @@ const shape = (props: Record<string, Check>, required: string[] = []): Check => 
 export const ICONS = ['account', 'alert', 'attach', 'back', 'bell', 'check', 'close', 'compose', 'copy', 'cpu',
   'download', 'drafts', 'extension', 'forward', 'image', 'inbox', 'info', 'key', 'layout', 'mail', 'next',
   'palette', 'pencil', 'plus', 'refresh', 'reply', 'replyAll', 'search', 'sent', 'server', 'settings', 'shield',
-  'sidebar', 'sort', 'text', 'trash'] as const satisfies readonly IconName[];
+  'sidebar', 'sort', 'sparkles', 'text', 'trash'] as const satisfies readonly IconName[];
 const icon = oneOf(...ICONS);
 const tone = oneOf('default', 'muted', 'danger', 'ok');
 const span = shape({ text, style: oneOf('plain', 'strong', 'code', 'kbd', 'muted') }, ['text']);
