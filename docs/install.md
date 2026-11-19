@@ -5,14 +5,14 @@ Download the file for your system from the
 named `colecto-<version>-<platform>-<architecture>.<ext>`. Check a download against
 `SHA256SUMS.txt` with `sha256sum -c SHA256SUMS.txt --ignore-missing`.
 
-Windows installers lack a trusted code-signing certificate, and Android APKs use a
-temporary signing key. Releases do not include macOS or iOS builds. Platform-specific installation limits are described below.
+Windows installers lack a trusted code-signing certificate, and Android APKs are
+signed with Colecto's own key, not through Google Play. Releases do not include macOS or iOS builds. Platform-specific installation limits are described below.
 
 | System | File | Notes |
 | --- | --- | --- |
 | Linux | `.deb`, `.rpm` or `.AppImage` | Install with your package manager, or `chmod +x` the AppImage and run it |
 | Windows | `-setup.exe`, or `.msi` on x64 | SmartScreen: choose **More info → Run anyway** |
-| Android | `.apk` (`arm64` for most phones) | Allow installing from your browser or file manager. Each release is signed with a new throwaway key, so uninstall the old version before updating |
+| Android | `.apk` (`arm64` for most phones) | Allow installing from your browser or file manager. Releases share one signing key, so a new APK installs over the old one. APKs from before that change used a throwaway key: uninstall one of those once before installing a newer release |
 
 Architectures: `x64` (Intel/AMD 64-bit) and `arm64` (Apple Silicon, Snapdragon,
 phones). There are no 32-bit builds.
