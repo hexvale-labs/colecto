@@ -3,7 +3,7 @@
     {
       "version": 1,
       "breaking": false,
-      "released_in": null,
+      "released_in": "v0.8.0",
       "capabilities": [
         "extensions.bus",
         "account.read",

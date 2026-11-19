@@ -47,3 +47,5 @@ the panel and overlay system (v0.1.0 to v0.5.4) and the alpha's client-side APIs
 (v0.6.0 to v0.7.x). An alpha package that declares `api_version = 2` is refused as too
 new, and one that declares `api_version = 1` must be rebuilt against this page. Any
 further change to the extension API adds API 2.
+
+API 1 shipped in v0.8.0, the first beta.
