@@ -1,5 +1,5 @@
 <script lang="ts">
-  // A row's context menu, drawn by the shell from the items its extension sent (API 2 `menu`).
+  // A row's context menu, drawn by the shell from the items its extension sent (`menu`).
   // It opens at the pointer, or under the row from the keyboard, and stays inside the window.
   import { tick } from 'svelte';
   import Icon from '../Icon.svelte';

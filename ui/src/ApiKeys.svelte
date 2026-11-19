@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
-  import { hostService, type AccountInfo, type ApiKey, type Capability } from './lib/api';
+  import { desktopApp, hostService, type AccountInfo, type ApiKey, type Capability } from './lib/api';
   import { capabilityLabel } from './lib/capabilities';
   let { accounts }: { accounts: AccountInfo[] } = $props();
   let keys = $state<ApiKey[]>([]);
@@ -18,6 +18,8 @@
   let busy = $state(false);
   const operations: Capability[] = ['account.read', 'messages.list', 'messages.read', 'messages.label', 'drafts.list', 'drafts.read', 'drafts.write', 'messages.send', 'app.navigate', 'settings.appearance', 'settings.notifications', 'settings.extensions'];
   let mcp = $state<boolean | null>(null);
+  // The desktop app has no port of its own; it opens one for API keys while MCP is on.
+  const apiOrigin = (window as { __COLECTO_API__?: string }).__COLECTO_API__ ?? window.location.origin;
   async function reload() { keys = await hostService.apiKeys(); }
   onMount(() => {
     void reload().catch(e => error = e.message);
@@ -54,7 +56,7 @@
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   <p role="status">{status}</p>
   <div class="settings-group setting setting-row">
-    <div class="setting-text"><h3>MCP server</h3><p>Lets MCP clients use a key below at <code>{window.location.origin}/api/v1/mcp</code>. Off until you turn it on; keys keep working over HTTP either way.</p></div>
+    <div class="setting-text"><h3>MCP server</h3><p>Lets MCP clients use a key below at <code>{apiOrigin}/api/v1/mcp</code>. Off until you turn it on; {desktopApp ? 'the desktop app opens this port only while it is on, and only for keys.' : 'keys keep working over HTTP either way.'}</p></div>
     <label class="switch"><input type="checkbox" checked={!!mcp} disabled={busy || mcp === null} onchange={(event) => void toggleMcp(event.currentTarget.checked)} /><span class="sr-only">MCP server</span></label>
   </div>
   {#if secret}<section class="secret" aria-label="New API key"><h3>Copy your key now</h3><p>This secret is shown only here, until you leave or dismiss it.</p><textarea aria-label="API key secret" readonly value={secret} spellcheck="false"></textarea><div><button class="secondary" onclick={copy}>Copy key</button><button class="text-button" onclick={() => secret = ''}>Dismiss secret</button></div></section>{/if}

@@ -69,7 +69,7 @@ export async function request<T>(extension: string, account: string, path: strin
 
 /** Owner preferences, stored by the Host in Turso. `workspace` is the dock layout. */
 export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right' | 'bottom' | 'bottom-left' | 'left';
-export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner; updates: boolean }
+export interface NotificationPreferences { enabled: boolean; system: boolean; position: Corner }
 /** Message list rows: two lines with a preview, a shorter version, or one line. */
 export type ListDensity = 'full' | 'medium' | 'compact';
 export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; text_spacing: TextSpacing; notifications: NotificationPreferences; remote_images: boolean; list_density: ListDensity; date_groups: boolean; notified_release: string | null; accounts_enabled: Record<string, boolean>; onboarded: boolean; prefetch: PrefetchPreferences }
@@ -81,7 +81,7 @@ export const accountOn = (choices: Record<string, boolean>, id: string) => choic
 export interface PrefetchPreferences { enabled: boolean; count: number }
 /** An empty accent restores the default. */
 /** `accounts_enabled` entries are merged into the stored choices. */
-export type PreferencesInput = Partial<Omit<Preferences, 'accent'>> & { accent?: string };
+export type PreferencesInput = Partial<Omit<Preferences, 'accent'>> & { accent?: string; /** Setting keys, such as `notifications.position`, to return to their defaults. */ reset?: string[] };
 export const hostService = {
   preferences: () => request<Preferences>('host', 'demo', '/preferences'),
   savePreferences: (input: PreferencesInput) => request<Preferences>('host', 'demo', '/preferences', input),
@@ -162,6 +162,22 @@ export interface ApiKey extends ApiKeyInput { id: string; created_at: number; la
 
 export interface PendingSend { id: string; requester: string; account: string; from: string; snapshot: DraftInput | null; created_at: number; expires_at: number; status: 'pending' | 'rejected' | 'expired' | 'submitting' | 'sent' | 'uncertain' }
 
+/** The desktop app loads Colecto from its own `colecto://` scheme with no port open; there the
+ *  event streams arrive over a Tauri channel instead of a streamed `fetch`. */
+export const desktopApp = typeof location === 'object' && (location.protocol === 'colecto:' || location.hostname === 'colecto.localhost');
+let streamIds = 0;
+/** Read one event stream through the desktop app's `stream` command until it ends or `signal` aborts. */
+async function appStream(path: string, headers: Record<string, string>, body: string | null, onchunk: (text: string) => void, signal: AbortSignal) {
+  const { Channel, invoke } = await import('@tauri-apps/api/core');
+  const id = ++streamIds;
+  const channel = new Channel<string>();
+  channel.onmessage = onchunk;
+  const close = () => void invoke('close_stream', { id }).catch(() => {});
+  signal.addEventListener('abort', close, { once: true });
+  try { await invoke('stream', { request: { path: `/api/v1${path}`, headers, body }, id, channel }); }
+  finally { signal.removeEventListener('abort', close); }
+}
+
 /**
  * Follow the Host's server-sent events (`mail`, `approval`, `navigate`, `sync`), reconnecting with backoff.
  * Uses fetch rather than EventSource so the owner token can travel in a header. Returns a stop function.
@@ -169,31 +185,39 @@ export interface PendingSend { id: string; requester: string; account: string; f
 export function openEvents(onevent: (name: string, data: unknown) => void, path = '/events', body?: unknown): () => void {
   const controller = new AbortController();
   let delay = 1000;
+  let buffer = '';
+  /** Add received text; dispatch every complete event in it. */
+  const feed = (value: string) => {
+    buffer += value;
+    if (buffer.length > 262_144) throw new Error('Event too large');
+    let end: number;
+    while ((end = buffer.search(/\r?\n\r?\n/)) >= 0) {
+      const block = buffer.slice(0, end); buffer = buffer.slice(end).replace(/^\r?\n\r?\n/, '');
+      let name = 'message'; const data: string[] = [];
+      for (const line of block.split(/\r?\n/)) {
+        if (line.startsWith('event:')) name = line.slice(6).trim();
+        else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+      }
+      try { onevent(name, JSON.parse(data.join('\n') || 'null')); } catch { /* Ignore malformed events. */ }
+    }
+  };
   void (async () => {
     while (!controller.signal.aborted) {
+      buffer = '';
       try {
-        const response = await fetch(`/api/v1${path}`, {
-          credentials: 'omit', signal: controller.signal,
-          ...(body === undefined ? { headers: headers('host', 'demo') } : { method: 'POST', headers: { ...headers('host', 'demo'), 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-        });
-        if (!response.ok || !response.body) throw new Error();
-        delay = 1000;
-        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buffer = '';
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += value;
-          if (buffer.length > 262_144) throw new Error('Event too large');
-          let end: number;
-          while ((end = buffer.search(/\r?\n\r?\n/)) >= 0) {
-            const block = buffer.slice(0, end); buffer = buffer.slice(end).replace(/^\r?\n\r?\n/, '');
-            let name = 'message'; const data: string[] = [];
-            for (const line of block.split(/\r?\n/)) {
-              if (line.startsWith('event:')) name = line.slice(6).trim();
-              else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
-            }
-            try { onevent(name, JSON.parse(data.join('\n') || 'null')); } catch { /* Ignore malformed events. */ }
+        const sent = body === undefined ? { headers: headers('host', 'demo') } : { method: 'POST', headers: { ...headers('host', 'demo'), 'content-type': 'application/json' }, body: JSON.stringify(body) };
+        if (desktopApp) {
+          // An event over the limit is dropped; the stream itself goes on.
+          await appStream(path, sent.headers, sent.body ?? null, text => { try { feed(text); delay = 1000; } catch { buffer = ''; } }, controller.signal);
+        } else {
+          const response = await fetch(`/api/v1${path}`, { credentials: 'omit', signal: controller.signal, ...sent });
+          if (!response.ok || !response.body) throw new Error();
+          delay = 1000;
+          const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            feed(value);
           }
         }
       } catch { /* Reconnect below. */ }

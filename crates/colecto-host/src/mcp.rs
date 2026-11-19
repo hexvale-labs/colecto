@@ -19,9 +19,13 @@ pub(crate) struct MailMcp {
     host: Host,
 }
 pub(crate) fn http(host: Host) -> StreamableHttpService<MailMcp, LocalSessionManager> {
+    // The Host's boundary already admits only its own authority. rmcp's default list (loopback
+    // names only) refused a daemon's public name and the desktop app's `colecto.localhost`.
+    let authority = host.authority.clone();
     let mut config = StreamableHttpServerConfig::default()
         .with_json_response(true)
-        .with_max_request_body_bytes(512_000);
+        .with_max_request_body_bytes(512_000)
+        .with_allowed_hosts([authority]);
     config.legacy_session_mode = false;
     StreamableHttpService::new(
         move || Ok(MailMcp { host: host.clone() }),

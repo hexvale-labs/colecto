@@ -1,6 +1,6 @@
 //! Foreground runtime shared by the desktop shell and standalone daemon.
 use crate::{AccessPolicy, MailService};
-use colecto_core::{Accounts, Error, JmapAccount, MailAccount, MailStore, SecretStore};
+use colecto_core::{Accounts, Error, MailStore, SecretStore};
 use std::{
     env,
     path::{Path, PathBuf},
@@ -9,48 +9,7 @@ use std::{
 };
 
 pub fn open_accounts(directory: &Path) -> Result<Accounts, Box<dyn std::error::Error>> {
-    let mut store = MailStore::open(directory)?;
-    let keys = [
-        "COLECTO_IMAP_HOST",
-        "COLECTO_IMAP_PORT",
-        "COLECTO_SMTP_HOST",
-        "COLECTO_SMTP_PORT",
-        "COLECTO_MAIL_USERNAME",
-        "COLECTO_MAIL_PASSWORD",
-        "COLECTO_MAIL_ADDRESS",
-    ];
-    let jmap_keys = ["COLECTO_JMAP_SESSION_URL", "COLECTO_JMAP_TOKEN"];
-    let jmap = jmap_keys.iter().any(|key| env::var_os(key).is_some());
-    let imap = keys[..6].iter().any(|key| env::var_os(key).is_some());
-    if jmap && imap {
-        return Err("Configure either JMAP or IMAP/SMTP, not both".into());
-    }
-    if jmap {
-        let required = |key: &str| env::var(key).map_err(|_| format!("Missing {key}"));
-        store.connect_jmap(JmapAccount {
-            session_url: required("COLECTO_JMAP_SESSION_URL")?,
-            token: required("COLECTO_JMAP_TOKEN")?,
-            address: required("COLECTO_MAIL_ADDRESS")?,
-            username: env::var("COLECTO_JMAP_USERNAME").unwrap_or_default(),
-        })?;
-    } else if keys.iter().any(|key| env::var_os(key).is_some()) {
-        let required = |key: &str| env::var(key).map_err(|_| format!("Missing {key}"));
-        store.connect_account(MailAccount {
-            imap_host: required("COLECTO_IMAP_HOST")?,
-            imap_port: env::var("COLECTO_IMAP_PORT")
-                .unwrap_or_else(|_| "993".into())
-                .parse()?,
-            smtp_host: required("COLECTO_SMTP_HOST")?,
-            smtp_port: env::var("COLECTO_SMTP_PORT")
-                .unwrap_or_else(|_| "587".into())
-                .parse()?,
-            username: required("COLECTO_MAIL_USERNAME")?,
-            password: required("COLECTO_MAIL_PASSWORD")?,
-            address: required("COLECTO_MAIL_ADDRESS")?,
-            imap_starttls: false,
-            tls_certificate: String::new(),
-        })?;
-    }
+    let store = MailStore::open(directory)?;
     let namespace = format!("Colecto:{}", std::fs::canonicalize(directory)?.display());
     Ok(Accounts::open(store, Arc::new(SystemSecrets(namespace)))?)
 }
@@ -319,10 +278,9 @@ pub fn owner_initialization_script(origin: &str, token: &str) -> String {
 
 /// Whether the native window may load `destination`. WebKitGTK also asks for
 /// subframe loads, so the reader's sandboxed `about:srcdoc` mail frame must pass.
-pub fn native_navigation_allowed(authority: &str, destination: &reqwest::Url) -> bool {
-    destination
-        .as_str()
-        .starts_with(&format!("http://{authority}/"))
+/// `origin` is the page's own: `colecto://localhost` on desktop, loopback on phones.
+pub fn native_navigation_allowed(origin: &str, destination: &reqwest::Url) -> bool {
+    destination.as_str().starts_with(&format!("{origin}/"))
         || destination.as_str() == "about:srcdoc"
         || (destination.scheme() == "https"
             && destination.username().is_empty()
@@ -354,8 +312,6 @@ pub fn service_command() -> Result<Vec<String>, std::io::Error> {
     }
     Ok(command)
 }
-/// Shown when an old unit or script still runs the separate notifier.
-pub const NOTIFY_MERGED: &str = "`notify` is now part of `daemon`, which shows desktop notifications itself. To only show a remote daemon's notifications, run `daemon` with COLECTO_RELAY_ORIGIN and COLECTO_TOKEN_FILE.";
 
 /// The daemon behind a desktop session (the user service, on its Unix socket) shows desktop
 /// notifications itself, through the same event stream a remote relay reads. A server
@@ -413,8 +369,13 @@ mod tests {
     #[test]
     fn native_navigation_allows_the_service_mail_frames_and_plain_https_only() {
         let allowed =
-            |url: &str| native_navigation_allowed("127.0.0.1:4173", &url.parse().unwrap());
+            |url: &str| native_navigation_allowed("http://127.0.0.1:4173", &url.parse().unwrap());
         assert!(allowed("http://127.0.0.1:4173/"));
+        let desktop =
+            |url: &str| native_navigation_allowed("colecto://localhost", &url.parse().unwrap());
+        assert!(desktop("colecto://localhost/"));
+        assert!(!desktop("colecto://localhost.example/"));
+        assert!(!desktop("http://127.0.0.1:4173/"));
         assert!(allowed("about:srcdoc"));
         assert!(allowed("https://purelymail.com/docs/"));
         for denied in [

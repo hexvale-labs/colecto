@@ -32,9 +32,11 @@ creates that file with mode `0600`, tightens its data directory to `0700`, never
 prints the secret and never puts it in a URL. An existing token file with looser
 permissions is rejected.
 
-The desktop app connects by itself: it injects its owner credential only at its own
-loopback origin. It keeps its data in the platform's app data directory (for example
-`~/.local/share/app.colecto.mail` on Linux) unless `COLECTO_DATA_DIR` is set, and its
+The desktop app connects by itself: it serves the UI and API in-process through its
+`colecto://` scheme with no port open, and injects its owner credential only at that
+origin. `COLECTO_PORT` sets the port it opens for API keys while MCP is on (see
+[Desktop app without a port](architecture.md#desktop-app-without-a-port)). It keeps its data in the platform's app data directory (for example
+`~/.local/share/com.kogical.colecto` on Linux) unless `COLECTO_DATA_DIR` is set, and its
 logs in the platform's log directory. Wayland desktops take a window's icon from its
 desktop entry, so on Linux install the app for your user:
 
@@ -53,8 +55,8 @@ The recipe copies the binary instead of pointing the entry at Cargo's target dir
 so later builds from any checkout or `cargo clean` do not change the installed app. To
 update, pull and run `just install desktop` again: it builds, then swaps the binary in
 with a rename, so a running app keeps working and the next launch starts the new
-version. `just cleanup desktop` removes only the files above (and the older
-`app.colecto.mail` entry and icons); mail data, settings and logs are kept.
+version. `just cleanup desktop` removes only the files above; mail data, settings and
+logs are kept.
 
 The Host stores accounts, drafts, labels and Inbox/Sent snapshots in one embedded
 Turso database, `colecto.db`, inside the data directory. Drafts and snapshots are not

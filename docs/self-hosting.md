@@ -284,12 +284,6 @@ open, the Host counts open shell event streams (`POST /api/v1/extensions/events`
 adds `windows` to each `mail` event on `GET /api/v1/events`. In relay mode that is any
 window connected to the remote server, on any device.
 
-In 0.6 and earlier the notifier was a separate `colecto notify` command and
-`colecto-notifications.service` unit. The command now exits with a message pointing
-to relay mode, and the app removes a Colecto-managed `colecto-notifications.service`
-(disable, stop, delete, `daemon-reload`) the first time it starts. A unit without the
-`# Managed by Colecto` marker is left alone.
-
 `GET /api/v1/events` is an authenticated SSE stream requiring Host capability
 headers and an explicit owner bearer. Cookie-only streaming is rejected; use
 a streaming HTTP client that can attach Authorization, not a cookie-dependent
@@ -407,6 +401,11 @@ validation remains required; a supplied browser Origin must match the service.
 Nonbrowser MCP requests may omit Origin because every request requires an
 explicit bearer. All calls recheck current key policy, including revocation and
 expiry after initialization.
+
+The desktop app has no port of its own. While MCP is on it opens
+`http://127.0.0.1:4173` (or `COLECTO_PORT`) for API keys only, and closes it when MCP is
+turned off; Settings → API keys shows the address. See
+[Desktop app without a port](architecture.md#desktop-app-without-a-port).
 
 For stdio clients, build `colecto-mcp` with `just build rust`, then configure the
 executable with one argument, such as `https://mail.example.com/api/v1/mcp`

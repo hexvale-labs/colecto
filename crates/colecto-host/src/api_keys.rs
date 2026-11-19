@@ -26,15 +26,12 @@ pub struct KeyMetadata {
     pub revoked_at: Option<u64>,
 }
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct StoredKey {
     metadata: KeyMetadata,
     verifier: [u8; 32],
 }
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct Policy {
-    version: u32,
     keys: Vec<StoredKey>,
 }
 #[derive(Deserialize)]
@@ -75,37 +72,25 @@ fn valid_metadata(key: &KeyMetadata) -> bool {
 }
 impl ApiKeys {
     pub fn open(database: Database) -> Result<Self, String> {
-        let policy = crate::store::open(
-            &database,
-            "api-keys",
-            || Policy {
-                version: 1,
-                keys: vec![],
-            },
-            |bytes| {
-                let policy: Policy =
-                    serde_json::from_slice(bytes).map_err(|_| "Invalid API key policy")?;
-                if policy.version != 1
-                    || policy.keys.len() > 128
-                    || policy.keys.iter().any(|k| !valid_metadata(&k.metadata))
-                    || policy.keys.iter().enumerate().any(|(i, k)| {
-                        policy.keys[..i]
-                            .iter()
-                            .any(|v| v.metadata.id == k.metadata.id)
-                    })
-                {
-                    return Err("Invalid API key policy".into());
-                }
-                Ok(policy)
-            },
-        )?;
+        let policy = crate::store::open(&database, "api-keys", Policy::default, |bytes| {
+            let policy: Policy =
+                serde_json::from_slice(bytes).map_err(|_| "Invalid API key policy")?;
+            if policy.keys.len() > 128
+                || policy.keys.iter().any(|k| !valid_metadata(&k.metadata))
+                || policy.keys.iter().enumerate().any(|(i, k)| {
+                    policy.keys[..i]
+                        .iter()
+                        .any(|v| v.metadata.id == k.metadata.id)
+                })
+            {
+                return Err("Invalid API key policy".into());
+            }
+            Ok(policy)
+        })?;
         Ok(Self { database, policy })
     }
     fn reload(&mut self) -> Result<(), String> {
-        self.policy = Policy {
-            version: 1,
-            keys: vec![],
-        };
+        self.policy = Policy::default();
         self.policy = Self::open(self.database.clone())?.policy;
         Ok(())
     }

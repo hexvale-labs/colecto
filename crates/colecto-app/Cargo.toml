@@ -22,9 +22,13 @@ path = "src/main.rs"
 [dependencies]
 axum.workspace = true
 colecto-host.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tauri.workspace = true
 tauri-plugin-colecto-native.workspace = true
 tokio.workspace = true
+tower.workspace = true
 tracing.workspace = true
 zeroize.workspace = true
 

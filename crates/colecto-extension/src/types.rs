@@ -20,7 +20,7 @@ pub struct Message {
     pub date: String,
     pub seen: bool,
     pub flagged: bool,
-    /// The conversation it belongs to; empty when the provider gave none (API 2).
+    /// The conversation it belongs to; empty when the provider gave none.
     pub thread: String,
 }
 

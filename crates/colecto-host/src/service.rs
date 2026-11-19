@@ -251,9 +251,6 @@ impl MailService {
             policy.local && !policy.daemon_socket,
             policy.service_command.clone(),
         )?;
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(crate::services::retire_notifier(control.clone()));
-        }
         let mut policy = policy;
         if policy.token.is_none() {
             policy.token = Some(Arc::new(Zeroizing::new(
@@ -411,6 +408,10 @@ impl MailService {
             .accounts
             .lock()
             .map_or_else(|e| e.into_inner().database(), |a| a.database())
+    }
+    /// Whether the owner turned MCP (and so the desktop app's API port) on.
+    pub fn mcp_enabled(&self) -> bool {
+        self.host.preferences.lock().is_ok_and(|p| p.get().mcp)
     }
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<(&'static str, String)> {
         self.events.subscribe()

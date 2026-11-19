@@ -1,9 +1,20 @@
 # Roadmap
 
-**Alpha** means one owner can use Colecto as their daily mail client over IMAP/SMTP or
-JMAP, without data loss and without opening another client for routine mail. Desktop
-and browser come first; Android builds exist but are lightly tested. Until the first
-stable release, stored formats may change without migrations.
+Colecto is in **beta**: one owner can use it as their daily mail client over IMAP/SMTP
+or JMAP, without data loss and without opening another client for routine mail.
+Desktop and browser come first; Android builds exist but are lightly tested.
+
+What beta promises:
+
+- Updates migrate stored data forward (see [storage](storage.md#migrations)). Going
+  back to an older version is not supported: an older build refuses a newer database.
+- Extension API 1 stays supported; changes add API 2, 3, … (see
+  [API versions](extensions/api-versions/README.md)).
+- Settings keep only what the owner changed, so improved defaults reach everyone who
+  never changed them.
+
+Alpha data does not carry over: beta uses a new app identifier (`com.kogical.colecto`)
+and refuses an alpha `colecto.db`.
 
 Statuses: **Done**, **In progress**, **Next**, **Later**.
 
@@ -24,12 +35,23 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Inline `cid:` images in HTML mail | Later |
 | Encryption of stored mail | Later |
 
+## Storage
+
+| Item | Status |
+| --- | --- |
+| Versioned schema migrations, a copy before each migration, refuse alpha and newer databases | Done |
+| Settings store only what the owner changed; `reset` returns a setting to its default | Done |
+| Separate tables for drafts, labels, API keys and send approvals instead of one document each | Next |
+| "Reset to default" buttons in Settings | Next |
+| `colecto-daemon export` of accounts (without secrets), settings, drafts and labels | Later |
+
 ## App
 
 | Item | Status |
 | --- | --- |
 | Dockable workspace, command runner, notifications, accent colour | Done |
 | Interface zoom with `Ctrl +`, `Ctrl -` and `Ctrl 0` in the desktop app | Done |
+| Desktop app with no open port: UI and API in-process over `colecto://`, a port only while MCP is on | Done; checked on Linux (WebKitGTK), not yet on Windows |
 | MCP tools to read and change appearance, notification and extension settings, each behind its own key permission | Done |
 | Extensions: Wasm panels and overlays, install-time consent, z-index layers | Done |
 | Declarative extension settings, owner controls and per-guest reads | Done |

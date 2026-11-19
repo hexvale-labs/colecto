@@ -250,14 +250,12 @@ pub(crate) struct Ai {
     client: reqwest::Client,
 }
 
+/// Settings scope of the AI settings in the `settings` table.
+const SCOPE: &str = "ai";
+
 impl Ai {
     pub(crate) fn open(database: colecto_core::Database) -> Result<Self, String> {
-        let settings = crate::store::open(&database, "ai", AiSettings::default, |bytes| {
-            let value: AiSettings =
-                serde_json::from_slice(bytes).map_err(|_| "Invalid AI settings")?;
-            validate(&value)?;
-            Ok(value)
-        })?;
+        let (settings, _) = crate::store::load_settings(&database, SCOPE, validate)?;
         let summaries = crate::store::open(&database, "ai-summaries", Vec::new, |bytes| {
             serde_json::from_slice::<Vec<Summary>>(bytes).map_err(|_| "Invalid AI summaries".into())
         })?;
@@ -290,10 +288,14 @@ impl Ai {
     /// Forget everything kept for a removed account.
     pub(crate) fn remove_account(&self, account: &str) {
         if let Ok(mut settings) = self.settings.lock()
-            && settings.labels.remove(account).is_some()
-            && crate::store::save(&self.database, "ai", &*settings).is_err()
+            && settings.labels.contains_key(account)
         {
-            tracing::warn!("Could not save AI settings");
+            let mut next = settings.clone();
+            next.labels.remove(account);
+            match crate::store::save_settings(&self.database, SCOPE, &*settings, &next, &[]) {
+                Ok(()) => *settings = next,
+                Err(_) => tracing::warn!("Could not save AI settings"),
+            }
         }
         if let Ok(mut summaries) = self.summaries.lock() {
             summaries.retain(|s| s.account != account);
@@ -655,7 +657,7 @@ pub(crate) async fn put_settings(
     let host2 = host.clone();
     tokio::task::spawn_blocking(move || {
         let mut settings = host2.ai.settings.lock().map_err(|_| forbidden())?;
-        crate::store::save(&host2.ai.database, "ai", &input)
+        crate::store::save_settings(&host2.ai.database, SCOPE, &*settings, &input, &[])
             .map_err(|e| Failure(StatusCode::INTERNAL_SERVER_ERROR, e))?;
         *settings = input;
         Ok::<_, Failure>(())

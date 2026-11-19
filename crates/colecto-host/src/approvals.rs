@@ -28,10 +28,8 @@ pub struct PendingSend {
     pub expires_at: u64,
     pub status: Status,
 }
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct Journal {
-    version: u32,
     requests: Vec<PendingSend>,
 }
 pub struct Approvals {
@@ -40,22 +38,15 @@ pub struct Approvals {
 }
 impl Approvals {
     pub fn open(database: Database, now: u64) -> Result<Self, String> {
-        let mut journal = crate::store::open(
-            &database,
-            "send-approvals",
-            || Journal {
-                version: 1,
-                requests: vec![],
-            },
-            |bytes| {
+        let mut journal =
+            crate::store::open(&database, "send-approvals", Journal::default, |bytes| {
                 let journal: Journal =
                     serde_json::from_slice(bytes).map_err(|_| "Invalid approval journal")?;
-                if journal.version != 1 || journal.requests.len() > MAX_REQUESTS {
+                if journal.requests.len() > MAX_REQUESTS {
                     return Err("Invalid approval journal".into());
                 }
                 Ok(journal)
-            },
-        )?;
+            })?;
         for request in &mut journal.requests {
             if request.status == Status::Submitting {
                 request.status = Status::Uncertain;
@@ -64,7 +55,9 @@ impl Approvals {
         let mut result = Self { database, journal };
         result.maintain(now)?;
         // Persist crash recovery before accepting new decisions.
-        result.persist(&result.journal)?;
+        if !result.journal.requests.is_empty() {
+            result.persist(&result.journal)?;
+        }
         Ok(result)
     }
     fn persist(&self, journal: &Journal) -> Result<(), String> {

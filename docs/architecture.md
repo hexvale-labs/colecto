@@ -81,8 +81,9 @@ preferences and the optional AI settings and summaries. The OS keyring and passw
 process may open a data directory at a time. Mail snapshots and drafts are not
 encrypted at rest. See [storage](storage.md).
 
-In alpha, persisted formats may change without migrations; old JSON files from early
-prototypes are ignored.
+The schema is versioned and migrated forward on startup; a database from Colecto alpha,
+another program or a newer build is refused. Settings store only what the owner
+changed. See [storage](storage.md).
 
 ## Platforms
 
@@ -99,8 +100,25 @@ page has history to go back through and streams predictive-back progress to it a
 `colecto:back` window events, and its one command, `press`, plays the system click
 sound and haptics. The capability `native-feedback`
 (`crates/colecto-app/capabilities/native.json`) grants only that command, and only to
-the app's own loopback page (`http://127.0.0.1:*`); nothing else on that page can reach
-Tauri. On desktop the plugin does nothing.
+the phone app's own loopback page (`http://127.0.0.1:*`); nothing else on that page can
+reach Tauri. On desktop the plugin does nothing; the desktop page's capability
+`desktop-page` (`capabilities/desktop.json`) adds only its own zoom.
+
+### Desktop app without a port
+
+The desktop app runs the mail service in-process and opens **no port** while MCP is off
+(`crates/colecto-app/src/desktop.rs`). Phones still use a loopback port, because
+Android's WebView does not give custom schemes the request body.
+
+| Piece | How it works |
+| --- | --- |
+| Page and API | The window loads `colecto://localhost/` (`http://colecto.localhost/` on Windows). Each request goes to the service's router in-process and the whole response comes back; the service sees the authority `colecto.localhost`. |
+| Origin | The page's own origin, or no `Origin` at all (WebKitGTK sends none on same-origin requests to a custom scheme), becomes `http://colecto.localhost`; any other origin becomes `null` and mutations are refused. Only this window can reach the scheme. |
+| Event streams | `/api/v1/events` and `/api/v1/extensions/events` never stream through the scheme. The page calls the app's `stream` command with a Tauri `Channel`, which passes the text on as it arrives; `close_stream` and any page load end them, so a reload leaves no stream counting as an open window. |
+| Owner token | Injected only when `window.origin` is the page's origin, as before. |
+| IPC policy | The scheme handler adds `connect-src 'self' ipc: http://ipc.localhost` to the service's CSP so Tauri calls avoid their slow fallback. |
+| MCP and API keys | While MCP is on (Settings → API keys), the app listens on `127.0.0.1:${COLECTO_PORT:-4173}`. That port answers only `Host` values `127.0.0.1:<port>` or `localhost:<port>`, only requests with an API key (`Bearer colecto_…`) plus `/api/v1/version`, and translates its own browser origin to the service's. The owner token never works there. Turning MCP off closes it (the Host emits an `mcp` event). |
+| Settings → API keys | Shows the port's URL (`window.__COLECTO_API__`, set by the app). |
 
 On Linux the app sets its GTK program name to `Colecto` so the Wayland `app_id`
 matches the `Colecto.desktop` entry every package installs; compositors use that

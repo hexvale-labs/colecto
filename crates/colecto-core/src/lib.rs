@@ -5,7 +5,7 @@ mod content;
 mod database;
 pub use cache::{MailCacheStore, MailSnapshot, SnapshotHandle};
 pub use content::{MAX_CONTENT_BYTES, MAX_CONTENT_MESSAGES};
-pub use database::Database;
+pub use database::{Database, SCHEMA_VERSION};
 mod credentials;
 pub use accounts::Accounts;
 pub use credentials::SecretStore;
@@ -56,9 +56,7 @@ fn storage(error: impl std::fmt::Display) -> Error {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct SavedMail {
-    version: u32,
     drafts: Vec<Draft>,
 }
 
@@ -253,17 +251,9 @@ impl MailStore {
             Some(database) => database,
             None => Database::open(&directory)?,
         };
-        let bytes = if database.contains_record(&namespace, "drafts")? {
-            database
-                .get_record(&namespace, "drafts", 1)?
-                .ok_or_else(|| storage("Authoritative drafts were removed"))?
-        } else {
-            let bytes = serde_json::to_vec(&SavedMail {
-                version: 1,
-                drafts: vec![],
-            })
-            .map_err(storage)?;
-            database.initialize_record(&namespace, "drafts", 1, &bytes)?
+        let bytes = match database.get_record(&namespace, "drafts")? {
+            Some(bytes) => bytes,
+            None => serde_json::to_vec(&SavedMail { drafts: vec![] }).map_err(storage)?,
         };
         let drafts = validate_drafts(&bytes)?;
         let cache = MailCacheStore::with_database(database.clone(), account)?;
@@ -320,17 +310,12 @@ impl MailStore {
             }
             Account::Jmap(account) => {
                 account.validate()?;
-                if account.username.is_empty() {
-                    // Bearer accounts keep the key they had before password sign-in existed.
-                    serde_json::to_string(&("jmap", &account.session_url, &account.address))
-                } else {
-                    serde_json::to_string(&(
-                        "jmap",
-                        &account.session_url,
-                        &account.address,
-                        &account.username,
-                    ))
-                }
+                serde_json::to_string(&(
+                    "jmap",
+                    &account.session_url,
+                    &account.address,
+                    &account.username,
+                ))
             }
         }
         .map_err(storage)?;
@@ -623,13 +608,12 @@ impl MailStore {
                 self.database.set_record(
                     &self.namespace,
                     "folders",
-                    1,
                     &serde_json::to_vec(&(key, &folders)).map_err(storage)?,
                 )?;
                 Ok(folders)
             }
             Err(error) => {
-                if let Some(bytes) = self.database.get_record(&self.namespace, "folders", 1)? {
+                if let Some(bytes) = self.database.get_record(&self.namespace, "folders")? {
                     let (provider, folders): (String, Vec<Folder>) =
                         serde_json::from_slice(&bytes).map_err(storage)?;
                     if &provider == key {
@@ -862,11 +846,10 @@ impl MailStore {
             Some(index) => drafts[index] = draft.clone(),
             None => drafts.push(draft.clone()),
         }
-        let saved = SavedMail { version: 1, drafts };
+        let saved = SavedMail { drafts };
         self.database.set_record(
             &self.namespace,
             "drafts",
-            1,
             &serde_json::to_vec(&saved).map_err(storage)?,
         )?;
         self.drafts = saved.drafts;
@@ -884,9 +867,6 @@ fn validate_drafts(bytes: &[u8]) -> Result<Vec<Draft>, Error> {
         return Err(storage("Draft store exceeds its size limit"));
     }
     let saved: SavedMail = serde_json::from_slice(bytes).map_err(storage)?;
-    if saved.version != 1 {
-        return Err(storage("Unsupported draft store version"));
-    }
     let mut ids = HashSet::new();
     for draft in &saved.drafts {
         if !draft.id.starts_with("draft-")
@@ -1105,7 +1085,6 @@ mod cache_tests {
             .set_record(
                 &store.namespace,
                 "folders",
-                1,
                 &serde_json::to_vec(&(&store.account_key, &folders)).unwrap(),
             )
             .unwrap();
@@ -1205,7 +1184,7 @@ mod cache_tests {
         let draft = store.save_draft(input.clone()).unwrap();
         let before = store
             .database
-            .get_record(&store.namespace, "drafts", 1)
+            .get_record(&store.namespace, "drafts")
             .unwrap();
         futures_executor::block_on(
             store
@@ -1228,7 +1207,7 @@ mod cache_tests {
         assert_eq!(
             store
                 .database
-                .get_record(&store.namespace, "drafts", 1)
+                .get_record(&store.namespace, "drafts")
                 .unwrap(),
             before
         );

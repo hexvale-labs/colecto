@@ -1,8 +1,5 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     colecto_host::logging::init();
-    if std::env::args().nth(1).as_deref() == Some("notify") {
-        return Err(colecto_host::runtime::NOTIFY_MERGED.into());
-    }
     if std::env::args().nth(1).as_deref() == Some("--version") {
         match colecto_host::commit() {
             Some(commit) => println!("colecto-daemon {} ({commit})", colecto_host::VERSION),
