@@ -1,9 +1,11 @@
 import { installLayers } from './lib/layers';
 import { installBack } from './lib/back';
 import { installPressFeedback, platform } from './lib/native';
+import { installZoom } from './lib/zoom';
 installLayers();
 installBack();
 installPressFeedback();
+installZoom();
 // Motion follows the platform's conventions (see lib/back.ts); styles can too.
 document.documentElement.dataset.platform = platform;
 // Overlay scrollbars take no width. WebKitGTK fades them on a layer above everything else,

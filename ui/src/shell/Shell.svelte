@@ -24,7 +24,7 @@
   import AccountSettings from '../AccountSettings.svelte';
   import { applyTypography, DEFAULT_FONT, DEFAULT_TEXT_SIZE } from '../lib/typography';
   import { applySpacing, NO_SPACING, type TextSpacing } from '../lib/text-spacing.svelte';
-  import { hostService, accountOn, subscribeEvents, type AccountInfo, type ExtensionState, type NotificationPreferences, type PreferencesInput, type SecurityInfo } from '../lib/api';
+  import { hostService, accountOn, subscribeEvents, type AccountInfo, type ExtensionState, type NotificationPreferences, type Preferences, type PreferencesInput, type SecurityInfo } from '../lib/api';
   import type { Workspace } from '../App.svelte';
   import ToastSettings from '../ToastSettings.svelte';
   import AppearanceSettings from '../AppearanceSettings.svelte';
@@ -84,6 +84,13 @@
   $effect(() => { applySpacing(spacing); });
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); runtimes.refreshTheme(); });
   $effect(() => { notificationPosition.value = notificationPrefs.position; });
+  /** The saved preferences that change how Colecto looks and notifies. */
+  function applyLook(saved: Preferences | null) {
+    accent = saved?.accent ?? null;
+    font = saved?.font || DEFAULT_FONT; textSize = saved?.font_size || DEFAULT_TEXT_SIZE;
+    spacing = { ...NO_SPACING, ...saved?.text_spacing };
+    if (saved?.notifications) notificationPrefs = saved.notifications;
+  }
   function savePreferences(input: PreferencesInput) {
     if (input.accent !== undefined) accent = input.accent || null;
     if (input.font) font = input.font;
@@ -346,10 +353,7 @@
     const preferences = hostService.preferences().catch(() => null);
     void preferences.then(saved => {
       savedLayout = parseLayout(saved?.workspace); layoutReady = true;
-      accent = saved?.accent ?? null;
-      font = saved?.font || DEFAULT_FONT; textSize = saved?.font_size || DEFAULT_TEXT_SIZE;
-      spacing = { ...NO_SPACING, ...saved?.text_spacing };
-      if (saved?.notifications) notificationPrefs = saved.notifications;
+      applyLook(saved);
       accountsEnabled = saved?.accounts_enabled ?? {};
     });
     let stopEvents = () => {};
@@ -360,7 +364,11 @@
       connected = accounts.find(a => a.id === accountId)?.connected ?? false;
     }).catch(e => accountError = (e as Error).message).finally(() => {
       initialized = true;
-      stopEvents = subscribeEvents((name, data) => { if (name === 'navigate') onNavigate((data ?? {}) as { target?: unknown; account?: string }); });
+      stopEvents = subscribeEvents((name, data) => {
+        if (name === 'navigate') onNavigate((data ?? {}) as { target?: unknown; account?: string });
+        // An API key changed appearance or notification settings (MCP `settings.update`).
+        else if (name === 'preferences') void hostService.preferences().then(applyLook).catch(() => {});
+      });
     });
     return () => { narrow.removeEventListener('change', sync); small.removeEventListener('change', sync); stopEvents(); };
   });

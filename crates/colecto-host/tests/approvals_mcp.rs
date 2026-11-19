@@ -80,6 +80,7 @@ impl Fixture {
                 Capability::MessagesSend,
                 Capability::MessagesList,
                 Capability::AppNavigate,
+                Capability::SettingsAppearance,
             ],
             expires_at: None,
         };
@@ -529,6 +530,95 @@ async fn sdk_interop(expire: bool) {
         let refused = http.call_tool(navigate(account, target)).await.unwrap();
         assert_eq!(refused.is_error, Some(true));
     }
+    // Settings: this key holds settings.appearance only.
+    let settings = |name: &str, input: Value| {
+        let mut arguments = json!({"account":f.account});
+        if !input.is_null() {
+            arguments["settings"] = input;
+        }
+        CallToolRequestParams::new(name.to_owned())
+            .with_arguments(arguments.as_object().unwrap().clone())
+    };
+    let read = http
+        .call_tool(settings("settings.read", Value::Null))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    assert!(read.get("appearance").is_some() && read.get("notifications").is_none());
+    let inbox = read["extensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "inbox")
+        .unwrap();
+    let keys: Vec<_> = inbox["settings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(keys, ["density", "date_groups"]);
+    let changed = http
+        .call_tool(settings(
+            "settings.update",
+            json!({"appearance":{"accent":"#8EC5F0"},"extensions":{"inbox":{"density":"compact"}}}),
+        ))
+        .await
+        .unwrap();
+    assert!(!changed.is_error.unwrap_or(false));
+    let changed = changed.structured_content.unwrap();
+    assert_eq!(changed["appearance"]["accent"], "#8ec5f0");
+    assert_eq!(events.recv().await.unwrap().0, "preferences");
+    assert_eq!(events.recv().await.unwrap().0, "extension.settings");
+    // Text spacing merges step by step, like the notification fields.
+    for spacing in [json!({"line":2}), json!({"word":1})] {
+        let result = http
+            .call_tool(settings(
+                "settings.update",
+                json!({"appearance":{"text_spacing":spacing}}),
+            ))
+            .await
+            .unwrap();
+        assert!(!result.is_error.unwrap_or(false));
+        assert_eq!(events.recv().await.unwrap().0, "preferences");
+    }
+    // Ungranted areas, invalid values and owner-only fields are refused, and nothing is saved.
+    for refused in [
+        json!({"notifications":{"system":true}}),
+        json!({"extensions":{"inbox":{"prefetch":false}}}),
+        json!({"appearance":{"accent":"red"},"extensions":{"inbox":{"density":"full"}}}),
+        json!({"appearance":{"font_size":40}}),
+        json!({"appearance":{"text_spacing":{"line":3}}}),
+        json!({"appearance":{"text_spacing":{"lines":1}}}),
+        json!({"extensions":{"inbox":{"density":"huge"}}}),
+        json!({"mcp":false}),
+    ] {
+        let result = http
+            .call_tool(settings("settings.update", refused))
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+    }
+    let read = http
+        .call_tool(settings("settings.read", Value::Null))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    assert_eq!(read["appearance"]["accent"], "#8ec5f0");
+    assert_eq!(
+        read["appearance"]["text_spacing"],
+        json!({"letter":0,"word":1,"line":2,"paragraph":0})
+    );
+    let density = read["extensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "inbox")
+        .unwrap()["settings"][0]["value"]
+        .clone();
+    assert_eq!(density, "compact");
     let wrong_account = http
         .call_tool(
             CallToolRequestParams::new("send.status").with_arguments(

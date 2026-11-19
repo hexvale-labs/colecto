@@ -317,6 +317,15 @@
 <style>
   .x-stack { display: flex; flex-direction: column; min-width: 0; }
   .x-stack[data-direction='row'] { flex-direction: row; align-items: center; }
+  /* A field in a row takes the free width. Aligned to the start, a field's error drops below it
+     without moving its neighbours, so they take the field's height to stay level (#118). */
+  :global(.x-stack[data-direction='row']:has(> .x-field)) { width: 100%; }
+  :global(.x-stack[data-direction='row'] > .x-field) { flex: 1 1 10rem; min-width: 0; }
+  :global(.x-stack[data-direction='row'][data-align='start'] > .select .select-trigger), :global(.x-stack[data-direction='row'][data-align='start'] > .icon-button) { height: 38px; }
+  /* Rows of a short list (labels in Settings → AI) read like the account rows. */
+  :global(.x-list > li:has(> .x-stack[data-direction='row'])) { display: flex; align-items: center; min-height: 56px; padding: 8px 0; }
+  :global(.x-list > li:has(> .x-stack[data-direction='row']) + li) { border-top: 1px solid var(--line-soft); }
+  :global(.x-list > li > .x-stack[data-direction='row']) { flex: 1; }
   .x-stack.wrap { flex-wrap: wrap; }
   .x-stack[data-align='start'] { align-items: flex-start; }
   .x-stack[data-align='center'] { align-items: center; }

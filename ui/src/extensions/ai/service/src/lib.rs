@@ -164,18 +164,10 @@ fn classify(account: &str, ids: &[String], force: bool, cx: &mut Context) -> Res
         seen.pop_front();
     }
     cx.store(&key, &seen)?;
-    // The Host refreshed before announcing new mail, so its saved Inbox normally has them all.
-    let mut messages: Vec<_> = cx
-        .messages()?
-        .into_iter()
-        .filter(|m| fresh.contains(&m.id))
-        .collect();
-    let missing: Vec<String> = fresh
-        .iter()
-        .filter(|id| !messages.iter().any(|m| &m.id == *id))
-        .cloned()
-        .collect();
-    for id in &missing {
+    // One message at a time: the whole saved Inbox (`messages.list`, bodies included) does
+    // not fit the 64 KiB bridge reply once it holds real mail, which failed every pass.
+    let mut messages = Vec::new();
+    for id in &fresh {
         if let Ok(message) = cx.message(id) {
             messages.push(message);
         }
@@ -298,10 +290,7 @@ mod tests {
                     *stored.borrow_mut() = request["value"].clone();
                     Ok(Value::Null)
                 }
-                Some("messages.list") => Ok(json!([
-                    {"id": "1", "sender": "Shop", "address": "shop@example.test", "subject": "Your receipt", "body": "Thanks"},
-                    {"id": "2", "sender": "Ada", "address": "ada@example.test", "subject": "Lunch?", "body": "Friday"},
-                ])),
+                Some("messages.read") => sample(&request["id"]),
                 Some("labels.list") => Ok(json!({"Receipts": [], "Friends": []})),
                 Some("ai.decide") => Ok(json!([decide])),
                 Some("messages.label") => Ok(json!({})),
@@ -325,6 +314,18 @@ mod tests {
                 )
             })
             .collect()
+    }
+    /// Two saved messages, read one at a time as the service part does.
+    fn sample(id: &Value) -> Result<Value, String> {
+        match id.as_str() {
+            Some("1") => Ok(
+                json!({"id": "1", "sender": "Shop", "address": "shop@example.test", "subject": "Your receipt", "body": "Thanks"}),
+            ),
+            Some("2") => Ok(
+                json!({"id": "2", "sender": "Ada", "address": "ada@example.test", "subject": "Lunch?", "body": "Friday"}),
+            ),
+            _ => Err("Message not found".into()),
+        }
     }
     fn settings(enabled: bool) -> Value {
         json!({"enabled": enabled, "autolabel": true, "decision": {"threshold": 0.7}, "labels": {"a": {
@@ -354,7 +355,7 @@ mod tests {
         assert_eq!(labeled(&calls), [("Receipts".into(), "1".into())]);
         let (calls, _) = run(settings(false), Some(0.9));
         assert!(labeled(&calls).is_empty());
-        assert!(!calls.iter().any(|c| c["operation"] == "messages.list"));
+        assert!(!calls.iter().any(|c| c["operation"] == "messages.read"));
     }
 
     #[test]
@@ -371,10 +372,7 @@ mod tests {
                 // Both were checked before; a reclassify checks them again.
                 Some("storage.get") => Ok(json!(["1", "2"])),
                 Some("storage.set") | Some("bus.emit") => Ok(Value::Null),
-                Some("messages.list") => Ok(json!([
-                    {"id": "1", "sender": "Shop", "address": "shop@example.test", "subject": "Your receipt", "body": "Thanks"},
-                    {"id": "2", "sender": "Ada", "address": "ada@example.test", "subject": "Lunch?", "body": "Friday"},
-                ])),
+                Some("messages.read") => sample(&request["id"]),
                 Some("labels.list") => Ok(json!({"Receipts": ["2"], "Friends": []})),
                 Some("ai.decide") => Ok(json!([0.2])),
                 Some("messages.label") => Ok(json!({})),

@@ -222,8 +222,8 @@ later, show it with weight, not another dot.
 ## Motion
 
 Follows Emil Kowalski's rules. Presses scale to 0.97. Listboxes grow from their
-trigger in about 200 ms with a strong ease-out (`--ease-out`), a 2 px blur that clears
-as they arrive, and leave in 120 ms back toward the trigger; the chosen option's check
+trigger in about 200 ms with a strong ease-out (`--ease-out`), without a blur (filters
+repaint in software on WebKitGTK), and leave in 120 ms back toward the trigger; the chosen option's check
 pops in. Typing a letter jumps to a matching option. The Settings card rises 6 px and
 scales from 0.97 in 220 ms. Notifications enter from the edge they are docked to and
 leave the same way, fading in place while the rest of the stack slides (FLIP) into the
@@ -246,7 +246,28 @@ not animate. `prefers-reduced-motion` removes every transition.
 Nothing animates forever unless work is in progress (spinners, skeletons, the syncing
 pulse), and nothing that content scrolls or moves under uses `backdrop-filter`. Both
 keep the page repainting, which WebKitGTK, the engine of the Linux app, turns into brief
-stutters elsewhere; the reader toolbar is solid for that reason.
+stutters elsewhere; the reader toolbar is solid for that reason. Nothing uses `filter:
+blur()` either: soft glows are radial gradients (#97).
+
+## Zoom
+
+In the desktop app, `Ctrl +` (or `Ctrl =`), `Ctrl -` and `Ctrl 0` zoom the whole
+interface through the webview's own zoom, in browser steps from 50 % to 200 %
+(`ui/src/lib/zoom.ts`). The level is kept per device in `localStorage`
+(`colecto.zoom`). In a browser these keys stay with the browser, which already zooms and
+remembers the level per site; the mobile apps follow the system text size and pinch.
+The app's page may call only `set_webview_zoom` for this (`core:webview:allow-set-webview-zoom`
+in `crates/colecto-app/capabilities/native.json`).
+
+## Reader
+
+The message body uses the pane's width, up to 1180 px with 32 px padding (16 px on
+narrow panes); plain text wraps at 110 characters at most. HTML mail lays itself out in
+its frame. Other saved messages of the conversation sit in the same column: a small
+"Show n earlier messages" control above the message and "Show n later messages" below
+it, separated by a thin rule. Both start collapsed, so the opened message stays in view.
+Shown, each message is one line (sender, date, first line of its own words, without the
+text it quotes) that expands to its text and an "Open this message" button (#120).
 
 ## Feels native
 

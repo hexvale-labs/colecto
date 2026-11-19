@@ -23,7 +23,7 @@
   - region "API keys":
     - heading "API keys" [level=2]
     - paragraph:
-      - text: Give automation access to selected accounts and operations. Keys cannot manage settings, and
+      - text: Give automation access to selected accounts and operations. Keys can change only the settings areas you grant them, never credentials, connections, keys or extensions, and
       - code: messages.send
       - text: only asks you for approval; it never sends directly.
     - heading "MCP server" [level=3]
@@ -64,6 +64,12 @@
       - text: Send mail
       - checkbox "Navigate the app"
       - text: Navigate the app
+      - checkbox "Change appearance settings"
+      - text: Change appearance settings
+      - checkbox "Change notification settings"
+      - text: Change notification settings
+      - checkbox "Change extension settings, such as Mail and Privacy"
+      - text: Change extension settings, such as Mail and Privacy
     - group "Expires":
       - text: ""
       - radio "Never" [checked]

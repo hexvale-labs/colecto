@@ -16,7 +16,7 @@
   let error = $state('');
   let status = $state('');
   let busy = $state(false);
-  const operations: Capability[] = ['account.read', 'messages.list', 'messages.read', 'messages.label', 'drafts.list', 'drafts.read', 'drafts.write', 'messages.send', 'app.navigate'];
+  const operations: Capability[] = ['account.read', 'messages.list', 'messages.read', 'messages.label', 'drafts.list', 'drafts.read', 'drafts.write', 'messages.send', 'app.navigate', 'settings.appearance', 'settings.notifications', 'settings.extensions'];
   let mcp = $state<boolean | null>(null);
   async function reload() { keys = await hostService.apiKeys(); }
   onMount(() => {
@@ -50,7 +50,7 @@
 
 <section class="settings-section" aria-labelledby="api-keys-title">
   <header class="section-head"><h2 id="api-keys-title">API keys</h2>
-  <p>Give automation access to selected accounts and operations. Keys cannot manage settings, and <code>messages.send</code> only asks you for approval; it never sends directly.</p></header>
+  <p>Give automation access to selected accounts and operations. Keys can change only the settings areas you grant them, never credentials, connections, keys or extensions, and <code>messages.send</code> only asks you for approval; it never sends directly.</p></header>
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
   <p role="status">{status}</p>
   <div class="settings-group setting setting-row">
