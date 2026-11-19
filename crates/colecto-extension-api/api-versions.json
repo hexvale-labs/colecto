@@ -35,11 +35,14 @@
     {
       "version": 2,
       "breaking": false,
-      "released_in": null,
+      "released_in": "v0.7.0",
       "capabilities": [],
       "changes": [
         "Optional `section` on each `[[settings]]` table (`appearance` or `notifications`) shows that setting in that core Settings section instead of the extension's own page.",
-        "The icon `sparkles`, and `menu_button` shows its `icon` (it was accepted but not drawn)."
+        "The icon `sparkles`, and `menu_button` shows its `icon` (it was accepted but not drawn).",
+        "Row context menus: a `list` with `context_menu: true` sends a `context` event, the owner answers with a `menu` message of up to 24 items, and the choice comes back as a `menu` event.",
+        "`message_row` takes `starred`; messages carry `thread`, the provider's conversation id.",
+        "The icons `archive`, `eye`, `filter`, `folder`, `star` and `tag`."
       ]
     }
   ]
