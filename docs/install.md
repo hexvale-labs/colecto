@@ -38,7 +38,7 @@ The last release workflow that built both, including an unsigned `.ipa`, is the 
 job and the `macos` desktop entries of `.github/workflows/release.yml` at commit
 `b42c216`.
 
-On Linux, Settings → Connection can install the mail and desktop notification user
-services using the currently running executable, including an AppImage. Keep that
-file in place after installing services. See [self-hosting](self-hosting.md#install-background-services-from-the-app)
+On Linux, Settings → Connection can install the background mail service, which also
+shows desktop notifications, as a user service using the currently running executable,
+including an AppImage. Keep that file in place after installing it. See [self-hosting](self-hosting.md#install-background-services-from-the-app)
 for generated units, private socket connections and service controls.

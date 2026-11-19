@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in Colecto does not work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include any error text exactly as Colecto showed it.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. See …
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Colecto version
+      description: The release you downloaded, or `colecto-daemon --version` for the daemon.
+      placeholder: "0.6.0"
+  - type: dropdown
+    id: package
+    attributes:
+      label: How do you run Colecto?
+      multiple: true
+      options:
+        - AppImage
+        - .deb or .rpm package
+        - AUR package
+        - Windows installer
+        - Android APK
+        - Docker or self-hosted daemon
+        - In a browser
+        - Built from source
+  - type: input
+    id: system
+    attributes:
+      label: Operating system and desktop
+      description: For example "CachyOS, KDE Plasma on Wayland" or "Windows 11".
+  - type: dropdown
+    id: account
+    attributes:
+      label: Mail account type, if it matters
+      options:
+        - IMAP and SMTP
+        - JMAP
+        - Not related to an account
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and screenshots
+      description: Logs from `journalctl --user -u colecto-daemon.service` or the terminal help a lot. Remove addresses, tokens and message text you do not want public.

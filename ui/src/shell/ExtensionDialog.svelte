@@ -32,4 +32,8 @@
 <style>
   .x-dialog-head { align-items: center; padding-bottom: 0; }
   .x-dialog-source { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); font-weight: 560; }
+  /* An extension's dialog is usually one form, so the body's gap would not reach its fields
+     and the controls sat flush against each other (#86). A heading keeps its lead-in close. */
+  .sheet-body > :global(form) { display: grid; gap: 16px; }
+  .sheet-body > :global(form > :is(h2, h3) + .x-text) { margin-top: -10px; }
 </style>

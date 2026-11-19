@@ -159,6 +159,37 @@ jobs:
 
       - run: just test jmap
 
+  # The same over IMAP and SMTP (GreenMail in Docker), including the copy Colecto files in Sent.
+  mail:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Linux build dependencies
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: libssl-dev libdbus-1-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      # Reuse verify's cache (it compiles a superset of these crates) instead of storing another.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: verify-${{ hashFiles('Cargo.toml') }}
+          save-if: false
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: just
+
+      - run: just test mail
+
   prune-caches:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     needs: verify

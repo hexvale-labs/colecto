@@ -335,8 +335,46 @@ impl MailAccount {
             .build()
             .send(&email)
             .map_err(smtp_error)?;
+        // SMTP only delivers; the copy in Sent is the client's job (#90). The message has
+        // already gone out, so a failed copy is logged rather than reported as a failed send.
+        if !provider_saves_sent(&self.imap_host)
+            && let Err(error) = self.save_sent(&email.formatted())
+        {
+            tracing::warn!(%error, "Sent message was not copied to the Sent folder");
+        }
         Ok(())
     }
+    fn save_sent(&self, raw: &[u8]) -> Result<(), Error> {
+        let mut session = self.login()?;
+        let result = save_sent_session(&mut session, raw);
+        let _ = session.logout();
+        result
+    }
+}
+
+/// Gmail and Outlook file every message sent through their SMTP servers in Sent themselves,
+/// so a second copy from Colecto would show up twice.
+fn provider_saves_sent(imap_host: &str) -> bool {
+    let host = imap_host.trim_end_matches('.').to_ascii_lowercase();
+    [
+        "gmail.com",
+        "googlemail.com",
+        "outlook.com",
+        "office365.com",
+    ]
+    .iter()
+    .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+}
+
+fn save_sent_session<T: std::io::Read + std::io::Write>(
+    session: &mut imap::Session<T>,
+    raw: &[u8],
+) -> Result<(), Error> {
+    let names = session.list(Some(""), Some("*")).map_err(imap_error)?;
+    let mailbox = sent_mailbox(&names)?;
+    session
+        .append_with_flags(&mailbox, raw, &[imap::types::Flag::Seen])
+        .map_err(imap_error)
 }
 
 /// IDs are `imap-{validity}-{uid}` for Inbox and `imap-{hex name}-{validity}-{uid}` otherwise.
@@ -680,8 +718,19 @@ fn sent_mailbox(names: &[imap::types::Name]) -> Result<String, Error> {
             .attributes()
             .contains(&imap::types::NameAttribute::NoSelect)
     };
+    // Servers without SPECIAL-USE often nest folders under the Inbox (`INBOX.Sent`), so the
+    // fallback compares the last part of the name.
+    let leaf = |name: &imap::types::Name| match name.delimiter() {
+        Some(delimiter) if !delimiter.is_empty() => name
+            .name()
+            .rsplit(delimiter)
+            .next()
+            .unwrap_or_default()
+            .to_owned(),
+        _ => name.name().to_owned(),
+    };
     names.iter().filter(selectable).find(|name| name.attributes().iter().any(|attribute| matches!(attribute, imap::types::NameAttribute::Custom(value) if value.eq_ignore_ascii_case("\\Sent"))))
-        .or_else(|| names.iter().filter(selectable).find(|name| ["Sent", "Sent Items", "Sent Messages", "[Gmail]/Sent Mail"].iter().any(|candidate| name.name().eq_ignore_ascii_case(candidate))))
+        .or_else(|| names.iter().filter(selectable).find(|name| ["Sent", "Sent Items", "Sent Messages", "Sent Mail"].iter().any(|candidate| leaf(name).eq_ignore_ascii_case(candidate))))
         .map(|name| name.name().to_owned())
         .ok_or_else(|| Error::Invalid("The provider did not advertise a Sent mailbox and no standard Sent folder was found".into()))
 }
@@ -836,6 +885,74 @@ mod tests {
         assert_eq!(messages[0].subject, "Needle");
         assert_eq!(messages[0].id, "imap-4f7574626f782061726368697665-7-42");
         server.join().unwrap();
+    }
+    #[test]
+    fn copies_sent_mail_to_the_nested_sent_folder_as_read() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let raw = b"From: me@example.test\r\nSubject: Hi\r\n\r\nHello\r\n";
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = BufReader::new(socket.try_clone().unwrap());
+            write!(socket, "* OK ready\r\n").unwrap();
+            let mut line = String::new();
+            for (expected, response) in [
+                ("LOGIN", ""),
+                (
+                    "LIST",
+                    "* LIST () \".\" INBOX\r\n* LIST (\\Noselect) \".\" Sent\r\n* LIST () \".\" INBOX.Sent\r\n",
+                ),
+            ] {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                let (tag, command) = line.split_once(' ').unwrap();
+                assert!(
+                    command.starts_with(expected),
+                    "unexpected command: {command}"
+                );
+                write!(socket, "{response}{tag} OK complete\r\n").unwrap();
+            }
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+            let (tag, command) = line.split_once(' ').unwrap();
+            let tag = tag.to_owned();
+            assert_eq!(
+                command,
+                format!("APPEND \"INBOX.Sent\" (\\Seen) {{{}}}\r\n", raw.len())
+            );
+            write!(socket, "+ go ahead\r\n").unwrap();
+            let mut body = vec![0; raw.len() + 2];
+            reader.read_exact(&mut body).unwrap();
+            assert_eq!(&body[..raw.len()], raw);
+            write!(socket, "{tag} OK appended\r\n").unwrap();
+        });
+        let mut client = imap::Client::new(TcpStream::connect(address).unwrap());
+        client.read_greeting().unwrap();
+        let mut session = client.login("me", "secret").unwrap();
+        save_sent_session(&mut session, raw).unwrap();
+        server.join().unwrap();
+    }
+    #[test]
+    fn leaves_sent_copies_to_providers_that_file_them() {
+        for host in [
+            "imap.gmail.com",
+            "IMAP.GMAIL.COM.",
+            "outlook.office365.com",
+            "imap-mail.outlook.com",
+        ] {
+            assert!(provider_saves_sent(host), "{host}");
+        }
+        for host in [
+            "imap.purelymail.com",
+            "mail.notgmail.com",
+            "gmail.com.example.test",
+        ] {
+            assert!(!provider_saves_sent(host), "{host}");
+        }
     }
     #[test]
     fn search_quotes_untrusted_text_and_bounds_decoded_bodies() {

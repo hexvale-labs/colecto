@@ -133,8 +133,11 @@ const rules = () => view?.settings.labels[account()] ?? {};
 async function load() {
   try { view = await call<SettingsView>('GET', '/ai/settings'); error = ''; }
   catch (e) { error = (e as Error).message; }
-  try { accountLabels = Object.keys(await call<Record<string, string[]>>('GET', '/labels')); } catch { accountLabels = []; }
+  await loadLabels();
   renderSettings(); contribute(); void loadSummary();
+}
+async function loadLabels() {
+  try { accountLabels = Object.keys(await call<Record<string, string[]>>('GET', '/labels')); } catch { accountLabels = []; }
 }
 // Settings save as they change. A failed save reloads what the Host kept.
 async function save(change: (draft: AiSettings) => void) {
@@ -270,7 +273,7 @@ function renderEditor() {
     { type: 'fieldset', legend: 'Decision model', children: [
       { type: 'toggle', id: 'rule-model', style: 'checkbox', label: 'Also ask the decision model about mail no rule matched', checked: rule.model },
       ...(rule.model && !view?.settings.decision.model ? [{ type: 'text', tone: 'muted', size: 'sm', text: 'Set up the decision model on the AI page first.' } as Node] : []),
-      { type: 'textarea', id: 'rule-description', label: 'What belongs under this label? Optional, helps the model', rows: 2, maxlength: 500, placeholder: 'e.g. receipts and order confirmations from shops', value: rule.description, report: 'input' },
+      { type: 'textarea', id: 'rule-description', label: 'What belongs under this label? Optional, helps the model', rows: 2, maxlength: 500, placeholder: 'e.g. receipts and order confirmations from shops', value: rule.description, report: 'input', disabled: !rule.model },
     ] },
     { type: 'stack', gap: 6, children: [
       { type: 'heading', level: 3, text: 'Test with your Inbox' },
@@ -291,7 +294,8 @@ async function saveEditor() {
 }
 const edit = (change: () => void, redraw = true) => { change(); if (redraw) { editorEpoch++; renderEditor(); } schedulePreview(); };
 app.when('rule-enabled', 'toggle', ({ checked }) => edit(() => { rule.enabled = checked; }, false), 'dialog');
-app.when('rule-model', 'toggle', ({ checked }) => edit(() => { rule.model = checked; }, false), 'dialog');
+// Redrawn in place (same form id), so the checkbox keeps focus while the description follows it.
+app.when('rule-model', 'toggle', ({ checked }) => { edit(() => { rule.model = checked; }, false); renderEditor(); }, 'dialog');
 app.when('rule-description', 'input', ({ value }) => { rule.description = value; }, 'dialog');
 app.when('add-rule', 'press', () => edit(() => { rule.rules.push({ field: 'any', pattern: '' }); }), 'dialog');
 app.when('cancel-rule', 'press', () => { editing = null; app.send({ t: 'dialog', tree: null }); }, 'dialog');
@@ -306,3 +310,7 @@ app.on('event', event => {
 
 app.on('start', () => void load());
 app.on('account', () => void load());
+// Labels made after Settings → AI loaded would otherwise be missing from it (#101).
+for (const source of ['inbox/v1/labels', 'reader/v1/labels']) {
+  bus.listen(source, payload => { if (payload?.account === account()) void loadLabels().then(renderSettings); });
+}

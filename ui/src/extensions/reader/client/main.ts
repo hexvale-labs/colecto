@@ -150,10 +150,33 @@ function greeting() {
   return hour < 5 ? 'Up late?' : hour < 12 ? 'Good morning.' : hour < 18 ? 'Good afternoon.' : 'Good evening.';
 }
 
+// A text node holds at most 16 KiB, and a longer one stops the reader (#87). Plain bodies run
+// longer, so they are split at line breaks into blocks that read as one continuous text.
+function bodyText(text: string): Node {
+  const max = 15 * 1024;
+  const parts: string[] = [];
+  let rest = text;
+  while (rest.length) {
+    let end = 0, bytes = 0;
+    for (const char of rest) {
+      const point = char.codePointAt(0)!;
+      bytes += point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4;
+      if (bytes > max) break;
+      end += char.length;
+    }
+    if (end === rest.length) { parts.push(rest); break; }
+    const newline = rest.lastIndexOf('\n', end - 1);
+    parts.push(rest.slice(0, newline > 0 ? newline : end));
+    rest = rest.slice(newline > 0 ? newline + 1 : end);
+  }
+  return parts.length === 1 ? { type: 'text', preset: 'body', text: parts[0] }
+    : { type: 'stack', gap: 0, children: parts.map(part => ({ type: 'text', preset: 'body', text: part }) as Node) };
+}
+
 function renderTabs() {
   const list = currentTabs();
   app.render('pane.header', list.length ? { type: 'tabs', id: 'tabs', label: 'Open messages', close_all: true,
-    items: list.map(tab => ({ id: tab.id, label: tab.subject, title: tab.subject, active: view?.id === tab.id })) } : null);
+    items: list.map(tab => ({ id: tab.id, label: clip(tab.subject, 512), title: clip(tab.subject, 1024), active: view?.id === tab.id })) } : null);
 }
 
 function render() {
@@ -175,12 +198,12 @@ function render() {
       { type: 'button', id: 'reply-all', variant: 'tool', icon: 'replyAll', label: 'Reply all', title: 'Reply all' },
       { type: 'button', id: 'forward', variant: 'tool', icon: 'forward', label: 'Forward', title: 'Forward' },
     ] } as Node, { type: 'slot', id: 'actions-slot', name: 'v1/actions', context: { account, message_id: view.id } } as Node,
-    { type: 'button', id: 'copy', variant: 'tool', icon: 'copy', label: 'Copy message text', title: 'Copy message text', live: true, copy: content?.text || message.body } as Node] : []),
+    { type: 'button', id: 'copy', variant: 'tool', icon: 'copy', label: 'Copy message text', title: 'Copy message text', live: true, copy: clip(content?.text || message.body, 1024 * 1024) } as Node] : []),
   ] };
   const body: Node[] = !message ? [] : [
     ...banners.map(banner => ({ type: 'banner', tone: banner.tone, text: banner.text }) as Node),
     ...(changedBy ? [{ type: 'banner', tone: 'info', text: `${changedBy} changed how this message is shown.` } as Node] : []),
-    { type: 'message_header', subject: message.subject, sender: message.sender, address: message.address, ...(date?.full ? { date: date.full, date_title: message.date } : {}) },
+    { type: 'message_header', subject: clip(message.subject, 1024), sender: clip(message.sender, 512), address: clip(message.address, 512), ...(date?.full ? { date: clip(date.full, 128), date_title: clip(message.date, 512) } : {}) },
     ...(labelError ? [{ type: 'text', preset: 'error', text: labelError } as Node] : []),
     ...(names.length ? [{ type: 'fieldset', preset: 'chips', legend: 'Labels', legend_hidden: true, disabled: labeling, children: names.map((name, index) => ({ type: 'toggle', id: `label.${index}`, style: 'chip', label: `Label ${name}`, label_hidden: true, checked: labels[name].includes(view!.id) })) } as Node] : []),
     ...(content?.attachments.length ? [{ type: 'attachments', id: 'attachments', label: 'Attachments', disabled: downloading !== null, items: content.attachments.map(file => ({ index: file.index, name: file.name, detail: downloading === file.index ? 'Downloading…' : size(file.size) })) } as Node] : []),
@@ -192,7 +215,7 @@ function render() {
     ] } as Node] : []),
     contentLoading ? { type: 'skeleton', lines: 3 }
       : content?.html && showHtml ? { type: 'frame', title: 'Message content', doc: content.html, designed: designed(), remote_images: remote() }
-      : { type: 'text', preset: 'body', text: content?.text || message.body },
+      : bodyText(content?.text || message.body),
   ];
   app.render('pane', { type: 'section', preset: 'reader', label: 'Message reader', busy: loading, children: [
     toolbar,

@@ -113,3 +113,21 @@ test('keeps designed mail on its light sheet even when it ships dark-mode rules'
   const cell = page.frameLocator('iframe[title="Message content"]').getByText('Welcome aboard');
   await expect(cell).toHaveCSS('color', 'rgb(34, 34, 34)');
 });
+
+// Regression (#87): a row or text node over 16 KiB stopped the whole extension, so one long
+// newsletter took down Mail with "Invalid message_row.preview".
+test('a message with a very long plain body lists and opens', async ({ page }) => {
+  const body = `${'A long line of newsletter text that keeps going for a while.\n'.repeat(1800)}The very last line.`;
+  const message = { id: 'long-plain', sender: 'news@example.test', address: 'news@example.test', subject: 'Weekly digest', body, date: 'Today' };
+  await page.route('**/api/v1/messages**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/long-plain/content')) return route.fulfill({ json: { text: body, html: null, attachments: [], message_id: '', references: '', reply_to: '', to: '', cc: '' } });
+    if (path.endsWith('/cache') || path.endsWith('/content')) return route.fallback();
+    return route.fulfill({ json: path.endsWith('/refresh') ? [message] : message });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /news@example\.test/ }).click();
+  await expect(page.getByRole('heading', { name: 'Weekly digest' })).toBeVisible();
+  await expect(page.getByText('The very last line.')).toBeVisible();
+  await expect(page.getByText(/stopped/i)).toHaveCount(0);
+});

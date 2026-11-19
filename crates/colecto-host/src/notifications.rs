@@ -1,4 +1,5 @@
-//! Optional desktop session agent; the remote daemon remains the only mail synchronizer.
+//! Desktop notifications for new mail while no Colecto window is open. The daemon runs this
+//! against its own socket, or, in relay mode, against a remote daemon that does the syncing.
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
@@ -61,18 +62,14 @@ pub fn run_agent(
                 .error_for_status()?;
             backoff = 1;
             consume_events(BufReader::new(response), || {
-                let status = std::process::Command::new("notify-send")
-                    .args([
-                        "--app-name=Colecto",
-                        "--",
-                        "New mail",
-                        "Open Colecto to read your messages.",
-                    ])
-                    .status()?;
-                if !status.success() {
-                    return Err(std::io::Error::other("notify-send failed"));
+                if !mail_enabled(&client, &url, &token) {
+                    return;
                 }
-                Ok(())
+                // No notification server (no desktop session yet, or a headless machine)
+                // must not drop the event stream, so a failure is only logged.
+                if let Err(error) = show("New mail", "Open Colecto to read your messages.") {
+                    tracing::warn!(%error, "Desktop notification failed");
+                }
             })?;
             Ok(())
         })();
@@ -84,10 +81,57 @@ pub fn run_agent(
     }
 }
 
-fn consume_events(
-    reader: impl BufRead,
-    mut notify: impl FnMut() -> Result<(), std::io::Error>,
-) -> Result<(), std::io::Error> {
+/// The "New mail" switch in Settings → Notifications; on when it cannot be read.
+fn mail_enabled(client: &reqwest::blocking::Client, url: &reqwest::Url, token: &str) -> bool {
+    let settings = (|| -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        Ok(client
+            .get(url.join("api/v1/extensions/notifications/settings")?)
+            .bearer_auth(token)
+            .header("x-colecto-extension", "host")
+            .header("x-colecto-account", "demo")
+            .timeout(Duration::from_secs(10))
+            .send()?
+            .error_for_status()?
+            .json()?)
+    })();
+    settings.map_or(true, |settings| settings["values"]["mail"] != false)
+}
+
+/// Post a notification over the freedesktop D-Bus interface, which every Linux desktop
+/// implements, rather than through `notify-send`, which not every distribution installs.
+#[cfg(target_os = "linux")]
+fn show(summary: &str, body: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use dbus::arg::{PropMap, Variant};
+    let connection = dbus::blocking::Connection::new_session()?;
+    let proxy = connection.with_proxy(
+        "org.freedesktop.Notifications",
+        "/org/freedesktop/Notifications",
+        Duration::from_secs(5),
+    );
+    let mut hints = PropMap::new();
+    // Lets the desktop show Colecto's name and icon, and group its notifications.
+    hints.insert(
+        "desktop-entry".into(),
+        Variant(Box::new("Colecto".to_owned())),
+    );
+    let actions: Vec<String> = Vec::new();
+    let _: (u32,) = proxy.method_call(
+        "org.freedesktop.Notifications",
+        "Notify",
+        (
+            "Colecto", 0u32, "colecto", summary, body, actions, hints, -1i32,
+        ),
+    )?;
+    Ok(())
+}
+#[cfg(not(target_os = "linux"))]
+fn show(_: &str, _: &str) -> Result<(), Box<dyn std::error::Error>> {
+    Err("Background desktop notifications are available only on Linux".into())
+}
+
+/// Calls `notify` for each mail event with new messages, unless a Colecto window was open
+/// when it was sent: that window shows its own notification.
+fn consume_events(reader: impl BufRead, mut notify: impl FnMut()) -> Result<(), std::io::Error> {
     let mut reader = reader;
     let mut event = String::new();
     let mut data = String::new();
@@ -109,10 +153,12 @@ fn consume_events(
             if event == "mail"
                 && serde_json::from_str::<serde_json::Value>(&data)
                     .ok()
-                    .and_then(|v| v["ids"].as_array().map(|a| !a.is_empty()))
-                    .unwrap_or(false)
+                    .is_some_and(|v| {
+                        v["ids"].as_array().is_some_and(|a| !a.is_empty())
+                            && v["windows"].as_u64().unwrap_or(0) == 0
+                    })
             {
-                notify()?;
+                notify();
             }
             event.clear();
             data.clear();
@@ -135,18 +181,14 @@ mod tests {
     use super::*;
     #[test]
     fn notifications_ignore_initial_snapshot_and_empty_or_malformed_events() {
-        let input = b"event: ready\ndata: {}\n\nevent: mail\ndata: {\"ids\":[]}\n\nevent: mail\ndata: invalid\n\nevent: mail\ndata: {\"account\":\"a\",\"ids\":[\"new\"]}\n\n";
+        let input = b"event: ready\ndata: {}\n\nevent: mail\ndata: {\"ids\":[]}\n\nevent: mail\ndata: invalid\n\nevent: mail\ndata: {\"account\":\"a\",\"ids\":[\"new\"]}\n\nevent: mail\ndata: {\"account\":\"a\",\"ids\":[\"open\"],\"windows\":1}\n\n";
         let mut count = 0;
-        consume_events(&input[..], || {
-            count += 1;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(count, 1);
+        consume_events(&input[..], || count += 1).unwrap();
+        assert_eq!(count, 1, "a window that is open shows its own notification");
     }
     #[test]
     fn oversized_events_are_bounded() {
-        assert!(consume_events(&vec![b'x'; 65538][..], || Ok(())).is_err());
+        assert!(consume_events(&vec![b'x'; 65538][..], || {}).is_err());
     }
 }
 

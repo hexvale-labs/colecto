@@ -13,7 +13,7 @@ export interface MailItem { id: string; name: string; subject: string; preview: 
 export interface AccountSettings { name: string; address: string; protocol: 'imap' | 'jmap'; imap_host: string; imap_port: number; smtp_host: string; smtp_port: number; username: string; session_url: string; imap_starttls?: boolean; tls_certificate?: string }
 export interface AccountInfo { id: string; settings: AccountSettings | null; connected: boolean; configured: boolean }
 /** `version` is the Colecto that wrote the unit; `update_to` is set when this app can rewrite it. */
-export interface BackgroundService { installed: boolean; version?: string | null; update_to?: string | null; enabled: boolean; active: boolean; supported: boolean; reason?: string | null; socket?: string | null; token_file?: string | null }
+export interface BackgroundService { installed: boolean; version?: string | null; update_to?: string | null; enabled: boolean; active: boolean; supported: boolean; reason?: string | null; socket?: string | null; token_file?: string | null; relay?: boolean }
 export interface Upstream { address: string; token_file: string }
 /** A socket names its daemon's token file; a remote origin sends its access token once. */
 export type UpstreamInput = { address: string; token_file: string } | { address: string; token?: string };
@@ -98,8 +98,8 @@ export const hostService = {
   disconnect: (id: string) => request<boolean>('host', 'demo', `/accounts/${encodeURIComponent(id)}/disconnect`, {}),
   security: () => request<SecurityInfo>('host', 'demo', '/security'),
   /** Linux user services this app can install (local service only). */
-  services: () => request<Record<'daemon' | 'notifications', BackgroundService>>('host', 'demo', '/services'),
-  serviceAction: (name: 'daemon' | 'notifications', input: { action: 'install'; autostart: boolean } | { action: 'autostart'; enabled: boolean } | { action: 'start' | 'stop' | 'uninstall' | 'update' }) => request<boolean>('host', 'demo', `/services/${name}`, input),
+  services: () => request<Record<'daemon', BackgroundService>>('host', 'demo', '/services'),
+  serviceAction: (name: 'daemon', input: { action: 'install'; autostart: boolean } | { action: 'autostart'; enabled: boolean } | { action: 'start' | 'stop' | 'uninstall' | 'update' }) => request<boolean>('host', 'demo', `/services/${name}`, input),
   /** The daemon (socket or remote origin) this app forwards to, or null for its built-in service. */
   upstream: async () => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream')).upstream,
   setUpstream: async (value: UpstreamInput | null) => (await request<{ upstream: Upstream | null }>('host', 'demo', '/upstream', value, 'PUT')).upstream,

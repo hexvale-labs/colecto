@@ -7,6 +7,11 @@ capabilities = ["messages.read", "messages.list", "messages.label", "ai.text", "
 description = "Optional summaries, drafted replies and automatic labels using AI services you configure. Off until you turn it on in Settings → AI."
 author = "Colecto"
 
+# Settings → AI lists the account's labels, so the client part reloads them when Mail or the
+# reader changes them. The service part has no handler for these events and ignores them.
+[bus]
+subscribe = ["inbox/v1/labels", "reader/v1/labels"]
+
 [settings_page]
 title = "AI"
 icon = "cpu"

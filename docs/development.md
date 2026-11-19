@@ -81,6 +81,7 @@ just install browsers # install the test browsers once
 just test browser     # browser flows and a real Host restart
 just test native      # desktop window smoke test (Linux, needs xvfb)
 just test jmap        # send/receive/search/attachments against a real JMAP server (Docker)
+just test mail        # the same over IMAP and SMTP (GreenMail in Docker, ports 3993 and 465)
 just perf-check       # verification plus three recorded resource runs
 ```
 
@@ -241,7 +242,7 @@ from scratch.
   the newest Rust and Bun package cache of each kind per branch and deletes the ones superseded
   by a newer toolchain or lockfile. GitHub also evicts anything unused for
   7 days, which is why `release.yml` runs twice a week.
-- `just test jmap` runs workspace-wide (`cargo test --test jmap_server`), not with
+- `just test jmap` and `just test mail` run workspace-wide (`cargo test --test jmap_server`), not with
   `-p colecto-core`: selecting one package changes dependency features and would
   rebuild dozens of crates the shared cache already holds.
 - `.github/actions/apt-install` times a small download from each Ubuntu mirror and

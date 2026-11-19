@@ -115,3 +115,23 @@ test('Settings → AI keeps everything inactive until AI features are on', async
   await expect(page.getByLabel('Base URL').first()).toBeDisabled();
   await expect(page.getByRole('checkbox', { name: 'Label new mail automatically' })).toBeDisabled();
 });
+
+test('a label’s description is only editable while the decision model is asked', async ({ page }) => {
+  await page.route('**/api/v1/ai/settings', route => route.fulfill({ json: { ...settings(true), settings: { ...settings(true).settings, autolabel: true } } }));
+  await page.route('**/api/v1/labels', route => route.fulfill({ json: { Work: [] } }));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'AI', exact: true }).click();
+  await page.getByRole('region', { name: 'AI' }).getByRole('button', { name: /^Work/ }).first().click();
+  const dialog = page.getByRole('dialog', { name: '“Work”' });
+  const description = dialog.getByLabel(/What belongs under this label/);
+  const model = dialog.getByRole('checkbox', { name: /Also ask the decision model/ });
+  await expect(description).toBeDisabled();
+  await model.click();
+  await expect(description).toBeEnabled();
+  await expect(model).toBeFocused();
+  await description.fill('receipts');
+  await model.click();
+  await expect(description).toBeDisabled();
+  await expect(description).toHaveValue('receipts');
+});

@@ -11,8 +11,8 @@ pub fn run() {
             "daemon" => tokio::runtime::Runtime::new()
                 .unwrap()
                 .block_on(colecto_host::runtime::run()),
-            "notify" => colecto_host::runtime::notify(),
-            _ => Err("Usage: colecto [daemon|notify]".into()),
+            "notify" => Err(colecto_host::runtime::NOTIFY_MERGED.into()),
+            _ => Err("Usage: colecto [daemon]".into()),
         };
         if let Err(error) = result {
             eprintln!("{error}");
