@@ -937,6 +937,7 @@ dependencies = [
  "colecto-core",
  "colecto-extension-api",
  "colecto-package",
+ "dbus",
  "futures-util",
  "getrandom 0.3.4",
  "hickory-resolver",

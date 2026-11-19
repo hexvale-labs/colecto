@@ -6,6 +6,17 @@ installBack();
 installPressFeedback();
 // Motion follows the platform's conventions (see lib/back.ts); styles can too.
 document.documentElement.dataset.platform = platform;
+// Overlay scrollbars take no width. WebKitGTK fades them on a layer above everything else,
+// so one in the app showed through the startup splash, Settings and dialogs (#96); style.css
+// hides them while one of those covers the app. Classic scrollbars stay, because hiding them
+// would reflow the page behind.
+{
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:absolute;top:-999px;width:50px;height:50px;overflow:scroll';
+  document.documentElement.append(probe);
+  if (probe.offsetWidth === probe.clientWidth) document.documentElement.dataset.overlayScrollbars = '';
+  probe.remove();
+}
 import { mount } from 'svelte';
 import App from './App.svelte';
 import '@fontsource-variable/mona-sans/wdth.css';

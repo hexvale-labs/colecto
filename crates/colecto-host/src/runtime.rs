@@ -91,6 +91,18 @@ impl SecretStore for SystemSecrets {
 }
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    // Relay mode: a remote daemon syncs the mail, and this one only shows its notifications.
+    if let Ok(origin) = env::var("COLECTO_RELAY_ORIGIN") {
+        let token_file = PathBuf::from(
+            env::var_os("COLECTO_TOKEN_FILE").ok_or("Relay mode requires COLECTO_TOKEN_FILE")?,
+        );
+        tracing::info!(%origin, "Relaying desktop notifications from a remote Colecto");
+        return tokio::task::spawn_blocking(move || {
+            crate::notifications::run_agent(&origin, &token_file).map_err(|e| e.to_string())
+        })
+        .await?
+        .map_err(Into::into);
+    }
     let directory = env::var_os("COLECTO_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(".colecto"));
@@ -168,6 +180,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "Colecto HTTP socket: {} (Host: localhost)",
                 socket.path.display()
             );
+            desktop_notifications(&socket.path, &directory);
             axum::serve(socket.listener()?, service.router())
                 .with_graceful_shutdown(shutdown)
                 .await?;
@@ -341,11 +354,34 @@ pub fn service_command() -> Result<Vec<String>, std::io::Error> {
     }
     Ok(command)
 }
-pub fn notify() -> Result<(), Box<dyn std::error::Error>> {
-    crate::notifications::run_agent(
-        &env::var("COLECTO_PUBLIC_ORIGIN")?,
-        &PathBuf::from(env::var_os("COLECTO_TOKEN_FILE").ok_or("COLECTO_TOKEN_FILE is required")?),
-    )
+/// Shown when an old unit or script still runs the separate notifier.
+pub const NOTIFY_MERGED: &str = "`notify` is now part of `daemon`, which shows desktop notifications itself. To only show a remote daemon's notifications, run `daemon` with COLECTO_RELAY_ORIGIN and COLECTO_TOKEN_FILE.";
+
+/// The daemon behind a desktop session (the user service, on its Unix socket) shows desktop
+/// notifications itself, through the same event stream a remote relay reads. A server
+/// without a session bus, or `COLECTO_NOTIFICATIONS=off`, skips it.
+#[cfg(unix)]
+fn desktop_notifications(socket: &Path, directory: &Path) {
+    let session = env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some()
+        || env::var_os("XDG_RUNTIME_DIR").is_some_and(|dir| Path::new(&dir).join("bus").exists());
+    if !cfg!(target_os = "linux")
+        || !session
+        || env::var("COLECTO_NOTIFICATIONS").is_ok_and(|value| value == "off")
+    {
+        return;
+    }
+    let origin = format!("unix:{}", socket.display());
+    let token_file = directory.join("owner-token");
+    let spawned = std::thread::Builder::new()
+        .name("notifications".into())
+        .spawn(move || {
+            if let Err(error) = crate::notifications::run_agent(&origin, &token_file) {
+                tracing::warn!(%error, "Desktop notifications stopped");
+            }
+        });
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "Desktop notifications unavailable");
+    }
 }
 
 #[cfg(test)]

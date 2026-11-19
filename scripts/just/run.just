@@ -18,8 +18,3 @@ daemon:
     {{j}} build rust
     {{j}} build ui
     cargo run -p colecto-host --bin colecto-daemon --locked
-
-# Run the optional Linux desktop notification agent for the configured HTTPS daemon.
-notify:
-    {{j}} build rust
-    cargo run -p colecto-host --bin colecto-daemon --locked -- notify

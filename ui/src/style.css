@@ -45,12 +45,17 @@ input, textarea, [contenteditable], code, .selectable, .letter, .error-box, .sna
 img, svg, a { -webkit-user-drag: none; }
 ::selection { background: color-mix(in oklch, var(--mint) 32%, transparent); color: var(--ink); }
 * { scrollbar-width: thin; }
+/* Overlay scrollbars in the app hide while anything covers it: the startup splash, Settings
+   or a dialog. See main.ts (#96). */
+:root[data-overlay-scrollbars]:is(:has(#startup), :has(.settings-overlay), :has(dialog[open])) .app-shell :not(dialog, dialog *) { scrollbar-width: none; }
+:root[data-overlay-scrollbars]:is(:has(#startup), :has(.settings-overlay), :has(dialog[open])) .app-shell :not(dialog, dialog *)::-webkit-scrollbar { display: none; }
 h1, h2, h3, p, ul, dl, dd, figure { margin: 0; }
 ul { padding: 0; list-style: none; }
 h1, h2, h3 { font-weight: 640; letter-spacing: -0.015em; text-wrap: balance; }
 button, input, textarea, select { font: inherit; color: inherit; letter-spacing: inherit; }
 button { border: 0; background: none; padding: 0; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
 button:disabled, label.disabled { opacity: 0.45; cursor: default; }
+.field:has(> :is(input, textarea, select):disabled) { opacity: 0.45; }
 fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 fieldset:disabled button:disabled { opacity: 1; }
 input, textarea { min-width: 0; caret-color: var(--mint); }
@@ -832,10 +837,9 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .reader-banner.warning { background: oklch(0.26 0.04 75); color: oklch(0.9 0.06 80); }
 .reader-banner.warning .icon { color: oklch(0.82 0.11 75); }
 
-/* Connection page: the current service and installable background services. */
+/* Connection page: the current service and the installable background service. */
 .service-list { margin-top: 10px; }
 .service-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; }
-.service-list .service-row + .service-row { border-top: 1px solid var(--line-soft); }
 .service-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px; background: var(--control); color: var(--ink-2); }
 .service-icon.current { background: var(--select); color: var(--mint-hi); }
 .service-text { display: grid; gap: 3px; flex: 1; min-width: 0; }

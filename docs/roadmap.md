@@ -43,7 +43,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Account setup wizard with settings lookup (provider list, Thunderbird Autoconfig and ISPDB, DNS SRV and MX, JMAP well-known) | Done |
 | Loading screen and selection polish | Done |
 | Custom ports in every server field | Done |
-| Install the daemon and notifier as Linux systemd user services from Connection | Done; real systemd validation pending |
+| Install the daemon (with desktop notifications, or as a relay of a remote server's) as a Linux systemd user service from Connection | Done; real systemd validation pending |
 | Show service unit versions and update outdated units from Connection | Done; real systemd validation pending |
 | Install the daemon as a Windows logon task | Next |
 | Stress testing with thousands of messages and very long HTML mail | Next |

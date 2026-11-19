@@ -178,7 +178,9 @@ function rows(list: Item[]): Row[] {
     const date = folder === 'Drafts' ? { label: '', group: '', full: '' } : when(item.date, now);
     if (grouped && date.group && date.group !== group) out.push({ key: `day:${date.group}`, kind: 'heading', node: { type: 'heading', level: 3, style: 'day', text: date.group } });
     group = date.group;
-    out.push({ key: item.id, kind: 'row', node: { type: 'message_row', sender: item.name, date: date.label, date_title: date.full, subject: item.subject, preview: item.preview } });
+    // A row shows one line of each field, while bodies run to 100 KB and the renderer rejects
+    // text over 16 KiB, stopping the whole extension (#87). Clip everything that comes from mail.
+    out.push({ key: item.id, kind: 'row', node: { type: 'message_row', sender: clip(item.name, 512), date: clip(date.label, 128), date_title: clip(date.full, 512), subject: clip(item.subject, 1024), preview: clip(item.preview, 512) } });
   }
   return out;
 }
