@@ -408,6 +408,11 @@ Nonbrowser MCP requests may omit Origin because every request requires an
 explicit bearer. All calls recheck current key policy, including revocation and
 expiry after initialization.
 
+The desktop app has no port of its own. While MCP is on it opens
+`http://127.0.0.1:4173` (or `COLECTO_PORT`) for API keys only, and closes it when MCP is
+turned off; Settings → API keys shows the address. See
+[Desktop app without a port](architecture.md#desktop-app-without-a-port).
+
 For stdio clients, build `colecto-mcp` with `just build rust`, then configure the
 executable with one argument, such as `https://mail.example.com/api/v1/mcp`
 (or `http://127.0.0.1:4173/api/v1/mcp` locally). Set `COLECTO_MCP_KEY_FILE` to a

@@ -319,10 +319,9 @@ pub fn owner_initialization_script(origin: &str, token: &str) -> String {
 
 /// Whether the native window may load `destination`. WebKitGTK also asks for
 /// subframe loads, so the reader's sandboxed `about:srcdoc` mail frame must pass.
-pub fn native_navigation_allowed(authority: &str, destination: &reqwest::Url) -> bool {
-    destination
-        .as_str()
-        .starts_with(&format!("http://{authority}/"))
+/// `origin` is the page's own: `colecto://localhost` on desktop, loopback on phones.
+pub fn native_navigation_allowed(origin: &str, destination: &reqwest::Url) -> bool {
+    destination.as_str().starts_with(&format!("{origin}/"))
         || destination.as_str() == "about:srcdoc"
         || (destination.scheme() == "https"
             && destination.username().is_empty()
@@ -413,8 +412,13 @@ mod tests {
     #[test]
     fn native_navigation_allows_the_service_mail_frames_and_plain_https_only() {
         let allowed =
-            |url: &str| native_navigation_allowed("127.0.0.1:4173", &url.parse().unwrap());
+            |url: &str| native_navigation_allowed("http://127.0.0.1:4173", &url.parse().unwrap());
         assert!(allowed("http://127.0.0.1:4173/"));
+        let desktop =
+            |url: &str| native_navigation_allowed("colecto://localhost", &url.parse().unwrap());
+        assert!(desktop("colecto://localhost/"));
+        assert!(!desktop("colecto://localhost.example/"));
+        assert!(!desktop("http://127.0.0.1:4173/"));
         assert!(allowed("about:srcdoc"));
         assert!(allowed("https://purelymail.com/docs/"));
         for denied in [

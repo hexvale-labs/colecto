@@ -30,6 +30,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | --- | --- |
 | Dockable workspace, command runner, notifications, accent colour | Done |
 | Interface zoom with `Ctrl +`, `Ctrl -` and `Ctrl 0` in the desktop app | Done |
+| Desktop app with no open port: UI and API in-process over `colecto://`, a port only while MCP is on | Done; checked on Linux (WebKitGTK), not yet on Windows |
 | MCP tools to read and change appearance, notification and extension settings, each behind its own key permission | Done |
 | Extensions: Wasm panels and overlays, install-time consent, z-index layers | Done |
 | Declarative extension settings, owner controls and per-guest reads | Done |

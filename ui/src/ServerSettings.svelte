@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import Icon from './Icon.svelte';
-  import { hostService, setAccessToken } from './lib/api';
+  import { desktopApp, hostService, setAccessToken } from './lib/api';
   import type { BackgroundService, Upstream, UpstreamInput } from './lib/api';
   type Name = 'daemon';
   let services = $state<Partial<Record<Name, BackgroundService>>>({});
@@ -90,7 +90,7 @@
         <span class="service-icon current" aria-hidden="true"><Icon name={upstream ? (viaSocket ? 'server' : 'globe') : local ? 'monitor' : 'globe'} size={18} /></span>
         <div class="service-text">
           <strong>{upstream ? (viaSocket ? 'Background mail service' : 'Remote server') : local ? 'This app' : 'Remote server'}</strong>
-          <span class="service-meta"><span class="status-dot on" aria-hidden="true"></span>Connected<span class="sep" aria-hidden="true">·</span><span class="selectable service-detail">{upstream ? upstream.address : window.location.origin}</span></span>
+          <span class="service-meta"><span class="status-dot on" aria-hidden="true"></span>Connected<span class="sep" aria-hidden="true">·</span><span class="selectable service-detail">{upstream ? upstream.address : desktopApp ? 'This computer' : window.location.origin}</span></span>
         </div>
         {#if upstream}<button class="secondary" disabled={busy !== null} onclick={() => useUpstream(null)}>Use this app instead</button>{/if}
       </div>

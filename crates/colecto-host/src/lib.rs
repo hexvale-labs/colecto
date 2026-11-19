@@ -1712,11 +1712,18 @@ async fn update_preferences(
     let Json(input) =
         input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid preferences".into()))?;
     tokio::task::spawn_blocking(move || {
-        host.preferences
-            .lock()
-            .map_err(|_| forbidden())?
+        let mut store = host.preferences.lock().map_err(|_| forbidden())?;
+        let before = store.get().mcp;
+        let saved = store
             .update(input)
-            .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))
+            .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+        // The desktop app opens or closes its API port with MCP.
+        if saved.mcp != before {
+            let _ = host
+                .events
+                .send(("mcp", serde_json::json!({"on": saved.mcp}).to_string()));
+        }
+        Ok(saved)
     })
     .await
     .map_err(|_| forbidden())?
