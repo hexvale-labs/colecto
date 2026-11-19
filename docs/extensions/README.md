@@ -224,6 +224,7 @@ transferred buffers are referenced as `{"$buffer": index}`.
 | `contribute` | `{slot, tree}`: content in another extension's slot (`ui.contribute`) |
 | `download` | `{name, data: {$buffer}}`: offer a file to save |
 | `frame` | `{bitmap: {$buffer}, x?, y?}`: one finished overlay frame, when the overlay runs in frames mode |
+| `menu` | `{surface, node, key, items}`: the context menu for a `list` row, answering its `context` event (API 2, see [API 2](api-versions/API-2.md)) |
 
 Surfaces are `pane` (declared by `[pane]`), `settings` (declared by `[settings_page]`,
 shown under the page title with "From *name*") and the dialog. The full protocol is in
@@ -271,11 +272,12 @@ A `frame` renders `doc` in `<iframe sandbox="allow-popups allow-popups-to-escape
 
 ### Icons
 
-`icon` props take one of: `account`, `alert`, `attach`, `back`, `bell`, `check`, `close`,
-`compose`, `copy`, `cpu`, `download`, `drafts`, `extension`, `forward`, `image`, `inbox`,
-`info`, `key`, `layout`, `mail`, `next`, `palette`, `pencil`, `plus`, `refresh`, `reply`,
-`replyAll`, `search`, `sent`, `server`, `settings`, `shield`, `sidebar`, `sort`, `text`,
-`trash`. A test keeps this list equal in `manifest.rs`, `protocol.ts` and `Icon.svelte`.
+`icon` props take one of: `account`, `alert`, `archive`, `attach`, `back`, `bell`, `check`,
+`close`, `compose`, `copy`, `cpu`, `download`, `drafts`, `extension`, `eye`, `filter`,
+`folder`, `forward`, `image`, `inbox`, `info`, `key`, `layout`, `mail`, `next`, `palette`,
+`pencil`, `plus`, `refresh`, `reply`, `replyAll`, `search`, `sent`, `server`, `settings`,
+`shield`, `sidebar`, `sort`, `sparkles`, `star`, `tag`, `text`, `trash`. `archive`, `eye`,
+`filter`, `folder`, `sparkles`, `star` and `tag` came in API 2. A test keeps this list equal in `manifest.rs`, `protocol.ts` and `Icon.svelte`.
 
 ### Limits
 

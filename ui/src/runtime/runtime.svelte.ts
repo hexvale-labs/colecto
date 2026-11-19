@@ -3,7 +3,7 @@
 // and Worker, checks every message, answers API calls and keeps the surfaces the renderer
 // draws. The credential and the owner token never cross into the frame or the Worker.
 import { callFailure, extensionHost, ServiceError, type ExtensionState } from '../lib/api';
-import { checkOutgoing, checkTree, LIMITS, ProtocolError, type Node, type Patch, type ToastAction } from './protocol';
+import { checkOutgoing, checkTree, LIMITS, ProtocolError, type MenuItem, type Node, type Patch, type ToastAction } from './protocol';
 import type { Theme } from './theme';
 import { dismissKey, notify } from '../shell/toast-store.svelte';
 import type { IconName } from '../Icon.svelte';
@@ -58,6 +58,8 @@ export class ExtensionRuntime {
   /** What each surface reported with `state`. */
   states = $state<Record<string, SurfaceState>>({});
   dialog = $state<Node | null>(null);
+  /** A row's context menu: asked for with a `context` event, filled by the extension's `menu`. */
+  menu = $state<{ surface: string; node: string; key: string; x: number; y: number; items: MenuItem[] | null } | null>(null);
   /** Its contributions to other extensions' slots, by full slot name (`reader/v1/actions`). */
   contributions = $state<Record<string, Node | null>>({});
   commands = $state<Command[]>([]);
@@ -145,7 +147,7 @@ export class ExtensionRuntime {
     if (this.#token) void extensionHost.revokeCredential(this.id, this.#token).catch(() => {});
     this.#token = '';
     this.status = 'stopped'; this.reason = reason; this.trees = {};
-    this.states = {}; this.dialog = null; this.contributions = {}; this.commands = []; this.appActions = []; this.searchScope = '';
+    this.states = {}; this.dialog = null; this.menu = null; this.contributions = {}; this.commands = []; this.appActions = []; this.searchScope = '';
   }
 
   restart() { this.stop(); void this.start(); }
@@ -161,6 +163,17 @@ export class ExtensionRuntime {
   }
 
   /** A meaningful interaction in one of its surfaces. */
+  /** The owner asked for a row's menu at (x, y); it shows once the extension answers. */
+  openMenu(surface: string, node: string, key: string, x: number, y: number) {
+    this.menu = { surface, node, key, x, y, items: null };
+    this.event(surface, node, 'context', { key });
+  }
+  chooseMenu(item: string) {
+    const menu = this.menu;
+    this.menu = null;
+    if (menu) this.event(menu.surface, menu.node, 'menu', { key: menu.key, item });
+  }
+
   event(surface: string, node: string, kind: string, value?: unknown) {
     this.#lastEvent = performance.now();
     this.send({ t: 'event', surface, node, kind, ...(value === undefined ? {} : { value }) });
@@ -195,6 +208,12 @@ export class ExtensionRuntime {
         case 'leave': this.#context().shell?.leave(this.id, message.surface); break;
         case 'focus': this.#focus(message.surface, message.node); break;
         case 'dialog': this.dialog = message.tree; break;
+        case 'menu': {
+          // Only an answer to the menu the owner asked for, and only while it is still wanted.
+          const menu = this.menu;
+          if (menu && !menu.items && menu.surface === message.surface && menu.node === message.node && menu.key === message.key) this.menu = message.items.length ? { ...menu, items: message.items } : null;
+          break;
+        }
         case 'contribute':
           if (!this.capabilities.includes('ui.contribute')) throw new ProtocolError('Contributions need ui.contribute');
           this.contributions[message.slot] = message.tree;

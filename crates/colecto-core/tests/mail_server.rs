@@ -117,6 +117,29 @@ fn sends_with_attachments_receives_searches_and_files_in_sent() {
 
     let found = recipient.query("inbox", &subject).unwrap();
     assert!(found.iter().any(|m| m.id == id), "search did not find it");
+    // Search filters become IMAP SEARCH keys on the server (#103).
+    let filtered = recipient
+        .query(
+            "inbox",
+            &format!("{subject} from:user1@example.com is:unread"),
+        )
+        .unwrap();
+    assert!(
+        filtered.iter().any(|m| m.id == id),
+        "filters did not find it"
+    );
+    assert!(
+        recipient
+            .query("inbox", &format!("{subject} from:nobody@example.com"))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        recipient
+            .query("inbox", &format!("{subject} is:starred"))
+            .unwrap()
+            .is_empty()
+    );
     assert!(
         recipient
             .query("inbox", "no such words")

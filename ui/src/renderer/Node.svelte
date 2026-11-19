@@ -33,6 +33,15 @@
     clearTimeout(timer);
     timer = setTimeout(() => emit('input', { value }), p<number>('debounce_ms') ?? 0);
   }
+  /** Fit a textarea's height to its text, without a scrollbar. */
+  function grow(field: HTMLTextAreaElement) {
+    const fit = () => { field.style.height = 'auto'; field.style.height = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`; };
+    const observer = new ResizeObserver(fit);
+    observer.observe(field);
+    field.addEventListener('input', fit);
+    queueMicrotask(fit);
+    return { destroy() { observer.disconnect(); field.removeEventListener('input', fit); } };
+  }
   function controlled(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
     field.value = value;
     return {
@@ -196,7 +205,7 @@
   {@const variant = p<string>('variant') ?? 'secondary'}
   {@const iconOnly = p('icon_only') || variant === 'icon' || variant === 'chip_remove' || variant === 'plain_remove' || variant === 'compose_icon'}
   {@const icon = typeof p('copy') === 'string' && copied !== null ? (copied ? 'check' : 'copy') : p<IconName>('icon')}
-  <button type={p('submit') ? 'submit' : 'button'} class="{classes[variant]}{p('icon') === 'back' && variant === 'icon' ? ' back' : ''}{p('icon') === 'refresh' && variant === 'icon' ? ' refresh' : ''}{p('push') ? (typeof p('copy') === 'string' ? ' copy-tool push' : ' push') : typeof p('copy') === 'string' ? ' copy-tool' : ''}" class:spinning={p('busy')} disabled={p('disabled')} aria-pressed={p('pressed')} aria-label={iconOnly || p('title') ? p('label') : undefined} title={p('title')} data-command={node.id} onclick={press}>
+  <button type={p('submit') ? 'submit' : 'button'} class="{classes[variant]}{p('icon') === 'back' && variant === 'icon' ? ' back' : ''}{p('icon') === 'refresh' && variant === 'icon' ? ' refresh' : ''}{p('push') ? (typeof p('copy') === 'string' ? ' copy-tool push' : ' push') : typeof p('copy') === 'string' ? ' copy-tool' : ''}" class:spinning={p('busy')} data-icon={p('icon')} disabled={p('disabled')} aria-pressed={p('pressed')} aria-label={iconOnly || p('title') ? p('label') : undefined} title={p('title')} data-command={node.id} onclick={press}>
     {#if icon && variant !== 'primary'}<Icon name={icon} size={variant === 'icon' && p('icon') === 'back' ? 18 : variant === 'icon' && p('icon') === 'refresh' ? 15 : variant === 'chip_remove' || variant === 'plain_remove' ? 12 : undefined} />{/if}
     {#if !iconOnly}{#if p('live')}<span aria-live="polite">{typeof p('copy') === 'string' ? (copied === null ? 'Copy' : copied ? 'Copied' : 'Copy failed') : p('label')}</span>{:else if variant === 'primary' || variant === 'secondary' || variant === 'text' || variant === 'chip'}{p('label')}{:else}<span>{p('label')}</span>{/if}{#if p('detail')}<small>{p('detail')}</small>{/if}{/if}
     {#if icon && variant === 'primary'}<Icon name={icon} size={14} />{/if}
@@ -209,8 +218,12 @@
   {#if p('kind') === 'search' && p('label_hidden')}
     <Icon name="search" />
     <label class="sr-only" for={fieldId}>{p('label')}</label>
-    <input id={fieldId} data-node={node.id} type="search" use:controlled={p<string>('value') ?? ''} placeholder={p('placeholder')} maxlength={p('maxlength')} enterkeyhint={p('enterkeyhint')} autocapitalize={p('autocapitalize')} disabled={p('disabled')}
-      oninput={(event) => typed(event.currentTarget.value)} onchange={(event) => { if (p('report') !== 'input') emit('change', { value: event.currentTarget.value }); }} />
+    <!-- A one-line field that grows to show a long query instead of scrolling sideways (#103).
+         Enter still searches, and line breaks never reach the value. -->
+    <textarea id={fieldId} data-node={node.id} rows="1" use:controlled={p<string>('value') ?? ''} use:grow placeholder={p('placeholder')} maxlength={p('maxlength')} enterkeyhint={p('enterkeyhint')} autocapitalize={p('autocapitalize')} spellcheck="false" disabled={p('disabled')}
+      onkeydown={(event) => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }}
+      oninput={(event) => { const field = event.currentTarget; if (/[\r\n]/.test(field.value)) field.value = field.value.replace(/[\r\n]+/g, ' '); typed(field.value); }}
+      onchange={(event) => { if (p('report') !== 'input') emit('change', { value: event.currentTarget.value }); }}></textarea>
   {:else if p('preset') === 'chip'}
     <input id={fieldId} data-node={node.id} aria-label={p('label')} placeholder={p('placeholder')} maxlength={p('maxlength')} use:controlled={p<string>('value') ?? ''} disabled={p('disabled')} oninput={(event) => typed(event.currentTarget.value)} />
   {:else if p('preset') === 'row'}
@@ -271,7 +284,7 @@
   <SecretField label={p<string>('label')} target={p<'ai.text' | 'ai.decision'>('target')} saved={p<boolean>('saved')} onsaved={(saved) => emit('saved', { saved })} />
 {:else if node.type === 'list'}
   {#if p('mode') === 'virtual'}
-    <List rows={p<Row[]>('rows')} selected={p<string>('selected')} arrived={p<string[]>('arrived') ?? []} onselect={(key) => emit('select', { key })} empty={children} />
+    <List rows={p<Row[]>('rows')} selected={p<string>('selected')} arrived={p<string[]>('arrived') ?? []} onselect={(key) => emit('select', { key })} onmenu={p('context_menu') && node.id && surface.menu ? (key, x, y) => surface.menu!(node.id!, key, x, y) : undefined} empty={children} />
   {:else}
     <ul class="x-list" aria-label={p('label')}>{#each p<Row[]>('rows') as row (row.key)}<li data-kind={row.kind}><Self node={row.node} /></li>{/each}</ul>
   {/if}

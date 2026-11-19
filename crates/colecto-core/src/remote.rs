@@ -537,7 +537,7 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
             .map_err(imap_error)?
     } else {
         let mut ids: Vec<_> = session
-            .uid_search(search_expression(search))
+            .uid_search(crate::search::Query::parse(search).imap())
             .map_err(imap_error)?
             .into_iter()
             .collect();
@@ -703,15 +703,6 @@ fn fetch_many_session<T: std::io::Read + std::io::Write>(
     Ok(())
 }
 
-fn search_expression(search: &str) -> String {
-    let escaped = search.replace('\\', "\\\\").replace('"', "\\\"");
-    let charset = if search.is_ascii() {
-        ""
-    } else {
-        "CHARSET UTF-8 "
-    };
-    format!("{charset}TEXT \"{escaped}\"")
-}
 fn sent_mailbox(names: &[imap::types::Name]) -> Result<String, Error> {
     let selectable = |name: &&imap::types::Name| {
         !name
@@ -747,12 +738,28 @@ fn parse_message(raw: &[u8], validity: u32, uid: u32) -> Result<Message, Error> 
         address: from,
         subject: mail.headers.get_first_value("Subject").unwrap_or_default(),
         date: mail.headers.get_first_value("Date").unwrap_or_default(),
+        thread: thread_of(&mail.headers),
         body: if body.is_empty() {
             "This message has no readable text.".into()
         } else {
             body
         },
     })
+}
+
+/// A conversation key from the headers replies carry (RFC 5322 §3.6.4): the first
+/// `References` id names the message that started it, which every reply keeps.
+fn thread_of(headers: &[mailparse::MailHeader]) -> String {
+    let first_id = |name: &str| {
+        let value = headers.get_first_value(name)?;
+        let start = value.find('<')?;
+        let end = value[start..].find('>')? + start;
+        Some(value[start..=end].to_ascii_lowercase())
+    };
+    first_id("References")
+        .or_else(|| first_id("In-Reply-To"))
+        .or_else(|| first_id("Message-ID"))
+        .unwrap_or_default()
 }
 
 impl Drop for MailAccount {
@@ -956,8 +963,9 @@ mod tests {
     }
     #[test]
     fn search_quotes_untrusted_text_and_bounds_decoded_bodies() {
-        assert_eq!(search_expression("a\\b\"c"), r#"TEXT "a\\b\"c""#);
-        assert_eq!(search_expression("世界"), "CHARSET UTF-8 TEXT \"世界\"");
+        let search = |text: &str| crate::search::Query::parse(text).imap();
+        assert_eq!(search("a\\b\"c"), r#"TEXT "a\\b\"c""#);
+        assert_eq!(search("世界"), "CHARSET UTF-8 TEXT \"世界\"");
         let raw = format!(
             "Content-Type: text/plain; charset=utf-8\r\n\r\n{}",
             "界".repeat(40_000)
@@ -965,6 +973,27 @@ mod tests {
         let message = parse_message(raw.as_bytes(), 1, 1).unwrap();
         assert!(message.body.len() <= 100_100);
         assert!(message.body.ends_with("[Body truncated]"));
+    }
+    #[test]
+    fn replies_share_the_thread_of_the_message_that_started_it() {
+        let parse = |headers: &str| {
+            parse_message(format!("{headers}\r\n\r\nHi").as_bytes(), 1, 1)
+                .unwrap()
+                .thread
+        };
+        let first = parse("Message-ID: <Root@example.test>");
+        assert_eq!(first, "<root@example.test>");
+        assert_eq!(
+            parse(
+                "Message-ID: <r2@x>\r\nIn-Reply-To: <r1@x>\r\nReferences: <root@example.test> <r1@x>"
+            ),
+            first
+        );
+        assert_eq!(
+            parse("Message-ID: <r1@x>\r\nIn-Reply-To: <ROOT@example.test>"),
+            first
+        );
+        assert_eq!(parse("Subject: no ids"), "");
     }
     #[test]
     fn decodes_mime_without_rendering_html_or_attachments() {

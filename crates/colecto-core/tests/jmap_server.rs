@@ -83,6 +83,26 @@ fn sends_with_attachments_receives_searches_and_files_in_sent() {
 
     let found = recipient.query("inbox", &subject).unwrap();
     assert!(found.iter().any(|m| m.id == id), "search did not find it");
+    // Search filters become JMAP filter conditions on the server (#103).
+    let filtered = recipient
+        .query(
+            "inbox",
+            &format!("{subject} from:user1@example.com is:unread"),
+        )
+        .unwrap();
+    assert!(
+        filtered.iter().any(|m| m.id == id),
+        "filters did not find it"
+    );
+    assert!(
+        recipient
+            .query(
+                "inbox",
+                &format!("{subject} from:nobody@example.com is:starred")
+            )
+            .unwrap()
+            .is_empty()
+    );
 
     wait_for(&mut sender, "sent", &subject);
 }

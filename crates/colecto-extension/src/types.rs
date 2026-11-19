@@ -20,6 +20,8 @@ pub struct Message {
     pub date: String,
     pub seen: bool,
     pub flagged: bool,
+    /// The conversation it belongs to; empty when the provider gave none (API 2).
+    pub thread: String,
 }
 
 /// A saved draft (`drafts.list`, `drafts.read`, `drafts.write`).
@@ -100,11 +102,17 @@ mod tests {
             subject: "Hi".into(),
             body: "Hello".into(),
             date: "2026-11-13".into(),
+            thread: "t1".into(),
         };
         let guest: Message = serde_json::from_value(serde_json::to_value(&host).unwrap()).unwrap();
         assert_eq!(
-            (guest.id.as_str(), guest.address.as_str(), guest.seen),
-            ("1", "ada@example.test", true)
+            (
+                guest.id.as_str(),
+                guest.address.as_str(),
+                guest.seen,
+                guest.thread.as_str()
+            ),
+            ("1", "ada@example.test", true, "t1")
         );
 
         let host = api::Draft {

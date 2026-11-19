@@ -13,6 +13,7 @@ mod jmap;
 mod labels;
 pub mod mime;
 mod remote;
+pub mod search;
 pub use jmap::JmapAccount;
 pub use remote::MailAccount;
 
@@ -661,17 +662,13 @@ impl MailStore {
     }
     pub fn query(&mut self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
         let Some(job) = self.begin_query(folder, search)? else {
-            let query = search.trim().to_lowercase();
+            let query = search::Query::parse(search.trim());
             let messages = if folder == "sent" {
                 Vec::new()
             } else {
                 self.messages
                     .iter()
-                    .filter(|m| {
-                        [&m.sender, &m.address, &m.subject, &m.body]
-                            .iter()
-                            .any(|text| text.to_lowercase().contains(&query))
-                    })
+                    .filter(|m| query.matches(m))
                     .cloned()
                     .collect()
             };
@@ -1030,7 +1027,7 @@ fn sample_messages() -> Vec<Message> {
         ("weekend", "Maya Chen", "maya@example.test", "A small plan for the weekend", "Hey,\n\nI found a little bookshop by the river. Coffee, a walk, and no particular agenda?\n\nLet me know what you think.\n\nMaya", "Nov 6"),
         ("notes", "Studio North", "studio@example.test", "Notes from our last conversation", "A few things to keep close:\n\n• Make room for the work that matters.\n• Keep the defaults simple.\n• Leave things better than you found them.\n\nSee you next week.", "Nov 5"),
         ("plaintext", "Alex Rivera", "alex@example.test", "Plain text, with a little character", "Hello 世界 👋\n\nMail should be readable, whatever language you write in.\n\nThis is text, not a button: <button>Do not click</button>\nAnd this is just text too: <script>alert('hello')</script>\n\nAlex", "Nov 4"),
-    ].into_iter().map(|(id,sender,address,subject,body,date)| Message { seen: id != "welcome", flagged: id == "weekend", id:id.into(), sender:sender.into(), address:address.into(), subject:subject.into(), body:body.into(), date:date.into() }).collect()
+    ].into_iter().map(|(id,sender,address,subject,body,date)| Message { seen: id != "welcome", flagged: id == "weekend", id:id.into(), sender:sender.into(), address:address.into(), subject:subject.into(), body:body.into(), date:date.into(), thread: id.into() }).collect()
 }
 
 #[cfg(test)]

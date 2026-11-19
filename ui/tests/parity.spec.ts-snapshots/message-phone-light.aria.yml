@@ -15,6 +15,7 @@
     - button "Reply"
     - button "Reply all"
     - button "Forward"
+    - button "Starred" [pressed]
   - button "Copy message text"
   - article:
     - heading "A small plan for the weekend" [level=2]

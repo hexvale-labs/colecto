@@ -21,7 +21,7 @@ test('local labels can be created, assigned, filtered and removed', async ({ pag
   await page.getByLabel('Label Follow up', { exact: true }).check();
   expect((await saved).ok()).toBe(true);
   await page.reload();
-  await page.getByRole('group', { name: 'Filter by label' }).getByRole('button', { name: 'Follow up', exact: true }).click();
+  await page.getByRole('group', { name: 'Filters and labels' }).getByRole('button', { name: 'Follow up', exact: true }).click();
   await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Alex Rivera/ })).toHaveCount(0);
   // The mailbox asks first, in a dialog that names it.

@@ -10,6 +10,9 @@ let account = '';
 let tabs: Tab[] = [];
 let view: { id: string; folder: string } | null = null;
 let message: Message | null = null;
+/** Other messages of the open message's conversation from the saved Inbox and Sent (#102). */
+let conversation: (Message & { folder: string })[] = [];
+let showQuoted = false;
 let content: MessageContent | null = null;
 let loading = false;
 let contentLoading = false;
@@ -66,7 +69,7 @@ function viewing() {
   app.send({ t: 'state', surface: 'pane', back: !!view });
 }
 
-function clear() { ++generation; view = null; message = null; content = null; error = ''; contentError = ''; banners = []; changedBy = ''; showHtml = true; allowRemote = false; }
+function clear() { ++generation; view = null; message = null; conversation = []; showQuoted = false; content = null; error = ''; contentError = ''; banners = []; changedBy = ''; showHtml = true; allowRemote = false; }
 
 async function load() {
   if (!view) return;
@@ -82,6 +85,7 @@ async function load() {
   if (mine !== generation) return;
   render();
   if (!message) return;
+  void loadConversation(mine, message);
   try { content = await body; contentError = ''; }
   catch (e) { contentError = (e as Error).message; }
   if (mine !== generation) return;
@@ -89,6 +93,54 @@ async function load() {
   render();
   await bus.emit('v1/message_opened', { message_id: id, subject: message.subject, from: message.address || message.sender, html: content?.html ?? null, text: content?.text || message.body }).catch(() => {});
 }
+
+async function loadConversation(mine: number, current: Message) {
+  if (!current.thread) return;
+  const saved = await Promise.all(['inbox', 'sent'].map(folder => call<{ messages: Message[] }>('GET', '/messages/cache', { query: { folder } })
+    .then(result => result.messages.map(item => ({ ...item, folder }))).catch(() => [])));
+  if (mine !== generation) return;
+  const seen = new Set<string>([current.id]);
+  conversation = saved.flat().filter(item => item.thread === current.thread && !seen.has(item.id) && !!seen.add(item.id))
+    .sort((a, b) => (Date.parse(a.date) || 0) - (Date.parse(b.date) || 0)).slice(-20);
+  render();
+}
+/** A reply's own words, and the quoted history under them ("On … wrote:", or `>` lines to the end). */
+function splitQuoted(text: string): { fresh: string; quoted: string } {
+  const lines = text.split('\n');
+  for (let index = 1; index < lines.length; index++) {
+    const line = lines[index].trim();
+    const header = /^On .{1,300}wrote:$/i.test(line) || /^-{2,}\s*(Original|Forwarded) Message\s*-{2,}$/i.test(line);
+    const quoteToEnd = line.startsWith('>') && lines.slice(index).every(rest => !rest.trim() || rest.trimStart().startsWith('>'));
+    if (header || quoteToEnd) return { fresh: lines.slice(0, index).join('\n').trimEnd(), quoted: lines.slice(index).join('\n') };
+  }
+  return { fresh: text, quoted: '' };
+}
+function plainBody(text: string): Node {
+  const { fresh, quoted } = splitQuoted(text);
+  if (!quoted || !fresh.trim()) return bodyText(text);
+  return { type: 'stack', gap: 12, children: [
+    bodyText(fresh),
+    { type: 'button', id: 'toggle-quoted', variant: 'text', label: showQuoted ? 'Hide quoted text' : 'Show quoted text' },
+    ...(showQuoted ? [bodyText(quoted)] : []),
+  ] };
+}
+/** Messages of the conversation before or after the open one, newest last. */
+function conversationPart(when: 'before' | 'after'): Node[] {
+  if (!message || !conversation.length) return [];
+  const opened = Date.parse(message.date) || 0;
+  const part = conversation.map((item, index) => ({ item, index })).filter(({ item }) => ((Date.parse(item.date) || 0) <= opened) === (when === 'before'));
+  if (!part.length) return [];
+  const title = when === 'before' ? `Earlier in this conversation (${part.length})` : `Later in this conversation (${part.length})`;
+  return [{ type: 'section', preset: 'summary', label: title, children: [{ type: 'stack', gap: 16, children: [
+    { type: 'heading', level: 3, text: title },
+    ...part.map(({ item, index }) => ({ type: 'stack', gap: 4, children: [
+      { type: 'text', size: 'sm', spans: [{ text: clip(item.sender || item.address, 256), style: 'strong' }, { text: ` · ${clip(when_(item.date), 120)}`, style: 'muted' }] },
+      { type: 'text', tone: 'muted', wrap: 'pre', text: clip(splitQuoted(item.body).fresh || item.body, 4000) },
+      { type: 'button', id: `conversation.${index}`, variant: 'text', label: 'Open this message' },
+    ] } as Node)),
+  ] }] }];
+}
+const when_ = (date: string) => when(date, app.now()).full || date;
 
 function open(id: string, folder: string, subject: string) {
   openError = '';
@@ -197,12 +249,14 @@ function render() {
       { type: 'button', id: 'reply', variant: 'tool', icon: 'reply', label: 'Reply', title: 'Reply' },
       { type: 'button', id: 'reply-all', variant: 'tool', icon: 'replyAll', label: 'Reply all', title: 'Reply all' },
       { type: 'button', id: 'forward', variant: 'tool', icon: 'forward', label: 'Forward', title: 'Forward' },
+      { type: 'button', id: 'star', variant: 'tool', icon: 'star', label: message.flagged ? 'Starred' : 'Star', title: message.flagged ? 'Remove star' : 'Star', pressed: message.flagged },
     ] } as Node, { type: 'slot', id: 'actions-slot', name: 'v1/actions', context: { account, message_id: view.id } } as Node,
     { type: 'button', id: 'copy', variant: 'tool', icon: 'copy', label: 'Copy message text', title: 'Copy message text', live: true, copy: clip(content?.text || message.body, 1024 * 1024) } as Node] : []),
   ] };
   const body: Node[] = !message ? [] : [
     ...banners.map(banner => ({ type: 'banner', tone: banner.tone, text: banner.text }) as Node),
     ...(changedBy ? [{ type: 'banner', tone: 'info', text: `${changedBy} changed how this message is shown.` } as Node] : []),
+    ...conversationPart('before'),
     { type: 'message_header', subject: clip(message.subject, 1024), sender: clip(message.sender, 512), address: clip(message.address, 512), ...(date?.full ? { date: clip(date.full, 128), date_title: clip(message.date, 512) } : {}) },
     ...(labelError ? [{ type: 'text', preset: 'error', text: labelError } as Node] : []),
     ...(names.length ? [{ type: 'fieldset', preset: 'chips', legend: 'Labels', legend_hidden: true, disabled: labeling, children: names.map((name, index) => ({ type: 'toggle', id: `label.${index}`, style: 'chip', label: `Label ${name}`, label_hidden: true, checked: labels[name].includes(view!.id) })) } as Node] : []),
@@ -215,7 +269,8 @@ function render() {
     ] } as Node] : []),
     contentLoading ? { type: 'skeleton', lines: 3 }
       : content?.html && showHtml ? { type: 'frame', title: 'Message content', doc: content.html, designed: designed(), remote_images: remote() }
-      : bodyText(content?.text || message.body),
+      : plainBody(content?.text || message.body),
+    ...conversationPart('after'),
   ];
   app.render('pane', { type: 'section', preset: 'reader', label: 'Message reader', busy: loading, children: [
     toolbar,
@@ -242,6 +297,22 @@ app.when('retry', 'press', () => void load());
 app.when('reply', 'press', () => reply('reply'));
 app.when('reply-all', 'press', () => reply('all'));
 app.when('forward', 'press', () => reply('forward'));
+app.when('toggle-quoted', 'press', () => { showQuoted = !showQuoted; render(); });
+app.on('event', event => {
+  const node = String(event.node);
+  if (event.kind !== 'press' || !node.startsWith('conversation.')) return;
+  const item = conversation[Number(node.slice('conversation.'.length))];
+  if (item) open(item.id, item.folder === 'sent' ? 'Sent' : 'Inbox', item.subject || '(No subject)');
+});
+// Stars use the provider's flag (IMAP \\Flagged, JMAP $flagged), so other clients see them (#111).
+app.when('star', 'press', async () => {
+  const current = message;
+  if (!current) return;
+  const flagged = !current.flagged;
+  current.flagged = flagged; render();
+  try { await call('POST', '/messages/flags', { body: { ids: [current.id], flagged } }); }
+  catch (e) { current.flagged = !flagged; error = (e as Error).message; render(); }
+});
 app.when('load-images', 'press', () => { allowRemote = true; render(); });
 app.when('toggle-html', 'press', () => { showHtml = !showHtml; render(); });
 app.when('attachments', 'download', ({ index }) => { const file = content?.attachments.find(item => item.index === index); if (file) void save(file); });
@@ -274,7 +345,7 @@ async function refreshLabels() { try { labels = await call<Labels>('GET', '/labe
 
 bus.listen('inbox/v1/selected', payload => { if (payload?.account === account && typeof payload.message_id === 'string') open(payload.message_id, payload.folder ?? 'Inbox', payload.subject ?? '(No subject)'); });
 bus.listen('inbox/v1/listed', payload => { if (payload?.account === account && Array.isArray(payload.ids)) void prefetch(payload.ids.filter((id: unknown) => typeof id === 'string')); });
-bus.listen('inbox/v1/labels', payload => { if (payload?.account === account) void refreshLabels(); });
+for (const source of ['inbox/v1/labels', 'ai/v1/labeled']) bus.listen(source, payload => { if (payload?.account === account) void refreshLabels(); });
 bus.handle('v1/get_html', payload => payload?.message_id === view?.id ? content?.html ?? null : null);
 bus.handle('v1/set_html', (payload, from) => {
   if (payload?.message_id === view?.id && content && typeof payload.html === 'string') { content = { ...content, html: payload.html }; changedBy = from; render(); }

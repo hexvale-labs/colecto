@@ -21,6 +21,13 @@ import { mount } from 'svelte';
 import App from './App.svelte';
 import '@fontsource-variable/mona-sans/wdth.css';
 import './style.css';
+// The browser's own menu (Back, Reload, Inspect) means nothing in an app. It stays only where it
+// helps: text fields, selectable text and links. Rows with a menu of their own open that (#95).
+document.addEventListener('contextmenu', event => {
+  const target = event.target instanceof Element ? event.target : null;
+  const selected = !!window.getSelection()?.toString();
+  if (!selected && !target?.closest('input, textarea, [contenteditable], a[href], .selectable, .letter')) event.preventDefault();
+});
 // Images, icons and links are part of the interface, not things to drag elsewhere. Selected text still drags.
 document.addEventListener('dragstart', event => {
   if (event.target instanceof Element && !event.target.closest('[draggable="true"], input, textarea')) event.preventDefault();

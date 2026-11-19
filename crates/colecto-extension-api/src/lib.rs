@@ -41,6 +41,10 @@ pub struct Message {
     pub subject: String,
     pub body: String,
     pub date: String,
+    /// The conversation this message belongs to (API 2): JMAP's `threadId`, or for IMAP the
+    /// first `References` id, else `In-Reply-To`, else its own `Message-ID`. Empty when unknown.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub thread: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

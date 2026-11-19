@@ -65,8 +65,23 @@ HTML-only messages show a placeholder. The latest successful Inbox and Sent
 snapshots persist in the shared `colecto.db`, bounded to 100 messages and 12 MB
 per account. They are plain text, keyed to provider identity, and restored on
 reconnect; receiving failures preserve the previous snapshot. Search results are
-held in a bounded in-memory reader cache. Search uses upstream IMAP TEXT or JMAP
-text filters and returns at most 100 matches. Sent uses the provider's `\Sent`
+held in a bounded in-memory reader cache. Search runs on the server
+and returns at most 100 matches. Plain words become IMAP `TEXT` or the JMAP `text`
+filter; these filters, typed into the search or picked from the mailbox's **Filter**
+menu, become the provider's own criteria (`crates/colecto-core/src/search.rs`):
+
+| Filter | IMAP | JMAP |
+| --- | --- | --- |
+| `from:<text>` | `FROM` | `from` |
+| `to:<text>` | `TO` | `to` |
+| `is:starred` / `is:unstarred` | `FLAGGED` / `UNFLAGGED` | `hasKeyword` / `notKeyword` `$flagged` |
+| `is:unread` / `is:read` | `UNSEEN` / `SEEN` | `notKeyword` / `hasKeyword` `$seen` |
+| `after:YYYY-MM-DD` (on or after) | `SINCE` | `after` |
+| `before:YYYY-MM-DD` | `BEFORE` | `before` |
+
+Values with spaces take quotes (`to:"Ada L"`). Unknown keys, impossible dates and empty
+values stay plain words. Non-ASCII text adds `CHARSET UTF-8` for IMAP. The demo account
+matches `from:` and `is:` locally and ignores dates. Sent uses the provider's `\Sent`
 role, then the folder names `Sent`, `Sent Items`, `Sent Messages` or `Sent Mail`,
 also nested under another folder (`INBOX.Sent`, `[Gmail]/Sent Mail`). Drafts remain local and unencrypted, namespaced by account
 inside `colecto.db`. The original `demo` account keeps its legacy identity and
@@ -206,7 +221,7 @@ What works, the same as IMAP/SMTP:
   marking them seen, in one request (`Email/query` with a back-referenced
   `Email/get`). Plain text up to 100000 bytes per part is listed; the raw message is
   downloaded on demand for HTML and attachments.
-- Search through the server's `text` filter.
+- Search through the server's `text` filter, with the search filters above.
 - Push through the session's event source: a change to the account's `Email` state
   refreshes it within seconds, and polling continues underneath.
 - Sending with Cc, threading headers and attachments. Attachments are uploaded as

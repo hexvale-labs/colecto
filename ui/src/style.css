@@ -87,6 +87,9 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 .icon-button.active { background: var(--raise); color: var(--ink); }
 @media (hover: hover) and (pointer: fine) { .icon-button:hover:not(:disabled) { background: var(--raise); color: var(--ink); } }
 .tool { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 11px; border-radius: 8px; color: var(--ink-2); font-size: calc(13px * var(--text-scale)); font-weight: 560; cursor: pointer; }
+.tool[aria-pressed='true'] { color: var(--ink); }
+.tool[aria-pressed='true'][data-icon='star'] { color: oklch(0.85 0.12 85); }
+.tool[aria-pressed='true'][data-icon='star'] .icon path { fill: currentColor; }
 @media (hover: hover) and (pointer: fine) { .tool:hover:not(:disabled):not(.disabled) { background: var(--raise); color: var(--ink); } }
 .button-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 16px; }
 
@@ -177,12 +180,11 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 /* Mail pane: search, folders, labels and the list. */
 .mail-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; padding-top: 10px; }
 .mail-head { display: flex; gap: 6px; margin: 0 10px 8px; }
-.mail-search { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; color: var(--ink-3); }
-.mail-search > .icon { position: absolute; left: 11px; pointer-events: none; }
-.mail-search input { width: 100%; height: 34px; padding: 0 40px 0 34px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--sunk); color: var(--ink); font-size: calc(13.5px * var(--text-scale)); outline: none; transition: border-color 140ms ease; }
-.mail-search input:focus { border-color: color-mix(in oklch, var(--mint) 55%, var(--line)); }
-.mail-search input::-webkit-search-cancel-button { display: none; }
-.search-submit { position: absolute; right: 7px; opacity: 0; transition: opacity 140ms ease; }
+.mail-search { position: relative; display: flex; flex: 1; min-width: 0; align-items: flex-start; color: var(--ink-3); }
+.mail-search > .icon { position: absolute; top: 10px; left: 11px; pointer-events: none; }
+.mail-search textarea { display: block; width: 100%; min-height: 34px; max-height: 9em; padding: 7px 40px 7px 34px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--sunk); color: var(--ink); font-size: calc(13.5px * var(--text-scale)); line-height: calc(1.4 * var(--line-scale)); overflow-wrap: anywhere; resize: none; overflow-y: auto; outline: none; transition: border-color 140ms ease; }
+.mail-search textarea:focus { border-color: color-mix(in oklch, var(--mint) 55%, var(--line)); }
+.search-submit { position: absolute; top: 4px; right: 7px; opacity: 0; transition: opacity 140ms ease; }
 .mail-search:focus-within .search-submit, .search-submit:focus-visible { opacity: 1; }
 
 .folder-nav { display: flex; gap: 2px; padding: 0 8px 8px; flex-shrink: 0; overflow-x: auto; scrollbar-width: none; }
@@ -223,6 +225,8 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 .mail-item.selected { background: var(--select); }
 /* The selection node echoes the incoming-message dot in the logo. */
 .mail-item.selected::before { content: ''; position: absolute; left: 7px; top: 16px; width: 5px; height: 5px; border-radius: 50%; background: var(--mint-hi); box-shadow: 0 0 8px color-mix(in oklch, var(--mint) 70%, transparent); }
+.item-star { display: inline-flex; margin-right: 5px; vertical-align: -1px; color: oklch(0.85 0.12 85); }
+.item-star path { fill: currentColor; }
 .item-sender { grid-area: sender; font-size: calc(13.5px * var(--text-scale)); font-weight: 620; }
 .item-date { grid-area: date; align-self: baseline; color: var(--ink-3); font-size: calc(12px * var(--text-scale)); font-variant-numeric: tabular-nums; }
 .item-subject { grid-area: subject; margin-top: 1px; font-size: calc(13px * var(--text-scale)); color: var(--ink); }
@@ -321,6 +325,9 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 @media (hover: hover) and (pointer: fine) { .body-controls .push:hover { color: var(--ink); } }
 .letter-body { max-width: 68ch; white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15.5px * var(--text-scale)); line-height: calc(1.68 * var(--line-scale)); color: oklch(0.9 0.01 155); }
 .letter-body p + p { margin-top: calc(1.68em * var(--line-scale) + var(--paragraph-gap)); }
+/* Blocks beside the message (its conversation, an AI summary) read as cards, apart from it. */
+.letter .x-summary { margin: 0 0 28px; padding: 16px 18px; border: 1px solid var(--line-soft); border-radius: 12px; }
+.letter > .x-summary:last-child { margin: 28px 0 0; }
 .html-body { display: block; width: 100%; height: max(320px, calc(100cqh - 64px)); border: 0; background: transparent; color-scheme: dark; }
 .html-body.designed { color-scheme: light; background: #fff; border-radius: 6px; }
 .body-skeleton { display: grid; gap: 12px; max-width: 68ch; padding-top: 6px; }
@@ -621,7 +628,8 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
   .folder-title { position: static; width: auto; height: auto; clip: auto; padding: 6px 16px 8px; font-size: calc(28px * var(--text-scale)); font-stretch: 108%; letter-spacing: calc(-0.025em + var(--letter-spacing)); }
   .icon-button { width: 44px; height: 44px; }
   /* Inputs stay at least 16 px so iOS does not zoom into them; otherwise they follow the text size. */
-  .mail-search input { height: 44px; font-size: max(16px, calc(13.5px * var(--text-scale))); }
+  .mail-search textarea { min-height: 44px; padding-block: 11px; font-size: max(16px, calc(13.5px * var(--text-scale))); }
+  .mail-search > .icon { top: 15px; }
   .label-bar .chip, .label-new { height: 32px; }
   .label-new input { font-size: max(16px, calc(12.5px * var(--text-scale))); }
   .mail-item { padding: 11px 12px 12px 20px; }

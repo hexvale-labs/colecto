@@ -7,6 +7,8 @@
     /** Files picked in a `file_picker`, sent with their bytes as transferred buffers. */
     files: (node: string, files: { name: string; type: string; size: number; failed?: boolean }[], buffers: ArrayBuffer[]) => void;
     may: (capability: string) => boolean;
+    /** Ask for a row's context menu (a `list` with `context_menu`), anchored at (x, y). */
+    menu?: (node: string, key: string, x: number, y: number) => void;
     /** Narrow layout: a `nav` with `placement: "bottom"` is drawn by the shell instead. */
     lifted?: boolean;
   }
@@ -25,6 +27,7 @@
     event: (node, kind, value) => runtime.event(surface, node, kind, value),
     files: (node, files, buffers) => runtime.files(surface, node, files, buffers),
     may: capability => runtime.capabilities.includes(capability),
+    menu: (node, key, x, y) => runtime.openMenu(surface, node, key, x, y),
   });
   const tree = $derived(runtime.trees[surface]);
 </script>

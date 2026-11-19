@@ -186,6 +186,7 @@ pub const NAVIGATION_OWNED: &[&str] = &["inbox", "drafts", "sent", "compose"];
 pub const ICONS: &[&str] = &[
     "account",
     "alert",
+    "archive",
     "attach",
     "back",
     "bell",
@@ -197,6 +198,9 @@ pub const ICONS: &[&str] = &[
     "download",
     "drafts",
     "extension",
+    "eye",
+    "filter",
+    "folder",
     "forward",
     "image",
     "inbox",
@@ -219,6 +223,8 @@ pub const ICONS: &[&str] = &[
     "sidebar",
     "sort",
     "sparkles",
+    "star",
+    "tag",
     "text",
     "trash",
 ];

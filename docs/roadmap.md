@@ -15,11 +15,12 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | IMAP IDLE and JMAP push, with polling fallback | Done |
 | IMAP STARTTLS, any SMTP port, a pinned certificate per account (Proton Mail Bridge) | Done; untested against a real Bridge |
 | Discover every server folder with its role and counts (`GET /folders`) | Done |
-| Read/unread and star flags; move, archive and delete | In progress |
+| Read/unread and star flags; move, archive and delete, also from each message's context menu | In progress |
+| Search filters (`from:`, `to:`, `is:`, `after:`, `before:`) run on the server | Done |
 | Browse any folder in the UI, with paging through full history | Next |
 | Incremental refresh of cached folders instead of refetching | Next |
 | Larger offline cache (thousands of messages per account) | Next |
-| Conversation threading | Later |
+| Conversation threading | In progress; the reader shows earlier saved messages of the same thread, with quoted text folded |
 | Inline `cid:` images in HTML mail | Later |
 | Encryption of stored mail | Later |
 

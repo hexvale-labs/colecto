@@ -2,7 +2,7 @@
 import type { TextSpacing } from './text-spacing.svelte';
 import type { Discovery } from './discovery';
 export type Labels = Record<string, string[]>;
-export interface Message { seen: boolean; flagged: boolean; id: string; sender: string; address: string; subject: string; body: string; date: string }
+export interface Message { seen: boolean; flagged: boolean; id: string; sender: string; address: string; subject: string; body: string; date: string; thread?: string }
 export interface MailSnapshot { folder: string; messages: Message[]; fetched_at: number | null }
 export class ServiceError extends Error { constructor(message: string, readonly category: string, readonly status?: number) { super(message); this.name = 'ServiceError'; } }
 export interface Draft { id: string; recipient: string; cc?: string; subject: string; body: string; in_reply_to?: string; references?: string; forward_of?: string }
