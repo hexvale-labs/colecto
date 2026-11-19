@@ -256,22 +256,34 @@ jobs:
             !~/.gradle/caches/modules-2/*.lock
           key: ${{ steps.gradle.outputs.cache-primary-key }}
 
-      # Android installs only signed APKs. A throwaway key costs nothing, but each APK has a
-      # new one, so updating means uninstalling the old version first.
+      # Android installs only signed APKs, and updates only over an APK signed with the same
+      # key (#100). Releases use the project key from the repository secrets; runs without
+      # them (forks) sign with a throwaway key so the build is still checked.
       - name: Sign and name the APK
         env:
           TAG: ${{ needs.version.outputs.tag }}
           ABI: ${{ matrix.abi }}
           ARCH: ${{ matrix.arch }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
           apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
-          keystore="$RUNNER_TEMP/release.jks"
-          password=$(openssl rand -hex 16)
-          keytool -genkeypair -keystore "$keystore" -storepass "$password" -keypass "$password" \
-            -alias colecto -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Colecto" -noprompt
+          keystore="$RUNNER_TEMP/release.p12"
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+            export KS_PASS="$KEYSTORE_PASSWORD"
+          elif [ "$UPLOAD" = "true" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD are needed to publish APKs"
+            exit 1
+          else
+            echo "::warning::No release key; signing with a throwaway key"
+            export KS_PASS=$(openssl rand -hex 16)
+            keytool -genkeypair -keystore "$keystore" -storetype PKCS12 -storepass:env KS_PASS -keypass:env KS_PASS \
+              -alias colecto -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Colecto" -noprompt
+          fi
           mkdir dist
-          "$apksigner" sign --v4-signing-enabled false --ks "$keystore" --ks-pass "pass:$password" \
+          "$apksigner" sign --v4-signing-enabled false --ks "$keystore" --ks-type PKCS12 --ks-key-alias colecto --ks-pass env:KS_PASS \
             --out "dist/colecto-$TAG-android-$ARCH.apk" \
             "crates/colecto-app/gen/android/app/build/outputs/apk/$ABI/release/app-$ABI-release-unsigned.apk"
           ls -l dist

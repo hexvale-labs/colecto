@@ -165,8 +165,13 @@ it by hand from the Actions tab (**Release → Run workflow**): it builds everyt
 publishes nothing. Tick **artifacts** to download the installers from the run; only tag
 runs and runs with that box ticked upload them, so the other runs cannot be failed
 by an outage of GitHub's artifact service. If a tag run fails on an upload, use
-**Re-run failed jobs**: the build caches make the rerun quick. Nothing is code-signed; see
-[installing](install.md). Release notes come from `.github/release-notes/<tag>.md`
+**Re-run failed jobs**: the build caches make the rerun quick. Desktop installers are not
+code-signed; see [installing](install.md). Android APKs are signed with the project key
+in the `ANDROID_KEYSTORE_BASE64` (a base64 PKCS12 keystore, key alias `colecto`) and
+`ANDROID_KEYSTORE_PASSWORD` secrets, so each release installs over the last. Tag runs
+fail without them; other runs fall back to a throwaway key. The maintainer keeps the
+only backup of that key: an APK signed with a different key cannot update an installed
+app. Release notes come from `.github/release-notes/<tag>.md`
 when that file exists. When the `AUR_SSH_PRIVATE_KEY` secret is set, the release also
 updates the `colecto`, `colecto-bin` and `colecto-git` AUR packages (see
 `packaging/aur/README.md`).
