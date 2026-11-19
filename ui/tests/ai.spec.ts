@@ -122,7 +122,7 @@ test('a label’s description is only editable while the decision model is asked
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'AI', exact: true }).click();
-  await page.getByRole('region', { name: 'AI' }).getByRole('button', { name: /^Work/ }).first().click();
+  await page.getByRole('region', { name: 'AI' }).getByRole('button', { name: 'Edit rules for Work' }).click();
   const dialog = page.getByRole('dialog', { name: '“Work”' });
   const description = dialog.getByLabel(/What belongs under this label/);
   const model = dialog.getByRole('checkbox', { name: /Also ask the decision model/ });
@@ -134,4 +134,24 @@ test('a label’s description is only editable while the decision model is asked
   await model.click();
   await expect(description).toBeDisabled();
   await expect(description).toHaveValue('receipts');
+});
+
+test('each label has Edit and Remove; Remove forgets its rules and keeps the label (#118)', async ({ page }) => {
+  const rule = { enabled: true, model: false, description: '', rules: [{ field: 'subject', pattern: 'invoice' }] };
+  let saved: { labels: Record<string, Record<string, unknown>> } | null = null;
+  await page.route('**/api/v1/ai/settings', route => {
+    if (route.request().method() === 'POST') { saved = route.request().postDataJSON(); return route.fulfill({ json: { ...settings(true), settings: saved } }); }
+    return route.fulfill({ json: { ...settings(true), settings: { ...settings(true).settings, autolabel: true, labels: { demo: { Work: rule } } } } });
+  });
+  await page.route('**/api/v1/labels', route => route.fulfill({ json: { Work: [], Home: [] } }));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'AI', exact: true }).click();
+  const region = page.getByRole('region', { name: 'AI' });
+  await expect(region.getByText('1 rule')).toBeVisible();
+  // A label without rules has nothing to remove.
+  await expect(region.getByRole('button', { name: 'Remove rules for Home' })).toBeDisabled();
+  await region.getByRole('button', { name: 'Remove rules for Work' }).click();
+  await expect.poll(() => saved?.labels.demo).toEqual({});
+  await expect(region.getByRole('button', { name: 'Edit rules for Work' })).toBeVisible();
 });

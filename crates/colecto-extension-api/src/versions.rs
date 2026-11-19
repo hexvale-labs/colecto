@@ -149,7 +149,7 @@ mod tests {
             | DraftsWrite | MessagesSend | MessagesLabel | MessagesOrganize | UiFrame
             | UiFrameRemote | UiCommands | UiAppActions | UiToasts | UiContribute | UiCanvas
             | ApprovalsNotify | ReleasesRead | AiText | AiDecide | AiConfigure => true,
-            AppNavigate => false,
+            AppNavigate | SettingsAppearance | SettingsNotifications | SettingsExtensions => false,
         };
         let all = [
             ExtensionsBus,
@@ -175,6 +175,9 @@ mod tests {
             AiDecide,
             AiConfigure,
             AppNavigate,
+            SettingsAppearance,
+            SettingsNotifications,
+            SettingsExtensions,
         ];
         for capability in all.into_iter().filter(|&c| for_extensions(c)) {
             let name = serde_json::to_string(&capability).unwrap();
@@ -187,7 +190,10 @@ mod tests {
                 "{name} must be introduced by exactly one API version"
             );
         }
-        assert_eq!(capability_since(AppNavigate), None);
+        for capability in all.into_iter().filter(|&c| !for_extensions(c)) {
+            assert!(capability.key_only());
+            assert_eq!(capability_since(capability), None);
+        }
     }
 
     #[test]

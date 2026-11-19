@@ -258,13 +258,14 @@ impl Extensions {
         }
         Ok(self.settings(id)?["values"].clone())
     }
-    pub fn update_settings(
-        &mut self,
+    /// Whether every value fits the extension's settings schema, without saving anything.
+    pub fn check_settings(
+        &self,
         id: &str,
-        values: serde_json::Map<String, serde_json::Value>,
-    ) -> Result<serde_json::Value, String> {
+        values: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String> {
         let manifest = self.manifest(id).ok_or("Unknown extension")?;
-        for (key, value) in &values {
+        for (key, value) in values {
             if !manifest
                 .settings
                 .iter()
@@ -273,6 +274,14 @@ impl Extensions {
                 return Err(format!("Invalid setting: {key}"));
             }
         }
+        Ok(())
+    }
+    pub fn update_settings(
+        &mut self,
+        id: &str,
+        values: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        self.check_settings(id, &values)?;
         let mut next = self.clone();
         next.setting_values
             .entry(id.into())

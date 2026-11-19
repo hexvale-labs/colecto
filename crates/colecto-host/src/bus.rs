@@ -148,6 +148,7 @@ async fn publish(host: Host, bus: String, account: String, input: Input) {
 }
 /// New mail: every enabled service part with `messages.list` runs once with
 /// `{"event":"mail","account","ids"}`, in the background and with today's limits.
+const MAIL_IDS_PER_INVOCATION: usize = 10;
 pub(crate) fn deliver_mail(host: &Host, account: &str, event: &str) {
     let Ok(event) = serde_json::from_str::<Value>(event) else {
         return;
@@ -160,21 +161,32 @@ pub(crate) fn deliver_mail(host: &Host, account: &str, event: &str) {
         .lock()
         .map(|e| e.mail_services())
         .unwrap_or_default();
+    // A few ids per invocation: each gets a fresh instance with its own request budget
+    // (`sandbox::MAX_REQUESTS`), which a service part reading each message would exhaust.
+    let ids = event["ids"].as_array().cloned().unwrap_or_default();
     for (id, epoch, module) in targets {
         let host = host.clone();
         let account = account.to_owned();
-        let action = json!({"event": "mail", "account": account, "ids": event["ids"]});
+        let chunks: Vec<Value> = ids
+            .chunks(MAIL_IDS_PER_INVOCATION)
+            .map(|c| json!(c))
+            .collect();
         runtime.spawn(async move {
-            let Ok(permit) = host.execution.clone().acquire_owned().await else {
-                return;
-            };
-            let _ = tokio::task::spawn_blocking(move || {
-                let _permit = permit;
-                if let Err(error) = deliver(&host, &id, &account, epoch, &module, action) {
-                    tracing::warn!(extension = %id, %error, "A service part failed on new mail");
-                }
-            })
-            .await;
+            for chunk in chunks {
+                let Ok(permit) = host.execution.clone().acquire_owned().await else {
+                    return;
+                };
+                let (host, id, account, module) =
+                    (host.clone(), id.clone(), account.clone(), module.clone());
+                let action = json!({"event": "mail", "account": account, "ids": chunk});
+                let _ = tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    if let Err(error) = deliver(&host, &id, &account, epoch, &module, action) {
+                        tracing::warn!(extension = %id, %error, "A service part failed on new mail");
+                    }
+                })
+                .await;
+            }
         });
     }
 }

@@ -76,7 +76,8 @@
   .mark-wrap { position: relative; margin-bottom: 6px; }
   .mark { display: block; border-radius: 16px; animation: float 6s ease-in-out infinite; }
   /* A soft halo breathes behind the icon. */
-  .mark-wrap::after { content: ''; position: absolute; inset: -10px; z-index: -1; border-radius: 24px; background: color-mix(in oklch, var(--mint) 16%, transparent); filter: blur(14px); animation: breathe 6s ease-in-out infinite; }
+  /* A soft glow from a gradient, not a blur filter, which WebKitGTK repaints every frame (#97). */
+  .mark-wrap::after { content: ''; position: absolute; inset: -24px; z-index: -1; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in oklch, var(--mint) 18%, transparent), transparent); animation: breathe 6s ease-in-out infinite; }
   .actions { display: grid; justify-items: center; gap: 10px; margin-top: 10px; }
   .go { height: 40px; padding: 0 18px; font-size: calc(14px * var(--text-scale)); transition: transform 160ms var(--ease-out), box-shadow 220ms var(--ease-out), background-color 140ms ease; }
   .go :global(svg) { transition: transform 200ms var(--ease-out); }
@@ -98,7 +99,7 @@
   /* Content arrives in a short stagger on every step. */
   .enter { animation: rise 520ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 70ms); }
   .error-box { margin: 0 20px 16px; text-align: left; }
-  @keyframes rise { from { opacity: 0; transform: translateY(8px); filter: blur(2px); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
   @keyframes float { 50% { transform: translateY(-4px) rotate(-1.5deg); } }
   @keyframes breathe { 50% { opacity: 0.55; transform: scale(1.06); } }
   @keyframes drift { to { translate: -46% -54%; } }

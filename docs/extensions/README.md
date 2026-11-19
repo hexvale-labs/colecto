@@ -113,7 +113,8 @@ every call.
 | `approvals.notify`, `releases.read` | Send-approval events; the newest Colecto release |
 | `ai.text`, `ai.decide`, `ai.configure` | The owner's AI models and settings |
 
-`app.navigate` is reserved for API keys. Settings and an extension's own values need no
+`app.navigate`, `settings.appearance`, `settings.notifications` and `settings.extensions` are
+reserved for API keys; a manifest that asks for one is refused. Settings and an extension's own values need no
 capability.
 
 ## Credentials

@@ -266,6 +266,29 @@ pub enum Capability {
     /// Lets an API key move the owner's open Colecto windows to a page. Never granted to extensions.
     #[serde(rename = "app.navigate")]
     AppNavigate,
+    /// Lets an API key read and change how Colecto looks (Settings → Appearance), including
+    /// extension settings placed there. Never granted to extensions.
+    #[serde(rename = "settings.appearance")]
+    SettingsAppearance,
+    /// Lets an API key read and change Settings → Notifications. Never granted to extensions.
+    #[serde(rename = "settings.notifications")]
+    SettingsNotifications,
+    /// Lets an API key read and change extensions' own settings pages (such as Mail and
+    /// Privacy). Never granted to extensions.
+    #[serde(rename = "settings.extensions")]
+    SettingsExtensions,
+}
+impl Capability {
+    /// Capabilities only API keys may hold; an extension manifest that asks for one is refused.
+    pub fn key_only(self) -> bool {
+        matches!(
+            self,
+            Self::AppNavigate
+                | Self::SettingsAppearance
+                | Self::SettingsNotifications
+                | Self::SettingsExtensions
+        )
+    }
 }
 
 /// Pages that automation may open with `app.navigate`. The UI's navigator mirrors this list.

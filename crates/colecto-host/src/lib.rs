@@ -9,6 +9,7 @@ pub mod mcp;
 pub mod preferences;
 mod releases;
 pub mod services;
+mod settings;
 mod store;
 mod sync;
 use api_keys::{ApiKeys, Principal};
@@ -1105,9 +1106,24 @@ fn extension_service(
                 .map_err(|_| "Mail delivery failed")?;
             serde_json::to_value(true)
         }
-        MessagesOrganize | AppNavigate | ExtensionsBus | UiFrame | UiFrameRemote | UiCommands
-        | UiAppActions | UiToasts | UiContribute | UiCanvas | ApprovalsNotify | ReleasesRead
-        | AiText | AiDecide | AiConfigure => {
+        MessagesOrganize
+        | AppNavigate
+        | SettingsAppearance
+        | SettingsNotifications
+        | SettingsExtensions
+        | ExtensionsBus
+        | UiFrame
+        | UiFrameRemote
+        | UiCommands
+        | UiAppActions
+        | UiToasts
+        | UiContribute
+        | UiCanvas
+        | ApprovalsNotify
+        | ReleasesRead
+        | AiText
+        | AiDecide
+        | AiConfigure => {
             return Err("Capability not granted".into());
         }
     };

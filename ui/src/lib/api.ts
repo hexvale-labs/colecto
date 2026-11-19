@@ -108,7 +108,7 @@ export const hostService = {
   securityAction: (action: string, password = '') => request<SecurityInfo>('host', 'demo', '/security', { action, password }),
 };
 
-export type Capability = 'extensions.bus' | 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate'
+export type Capability = 'extensions.bus' | 'account.read' | 'messages.list' | 'messages.read' | 'drafts.list' | 'drafts.read' | 'drafts.write' | 'messages.send' | 'messages.organize' | 'messages.label' | 'app.navigate' | 'settings.appearance' | 'settings.notifications' | 'settings.extensions'
   | 'ui.frame' | 'ui.frame.remote' | 'ui.commands' | 'ui.app_actions' | 'ui.toasts' | 'ui.contribute' | 'ui.canvas' | 'approvals.notify' | 'releases.read' | 'ai.text' | 'ai.decide' | 'ai.configure';
 export interface ExtensionState {
   manifest: {

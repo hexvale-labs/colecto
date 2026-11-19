@@ -6,6 +6,8 @@ const labels: Record<Capability, string> = {
   'drafts.read': 'Read drafts', 'drafts.write': 'Create and edit drafts',
   'messages.send': 'Send mail', 'messages.organize': 'Organize messages', 'messages.label': 'Manage message labels',
   'app.navigate': 'Navigate the app',
+  'settings.appearance': 'Change appearance settings', 'settings.notifications': 'Change notification settings',
+  'settings.extensions': 'Change extension settings, such as Mail and Privacy',
   'ui.frame': 'Show web content in a sealed frame', 'ui.frame.remote': 'Load images from the internet in its frames (servers can learn when, and possibly what, it shows)',
   'ui.commands': 'Add commands to the command runner', 'ui.app_actions': 'Add buttons to the top bar',
   'ui.toasts': 'Show notifications', 'ui.contribute': 'Add content inside other extensions', 'ui.canvas': 'Draw over the whole window',
