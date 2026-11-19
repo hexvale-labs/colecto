@@ -81,8 +81,9 @@ preferences and the optional AI settings and summaries. The OS keyring and passw
 process may open a data directory at a time. Mail snapshots and drafts are not
 encrypted at rest. See [storage](storage.md).
 
-In alpha, persisted formats may change without migrations; old JSON files from early
-prototypes are ignored.
+The schema is versioned and migrated forward on startup; a database from Colecto alpha,
+another program or a newer build is refused. Settings store only what the owner
+changed. See [storage](storage.md).
 
 ## Platforms
 

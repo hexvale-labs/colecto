@@ -7,7 +7,7 @@ use colecto_extension_api::{
     AccountInfo, AccountInput, AccountSettings, DEMO_ACCOUNT, Protocol, SecurityInfo,
 };
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     sync::{Arc, Mutex},
 };
 
@@ -78,90 +78,23 @@ impl Accounts {
         &self.directory
     }
 
-    pub fn open(mut legacy: MailStore, backend: Arc<dyn SecretStore>) -> Result<Self, Error> {
-        let directory = legacy.directory.clone();
-        let database = legacy.database.clone();
-        let mut vault = Vault::open(directory.clone(), database.clone(), backend)?;
-        let mut ids = HashSet::new();
-        for account in vault.accounts() {
-            if (account.id != DEMO_ACCOUNT
-                && (account.id.len() != 32 || !account.id.bytes().all(|b| b.is_ascii_hexdigit())))
-                || !ids.insert(account.id.clone())
-            {
-                return Err(invalid("Invalid or duplicate account identifier"));
-            }
-        }
-        // Import legacy environment credentials only when unlocked. The legacy
-        // draft store keeps its identity and is never assigned to another account.
-        if !vault.locked() && !ids.contains(DEMO_ACCOUNT) {
-            let input = match &legacy.account {
-                Some(Account::Imap(a)) => Some(AccountInput {
-                    id: Some(DEMO_ACCOUNT.into()),
-                    settings: AccountSettings {
-                        name: a.address.clone(),
-                        address: a.address.clone(),
-                        protocol: Protocol::Imap,
-                        imap_host: a.imap_host.clone(),
-                        imap_port: a.imap_port,
-                        smtp_host: a.smtp_host.clone(),
-                        smtp_port: a.smtp_port,
-                        username: a.username.clone(),
-                        session_url: String::new(),
-                        imap_starttls: a.imap_starttls,
-                        tls_certificate: a.tls_certificate.clone(),
-                    },
-                    secret: a.password.clone(),
-                }),
-                Some(Account::Jmap(a)) => Some(AccountInput {
-                    id: Some(DEMO_ACCOUNT.into()),
-                    settings: AccountSettings {
-                        name: a.address.clone(),
-                        address: a.address.clone(),
-                        protocol: Protocol::Jmap,
-                        imap_host: String::new(),
-                        imap_port: 993,
-                        smtp_host: String::new(),
-                        smtp_port: 587,
-                        username: a.username.clone(),
-                        session_url: a.session_url.clone(),
-                        imap_starttls: false,
-                        tls_certificate: String::new(),
-                    },
-                    secret: a.token.clone(),
-                }),
-                None => None,
-            };
-            if let Some(mut input) = input {
-                let mut records = vault.accounts().to_vec();
-                records.push(crate::credentials::SavedAccount {
-                    id: DEMO_ACCOUNT.into(),
-                    settings: input.settings.clone(),
-                    configured: true,
-                });
-                let mut secrets = vault.secrets.as_ref().expect("unlocked").clone();
-                secrets.insert(
-                    DEMO_ACCOUNT.into(),
-                    Secret(std::mem::take(&mut input.secret)),
-                );
-                vault.commit(records, secrets)?;
-            }
-        }
-        if vault.locked() {
-            legacy.disconnect();
-        }
+    /// `demo` is the sample account's store in the data directory itself.
+    pub fn open(demo: MailStore, backend: Arc<dyn SecretStore>) -> Result<Self, Error> {
+        let directory = demo.directory.clone();
+        let database = demo.database.clone();
+        // The vault already rejects invalid and duplicate account identifiers.
+        let vault = Vault::open(directory.clone(), database.clone(), backend)?;
         let mut stores = BTreeMap::new();
-        stores.insert(DEMO_ACCOUNT.into(), Arc::new(Mutex::new(legacy)));
+        stores.insert(DEMO_ACCOUNT.into(), Arc::new(Mutex::new(demo)));
         for account in vault.accounts() {
-            if account.id != DEMO_ACCOUNT {
-                stores.insert(
-                    account.id.clone(),
-                    Arc::new(Mutex::new(MailStore::open_with_database(
-                        directory.join("accounts").join(&account.id),
-                        database.clone(),
-                        &account.id,
-                    )?)),
-                );
-            }
+            stores.insert(
+                account.id.clone(),
+                Arc::new(Mutex::new(MailStore::open_with_database(
+                    directory.join("accounts").join(&account.id),
+                    database.clone(),
+                    &account.id,
+                )?)),
+            );
         }
         let snapshots = stores
             .iter()
@@ -567,7 +500,7 @@ mod storage_tests {
             for name in ["drafts", "labels", "folders"] {
                 accounts
                     .database
-                    .set_record(&format!("account:{id}"), name, 1, b"local data")
+                    .set_record(&format!("account:{id}"), name, b"local data")
                     .unwrap();
             }
             futures_executor::block_on(async {
@@ -614,7 +547,7 @@ mod storage_tests {
                 assert_eq!(
                     accounts
                         .database
-                        .get_record(&format!("account:{id}"), name, 1)
+                        .get_record(&format!("account:{id}"), name)
                         .unwrap()
                         .is_some(),
                     index == 1
@@ -695,7 +628,7 @@ mod storage_tests {
         let dir = tempfile::tempdir().unwrap();
         let mut accounts =
             Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(NoKeys)).unwrap();
-        let before = accounts.database.get_record("core", "vault", 1).unwrap();
+        let before = accounts.database.get_record("core", "vault").unwrap();
         futures_executor::block_on(
             accounts
                 .database
@@ -707,7 +640,7 @@ mod storage_tests {
         let input = serde_json::from_value(serde_json::json!({"id":null,"name":"A","address":"a@example.test","protocol":"imap","imap_host":"imap.example.test","imap_port":993,"smtp_host":"smtp.example.test","smtp_port":587,"username":"a","secret":"secret"})).unwrap();
         assert!(accounts.upsert(input).is_err());
         assert_eq!(
-            accounts.database.get_record("core", "vault", 1).unwrap(),
+            accounts.database.get_record("core", "vault").unwrap(),
             before
         );
     }

@@ -54,8 +54,7 @@ icon = "extension"
 | `[bus]` | No | `subscribe = ["<bus>/<name>", …]`, needs `extensions.bus`; see [Extension bus](#extension-bus) |
 | `[[settings]]` | No | Declarative owner settings; see [Extension settings](#extension-settings) |
 
-Unknown fields are rejected. The old top-level `slot`, `z_index` and `window.overlay`
-fields belonged to the alpha's panel system and are gone.
+Unknown fields are rejected.
 
 ## Packages
 
@@ -225,7 +224,7 @@ transferred buffers are referenced as `{"$buffer": index}`.
 | `contribute` | `{slot, tree}`: content in another extension's slot (`ui.contribute`) |
 | `download` | `{name, data: {$buffer}}`: offer a file to save |
 | `frame` | `{bitmap: {$buffer}, x?, y?}`: one finished overlay frame, when the overlay runs in frames mode |
-| `menu` | `{surface, node, key, items}`: the context menu for a `list` row, answering its `context` event (API 2, see [API 2](api-versions/API-2.md)) |
+| `menu` | `{surface, node, key, items}`: the context menu for a `list` row, answering its `context` event |
 
 Surfaces are `pane` (declared by `[pane]`), `settings` (declared by `[settings_page]`,
 shown under the page title with "From *name*") and the dialog. The full protocol is in
@@ -277,8 +276,7 @@ A `frame` renders `doc` in `<iframe sandbox="allow-popups allow-popups-to-escape
 `close`, `compose`, `copy`, `cpu`, `download`, `drafts`, `extension`, `eye`, `filter`,
 `folder`, `forward`, `image`, `inbox`, `info`, `key`, `layout`, `mail`, `next`, `palette`,
 `pencil`, `plus`, `refresh`, `reply`, `replyAll`, `search`, `sent`, `server`, `settings`,
-`shield`, `sidebar`, `sort`, `sparkles`, `star`, `tag`, `text`, `trash`. `archive`, `eye`,
-`filter`, `folder`, `sparkles`, `star` and `tag` came in API 2. A test keeps this list equal in `manifest.rs`, `protocol.ts` and `Icon.svelte`.
+`shield`, `sidebar`, `sort`, `sparkles`, `star`, `tag`, `text`, `trash`. A test keeps this list equal in `manifest.rs`, `protocol.ts` and `Icon.svelte`.
 
 ### Limits
 
@@ -358,7 +356,7 @@ invalid defaults reject the manifest.
 | `step` | Optional positive finite range increment (control hint) |
 | `unit` | Optional range suffix, at most 8 UTF-8 bytes |
 | `options` | Choice only: 2–8 distinct string `value` and nonempty `label` pairs |
-| `section` | Optional, API 2: `appearance` or `notifications`. Shows the setting in that core Settings section instead of the extension's own page |
+| `section` | Optional: `appearance` or `notifications`. Shows the setting in that core Settings section instead of the extension's own page |
 
 `GET /api/v1/extensions/{id}/settings` returns `{schema, values}`; `PUT` takes a partial
 `{key: value}` object, and unknown keys or invalid values reject the whole update. The
@@ -372,7 +370,7 @@ bundled ones in the Built-in group, installed ones under Extensions.
 
 ### Placing settings in a core section
 
-From API 2, a setting with `section` appears in that core section, grouped under a
+A setting with `section` appears in that core section, grouped under a
 heading with the extension's `settings_page.title` (or its name) and, for an installed
 extension, "From <name>". Only Appearance and Notifications accept settings; sections
 that hold credentials, connections, keys or other extensions do not. Values, events and

@@ -251,9 +251,6 @@ impl MailService {
             policy.local && !policy.daemon_socket,
             policy.service_command.clone(),
         )?;
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(crate::services::retire_notifier(control.clone()));
-        }
         let mut policy = policy;
         if policy.token.is_none() {
             policy.token = Some(Arc::new(Zeroizing::new(

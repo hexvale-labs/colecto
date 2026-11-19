@@ -22,7 +22,6 @@ pub struct Preferences {
     pub font_size: Option<u8>,
     pub text_spacing: TextSpacing,
     pub notifications: Notifications,
-    notification_position_chosen: bool,
     /// Load remote images in HTML mail without asking. Off by default: they can track opens.
     pub remote_images: bool,
     /// Per-account on/off choices. Accounts missing here use [`default_enabled`]: the demo
@@ -49,7 +48,6 @@ impl Default for Preferences {
             font_size: None,
             text_spacing: TextSpacing::default(),
             notifications: Notifications::default(),
-            notification_position_chosen: false,
             remote_images: false,
             list_density: ListDensity::Full,
             date_groups: true,
@@ -129,27 +127,21 @@ pub enum Corner {
     Left,
 }
 
-/// In-app notifications; `system` also uses the desktop's notifications while Colecto is unfocused.
+/// How notifications show; `system` also uses the desktop's notifications while Colecto is
+/// unfocused. What to be notified about is the Notifications extension's settings.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(default, deny_unknown_fields)]
 pub struct Notifications {
     pub enabled: bool,
-    pub mail: bool,
-    pub approvals: bool,
     pub system: bool,
     pub position: Corner,
-    /// Tell the owner when a newer release is published. Off means the UI never asks GitHub.
-    pub updates: bool,
 }
 impl Default for Notifications {
     fn default() -> Self {
         Self {
             enabled: true,
-            mail: true,
-            approvals: true,
             system: false,
             position: Corner::Top,
-            updates: true,
         }
     }
 }
@@ -174,6 +166,9 @@ pub struct PreferencesInput {
     pub date_groups: Option<bool>,
     pub notified_release: Option<String>,
     pub prefetch: Option<Prefetch>,
+    /// Setting keys, such as `notifications.position`, to return to their defaults.
+    #[serde(default)]
+    pub reset: Vec<String>,
 }
 
 fn validate(preferences: &Preferences) -> Result<(), String> {
@@ -253,24 +248,26 @@ fn validate(preferences: &Preferences) -> Result<(), String> {
     Ok(())
 }
 
+/// Settings scope of the owner preferences in the `settings` table.
+const SCOPE: &str = "core";
+
 pub struct PreferenceStore {
     database: Database,
     value: Preferences,
 }
 impl PreferenceStore {
     pub fn open(database: Database) -> Result<Self, String> {
-        let value = crate::store::open(&database, "preferences", Preferences::default, |bytes| {
-            let mut value: Preferences =
-                serde_json::from_slice(bytes).map_err(|_| "Invalid preferences")?;
-            if !value.notification_position_chosen
-                && value.notifications.position == Corner::BottomRight
-            {
-                value.notifications.position = Corner::Top;
-            }
-            validate(&value)?;
-            Ok(value)
-        })?;
+        let (value, _) = crate::store::load_settings(&database, SCOPE, validate)?;
         Ok(Self { database, value })
+    }
+    fn save(&mut self, next: Preferences, reset: &[String]) -> Result<(), String> {
+        crate::store::save_settings(&self.database, SCOPE, &self.value, &next, reset)?;
+        self.value = if reset.is_empty() {
+            next
+        } else {
+            crate::store::load_settings(&self.database, SCOPE, validate)?.0
+        };
+        Ok(())
     }
     pub fn get(&self) -> &Preferences {
         &self.value
@@ -282,16 +279,11 @@ impl PreferenceStore {
             next.account = None;
         }
         next.accounts_enabled.remove(id);
-        if next.account != self.value.account
-            || next.accounts_enabled.len() != self.value.accounts_enabled.len()
-        {
-            crate::store::save(&self.database, "preferences", &next)?;
-            self.value = next;
-        }
-        Ok(())
+        self.save(next, &[])
     }
     pub fn update(&mut self, input: PreferencesInput) -> Result<Preferences, String> {
         let mut next = self.value.clone();
+        let mut reset = input.reset;
         if let Some(mcp) = input.mcp {
             next.mcp = mcp;
         }
@@ -302,7 +294,11 @@ impl PreferenceStore {
             next.workspace = Some(workspace);
         }
         if let Some(accent) = input.accent {
-            next.accent = (!accent.is_empty()).then_some(accent.to_ascii_lowercase());
+            if accent.is_empty() {
+                reset.push("accent".into());
+            } else {
+                next.accent = Some(accent.to_ascii_lowercase());
+            }
         }
         if let Some(font) = input.font {
             next.font = Some(font);
@@ -314,8 +310,6 @@ impl PreferenceStore {
             next.text_spacing = spacing;
         }
         if let Some(notifications) = input.notifications {
-            next.notification_position_chosen |=
-                notifications.position != next.notifications.position;
             next.notifications = notifications;
         }
         if let Some(remote_images) = input.remote_images {
@@ -340,8 +334,7 @@ impl PreferenceStore {
             next.prefetch = prefetch;
         }
         validate(&next)?;
-        crate::store::save(&self.database, "preferences", &next)?;
-        self.value = next;
+        self.save(next, &reset)?;
         Ok(self.value.clone())
     }
 }
@@ -409,23 +402,17 @@ mod tests {
     fn list_and_update_preferences_default_validate_and_persist() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
-        // Preferences saved before these fields existed keep the defaults.
-        crate::store::save(
-            &database,
-            "preferences",
-            &serde_json::json!({"notifications":{"enabled":true,"mail":true,"approvals":true,"system":false,"position":"top"}}),
-        )
-        .unwrap();
         let mut store = PreferenceStore::open(database.clone()).unwrap();
         assert_eq!(store.get().list_density, ListDensity::Full);
         assert!(store.get().date_groups);
-        assert!(store.get().notifications.updates);
         assert_eq!(store.get().notified_release, None);
         for value in [
             serde_json::json!({"list_density":"tiny"}),
             serde_json::json!({"date_groups":"yes"}),
             serde_json::json!({"notified_release":""}),
             serde_json::json!({"notified_release":"1.2.3<script>"}),
+            serde_json::json!({"notifications":{"updates":false}}),
+            serde_json::json!({"reset":["nonexistent"]}),
         ] {
             assert!(
                 serde_json::from_value::<PreferencesInput>(value)
@@ -437,8 +424,7 @@ mod tests {
         store
             .update(
                 serde_json::from_value(serde_json::json!({
-                    "list_density":"compact","date_groups":false,"notified_release":"0.4.0",
-                    "notifications":{"updates":false}
+                    "list_density":"compact","date_groups":false,"notified_release":"0.4.0"
                 }))
                 .unwrap(),
             )
@@ -447,37 +433,44 @@ mod tests {
         assert_eq!(restored.get().list_density, ListDensity::Compact);
         assert!(!restored.get().date_groups);
         assert_eq!(restored.get().notified_release.as_deref(), Some("0.4.0"));
-        assert!(!restored.get().notifications.updates);
         assert!(restored.get().notifications.enabled);
     }
     #[test]
-    fn legacy_default_moves_to_top_but_new_position_choices_persist() {
+    fn only_changed_preferences_are_stored_and_can_be_reset() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
-        crate::store::save(
-            &database,
-            "preferences",
-            &serde_json::json!({"notifications":{"position":"bottom-right"}}),
-        )
-        .unwrap();
         let mut store = PreferenceStore::open(database.clone()).unwrap();
-        assert_eq!(store.get().notifications.position, Corner::Top);
+        assert!(database.settings(SCOPE).unwrap().is_empty());
+        // The UI sends the whole notifications object; only the field that changed is kept.
         store
             .update(
+                serde_json::from_value(serde_json::json!({
+                    "notifications":{"enabled":true,"system":false,"position":"bottom-right"},
+                    "accent":"#AABBCC"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let keys: Vec<String> = database
+            .settings(SCOPE)
+            .unwrap()
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(keys, ["accent", "notifications.position"]);
+        assert_eq!(store.get().accent.as_deref(), Some("#aabbcc"));
+        // An empty accent and `reset` both return to the default.
+        let value = store
+            .update(
                 serde_json::from_value(
-                    serde_json::json!({"notifications":{"position":"bottom-right"}}),
+                    serde_json::json!({"accent":"","reset":["notifications.position"]}),
                 )
                 .unwrap(),
             )
             .unwrap();
-        assert_eq!(
-            PreferenceStore::open(database)
-                .unwrap()
-                .get()
-                .notifications
-                .position,
-            Corner::BottomRight
-        );
+        assert_eq!(value.accent, None);
+        assert_eq!(value.notifications.position, Corner::Top);
+        assert!(database.settings(SCOPE).unwrap().is_empty());
     }
     #[test]
     fn mcp_starts_off_and_preferences_survive_restart_within_bounds() {
@@ -554,7 +547,7 @@ mod tests {
         }
         store.update(accent("#7AA2F7")).unwrap();
         let notifications: Notifications = serde_json::from_value(serde_json::json!({
-            "enabled": true, "mail": false, "approvals": true, "system": true, "position": "top-left"
+            "enabled": true, "system": true, "position": "top-left"
         }))
         .unwrap();
         store

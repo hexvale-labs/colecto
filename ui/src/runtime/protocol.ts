@@ -168,7 +168,7 @@ export type Outgoing =
   | { t: 'download'; name: string; data: { $buffer: number } }
   | { t: 'frame'; bitmap: { $buffer: number }; x?: number; y?: number };
 
-/** One entry of a row's context menu (API 2); `separator` draws a line before it. */
+/** One entry of a row's context menu; `separator` draws a line before it. */
 export interface MenuItem { id: string; label: string; icon?: IconName; danger?: boolean; disabled?: boolean; checked?: boolean; separator?: boolean }
 const menuItem = shape({ id: label, label, icon, danger: bool, disabled: bool, checked: bool, separator: bool }, ['id', 'label']);
 

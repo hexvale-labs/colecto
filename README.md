@@ -24,8 +24,9 @@
 </p>
 
 > [!NOTE]
-> Colecto is in alpha. It works with real mail accounts, but storage formats may still
-> change between versions. See the [roadmap](docs/roadmap.md).
+> Colecto is in beta. It works with real mail accounts, and updates migrate your data
+> forward; going back to an older version is not supported. See the
+> [roadmap](docs/roadmap.md).
 
 ## Features
 

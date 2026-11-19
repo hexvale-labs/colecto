@@ -17,23 +17,11 @@ use std::{
 struct Package {
     manifest: ExtensionManifest,
 }
-/// Version 2 is the client-side model. Version 1 held packages of the old panel and overlay
-/// system; they are dropped on startup (there is no migration).
-const POLICY_VERSION: u32 = 2;
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 struct Policy {
-    version: u32,
     disabled: HashSet<String>,
     packages: Vec<Package>,
-}
-/// What an old policy may hold: only the IDs matter, to drop their packages and settings.
-#[derive(Deserialize)]
-struct OldPolicy {
-    #[serde(default)]
-    disabled: HashSet<String>,
-    #[serde(default)]
-    packages: Vec<serde_json::Value>,
 }
 struct CachedPackage {
     service: Option<Arc<crate::sandbox::Compiled>>,
@@ -78,11 +66,7 @@ impl Extensions {
             setting_values: HashMap::new(),
             storage: HashMap::new(),
             manifests,
-            policy: Policy {
-                version: POLICY_VERSION,
-                disabled: HashSet::new(),
-                packages: vec![],
-            },
+            policy: Policy::default(),
             database: None,
             epoch: 0,
             generations: HashMap::new(),
@@ -103,32 +87,12 @@ impl Extensions {
     fn open_with(database: Database, support: fn(u32) -> ApiSupport) -> Result<Self, String> {
         let mut extensions = Self::bundled();
         extensions.support = support;
-        let empty = extensions.policy.clone();
-        let old_packages = std::cell::RefCell::new(Vec::<String>::new());
-        extensions.policy = crate::store::open(
-            &database,
-            "extensions",
-            || empty.clone(),
-            |bytes| {
-                let mut policy = match serde_json::from_slice::<Policy>(bytes) {
-                    Ok(policy) if policy.version == POLICY_VERSION => policy,
-                    _ => {
-                        // Packages from the old extension system: forget them, keep the rest.
-                        let old: OldPolicy =
-                            serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-                        *old_packages.borrow_mut() = old
-                            .packages
-                            .iter()
-                            .filter_map(|p| p["manifest"]["id"].as_str().map(String::from))
-                            .collect();
-                        Policy {
-                            disabled: old.disabled,
-                            ..empty.clone()
-                        }
-                    }
-                };
-                // Bundled extensions that became core UI (`mail-shell`, `accounts`) or were
-                // dropped may still be listed as disabled; forget them.
+        extensions.policy =
+            crate::store::open(&database, "extensions", Policy::default, |bytes| {
+                let mut policy =
+                    serde_json::from_slice::<Policy>(bytes).map_err(|e| e.to_string())?;
+                // A bundled extension a later version dropped may still be listed as
+                // disabled; forget it.
                 let known: HashSet<String> = extensions
                     .manifests
                     .iter()
@@ -138,8 +102,7 @@ impl Extensions {
                 policy.disabled.retain(|id| known.contains(id));
                 extensions.check(&policy)?;
                 Ok(policy)
-            },
-        )?;
+            })?;
         extensions.setting_values =
             crate::store::open(&database, "extension-settings", HashMap::new, |b| {
                 serde_json::from_slice(b).map_err(|e| e.to_string())
@@ -149,7 +112,7 @@ impl Extensions {
                 serde_json::from_slice(b).map_err(|e| e.to_string())
             })?;
         extensions.database = Some(database);
-        let mut dropped = old_packages.into_inner();
+        let mut dropped = Vec::new();
         // A package that no longer reads or matches its manifest is dropped too, rather than
         // keeping Colecto from starting.
         let ids: Vec<String> = extensions
@@ -173,10 +136,9 @@ impl Extensions {
         if !dropped.is_empty() {
             let database = extensions.database.clone().expect("database attached");
             for id in &dropped {
-                tracing::warn!(extension = %id, "Removed an extension built for the old extension system");
                 extensions.setting_values.remove(id);
                 extensions.storage.remove(id);
-                let _ = database.remove_record("extension-packages", id, 1);
+                let _ = database.remove_record("extension-packages", id);
             }
             crate::store::save(&database, "extensions", &extensions.policy)?;
             crate::store::save(&database, "extension-settings", &extensions.setting_values)?;
@@ -185,7 +147,7 @@ impl Extensions {
         Ok(extensions)
     }
     fn check(&self, policy: &Policy) -> Result<(), String> {
-        if policy.version != POLICY_VERSION || policy.packages.len() > MAX_INSTALLED {
+        if policy.packages.len() > MAX_INSTALLED {
             return Err("Unsupported extension policy".into());
         }
         let mut ids: HashSet<String> = self.manifests.iter().map(|m| m.id.clone()).collect();
@@ -364,7 +326,7 @@ impl Extensions {
     fn load(&mut self, id: &str) -> Result<(), String> {
         let bytes = if let Some(database) = &self.database {
             database
-                .get_record("extension-packages", id, 1)
+                .get_record("extension-packages", id)
                 .map_err(|e| e.to_string())?
                 .ok_or("Missing extension package")?
         } else {
@@ -406,7 +368,7 @@ impl Extensions {
         let id = manifest.id.clone();
         if let Some(database) = &next.database {
             database
-                .set_record("extension-packages", &id, 1, bytes)
+                .set_record("extension-packages", &id, bytes)
                 .map_err(|e| e.to_string())?;
         } else {
             next.memory_packages
@@ -436,7 +398,7 @@ impl Extensions {
         self.commit(next)?;
         if let Some(database) = &self.database {
             database
-                .remove_record("extension-packages", id, 1)
+                .remove_record("extension-packages", id)
                 .map_err(|e| e.to_string())?;
         }
         Ok(())
@@ -737,43 +699,6 @@ pub(crate) mod tests {
         assert!(reopened.client_files("hello-pane").is_some());
         assert_eq!(reopened.generation("reader"), None);
         assert!(reopened.generation("hello-pane").is_some());
-    }
-    #[test]
-    fn packages_from_the_old_extension_system_are_dropped_on_startup() {
-        let dir = tempfile::tempdir().unwrap();
-        let database = Database::open(dir.path()).unwrap();
-        let old = serde_json::json!({
-            "version": 1,
-            "disabled": ["mail-shell", "accounts", "ai", "hello-pane"],
-            "packages": [{"manifest": {"id": "hello-pane", "name": "Connection panel",
-                "description": "d", "author": "a", "api_version": 1, "slot": "panel",
-                "capabilities": ["account.read"]}}]
-        });
-        crate::store::save(&database, "extensions", &old).unwrap();
-        crate::store::save(
-            &database,
-            "extension-settings",
-            &serde_json::json!({"hello-pane": {"speed": 3}}),
-        )
-        .unwrap();
-        database
-            .set_record("extension-packages", "hello-pane", 1, b"old")
-            .unwrap();
-        let extensions = Extensions::open(database.clone()).unwrap();
-        assert!(extensions.policy.packages.is_empty());
-        assert_eq!(
-            extensions.policy.disabled,
-            HashSet::from(["ai".to_string()])
-        );
-        assert!(extensions.setting_values.is_empty());
-        assert!(
-            database
-                .get_record("extension-packages", "hello-pane", 1)
-                .unwrap()
-                .is_none()
-        );
-        // The cleaned policy is saved, so the next start reads it as is.
-        Extensions::open(database).unwrap();
     }
 }
 #[cfg(test)]

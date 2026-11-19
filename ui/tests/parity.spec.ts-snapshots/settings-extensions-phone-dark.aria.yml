@@ -18,7 +18,7 @@
     - heading "Installed" [level=3]
     - group "Mail":
       - text: ""
-      - paragraph: Bundled By Colecto · API 2
+      - paragraph: Bundled By Colecto · API 1
       - checkbox "Enabled for all accounts" [checked]
       - text: Enabled for all accounts
       - paragraph: Browse, search and filter the messages and drafts of the selected account.
@@ -66,7 +66,7 @@
         - listitem: Add commands to the command runner
     - group "Notifications":
       - text: ""
-      - paragraph: Bundled By Colecto · API 2
+      - paragraph: Bundled By Colecto · API 1
       - checkbox "Enabled for all accounts" [checked]
       - text: Enabled for all accounts
       - paragraph: Tells you about new mail, automation waiting for your approval and new Colecto releases.
@@ -80,7 +80,7 @@
         - listitem: Talk to other extensions by name
     - group "AI":
       - text: ""
-      - paragraph: Bundled By Colecto · API 2
+      - paragraph: Bundled By Colecto · API 1
       - checkbox "Enabled for all accounts" [checked]
       - text: Enabled for all accounts
       - paragraph: Optional summaries, drafted replies and automatic labels using AI services you configure. Off until you turn it on in Settings → AI.

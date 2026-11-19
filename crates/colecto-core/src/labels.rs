@@ -14,7 +14,7 @@ mod tests {
         }
         let before = store
             .database
-            .get_record(&store.namespace, "labels", 1)
+            .get_record(&store.namespace, "labels")
             .unwrap()
             .unwrap();
         assert!(store.update_label("Extra", None, false).is_err());
@@ -22,20 +22,20 @@ mod tests {
         assert_eq!(
             store
                 .database
-                .get_record(&store.namespace, "labels", 1)
+                .get_record(&store.namespace, "labels")
                 .unwrap()
                 .unwrap(),
             before
         );
         store
             .database
-            .set_record(&store.namespace, "labels", 1, b"invalid metadata")
+            .set_record(&store.namespace, "labels", b"invalid metadata")
             .unwrap();
         assert!(store.update_label("Work", None, false).is_err());
         assert_eq!(
             store
                 .database
-                .get_record(&store.namespace, "labels", 1)
+                .get_record(&store.namespace, "labels")
                 .unwrap()
                 .unwrap(),
             b"invalid metadata"
@@ -71,9 +71,7 @@ mod tests {
 pub type Labels = std::collections::BTreeMap<String, Vec<String>>;
 
 #[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct SavedLabels {
-    version: u32,
     labels: Labels,
 }
 fn valid_name(name: &str) -> bool {
@@ -84,20 +82,10 @@ fn valid_name(name: &str) -> bool {
 }
 impl MailStore {
     pub fn labels(&self) -> Result<Labels, Error> {
-        let bytes = if self.database.contains_record(&self.namespace, "labels")? {
-            self.database
-                .get_record(&self.namespace, "labels", 1)?
-                .ok_or_else(|| storage("Authoritative labels were removed"))?
-        } else {
-            let bytes = serde_json::to_vec(&SavedLabels {
-                version: 1,
-                labels: Labels::new(),
-            })
-            .map_err(storage)?;
-            self.database
-                .initialize_record(&self.namespace, "labels", 1, &bytes)?
-        };
-        validate_labels(&bytes)
+        match self.database.get_record(&self.namespace, "labels")? {
+            Some(bytes) => validate_labels(&bytes),
+            None => Ok(Labels::new()),
+        }
     }
     pub fn update_label(
         &mut self,
@@ -137,13 +125,13 @@ impl MailStore {
             }
             labels.insert(name.to_owned(), Vec::new());
         }
-        let saved = SavedLabels { version: 1, labels };
+        let saved = SavedLabels { labels };
         let bytes = serde_json::to_vec(&saved).map_err(storage)?;
         if bytes.len() > 2_000_000 {
             return Err(Error::Invalid("Label store exceeds its size limit".into()));
         }
         self.database
-            .set_record(&self.namespace, "labels", 1, &bytes)?;
+            .set_record(&self.namespace, "labels", &bytes)?;
         Ok(saved.labels)
     }
 }
@@ -153,8 +141,7 @@ fn validate_labels(bytes: &[u8]) -> Result<Labels, Error> {
         return Err(storage("Label store exceeds its size limit"));
     }
     let saved: SavedLabels = serde_json::from_slice(bytes).map_err(storage)?;
-    if saved.version != 1
-        || saved.labels.len() > 50
+    if saved.labels.len() > 50
         || saved.labels.iter().any(|(name, ids)| {
             !valid_name(name)
                 || ids.len() > 1000

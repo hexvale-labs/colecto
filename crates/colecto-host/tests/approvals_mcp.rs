@@ -38,8 +38,7 @@ impl SecretStore for Secrets {
 /// Change the fixture key's stored policy, as another owner session would.
 fn edit_keys(database: &colecto_core::Database, id: &str, change: impl FnOnce(&mut Value)) {
     let mut policy: Value =
-        serde_json::from_slice(&database.get_record("host", "api-keys", 1).unwrap().unwrap())
-            .unwrap();
+        serde_json::from_slice(&database.get_record("host", "api-keys").unwrap().unwrap()).unwrap();
     change(
         policy["keys"]
             .as_array_mut()
@@ -49,7 +48,7 @@ fn edit_keys(database: &colecto_core::Database, id: &str, change: impl FnOnce(&m
             .unwrap(),
     );
     database
-        .set_record("host", "api-keys", 1, &serde_json::to_vec(&policy).unwrap())
+        .set_record("host", "api-keys", &serde_json::to_vec(&policy).unwrap())
         .unwrap();
 }
 struct Fixture {
@@ -71,7 +70,7 @@ impl Fixture {
         let mut keys = ApiKeys::open(database.clone()).unwrap();
         // MCP is off by default; these tests exercise it, so the owner has turned it on.
         database
-            .set_record("host", "preferences", 1, br#"{"mcp":true}"#)
+            .write_settings("core", &[("mcp".into(), Some("true".into()))])
             .unwrap();
         let input = || KeyInput {
             name: "Fixture".into(),

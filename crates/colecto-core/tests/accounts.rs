@@ -26,12 +26,12 @@ impl SecretStore for MemorySecrets {
 fn vault(dir: &std::path::Path) -> Vec<u8> {
     Database::open(dir)
         .unwrap()
-        .get_record("core", "vault", 1)
+        .get_record("core", "vault")
         .unwrap()
         .unwrap()
 }
 fn write_vault(dir: &std::path::Path, bytes: Vec<u8>) -> Result<(), Error> {
-    Database::open(dir)?.set_record("core", "vault", 1, &bytes)
+    Database::open(dir)?.set_record("core", "vault", &bytes)
 }
 
 fn input(id: Option<String>, address: &str) -> AccountInput {
@@ -301,33 +301,6 @@ fn failed_cleanup_retains_encrypted_replacement_and_recovers_on_restart() {
     assert!(backend.memory.0.lock().unwrap().is_empty());
     accounts.unlock("a strong master password").unwrap();
     assert!(accounts.store(&a.id).unwrap().lock().unwrap().connected());
-}
-
-#[test]
-fn locked_vault_suppresses_legacy_environment_account() {
-    let dir = tempfile::tempdir().unwrap();
-    let backend = Arc::new(MemorySecrets::default());
-    let mut accounts =
-        Accounts::open(MailStore::open(dir.path()).unwrap(), backend.clone()).unwrap();
-    accounts.protect("a strong master password").unwrap();
-    drop(accounts);
-    let mut legacy = MailStore::open(dir.path()).unwrap();
-    legacy
-        .connect_account(colecto_core::MailAccount {
-            imap_host: "imap.example.test".into(),
-            imap_port: 993,
-            smtp_host: "smtp.example.test".into(),
-            smtp_port: 587,
-            username: "env".into(),
-            password: "must-not-bypass-lock".into(),
-            address: "env@example.test".into(),
-            imap_starttls: false,
-            tls_certificate: String::new(),
-        })
-        .unwrap();
-    let accounts = Accounts::open(legacy, backend).unwrap();
-    assert!(accounts.security().locked);
-    assert!(!accounts.store("demo").unwrap().lock().unwrap().connected());
 }
 
 #[test]

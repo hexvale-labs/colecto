@@ -32,8 +32,6 @@ desktop profile='debug':
     # Replace it with a rename so a running copy keeps working and launches after this get the new version.
     install -Dm755 "$target/{{profile}}/colecto" "$bin.new"
     mv -f "$bin.new" "$bin"
-    # Earlier versions installed the entry as app.colecto.mail; remove it so the menu shows one Colecto.
-    rm -f "$data/applications/app.colecto.mail.desktop" "$data"/icons/hicolor/*/apps/app.colecto.mail.{png,svg}
     for size in 32x32 128x128 256x256; do
       file=crates/colecto-app/icons/$size.png; [ "$size" = 256x256 ] && file=crates/colecto-app/icons/128x128@2x.png
       install -Dm644 "$file" "$data/icons/hicolor/$size/apps/colecto.png"
