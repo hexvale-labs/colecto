@@ -185,8 +185,7 @@ pub(crate) fn update(
             let mut merged = serde_json::to_value(&store.get().notifications)
                 .map_err(|_| bad("Invalid notification settings".into()))?;
             for (field, value) in fields {
-                // What to be notified about lives in the Notifications extension's settings;
-                // the older mail, approvals and updates fields here no longer do anything.
+                // What to be notified about lives in the Notifications extension's settings.
                 if !NOTIFICATION_FIELDS.contains(&field.as_str()) {
                     return Err(bad(format!("Invalid notification setting: {field}")));
                 }

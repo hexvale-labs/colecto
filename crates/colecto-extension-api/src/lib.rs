@@ -41,7 +41,7 @@ pub struct Message {
     pub subject: String,
     pub body: String,
     pub date: String,
-    /// The conversation this message belongs to (API 2): JMAP's `threadId`, or for IMAP the
+    /// The conversation this message belongs to: JMAP's `threadId`, or for IMAP the
     /// first `References` id, else `In-Reply-To`, else its own `Message-ID`. Empty when unknown.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub thread: String,
@@ -421,7 +421,7 @@ pub struct SettingOption {
     pub label: String,
 }
 /// A core Settings section an extension setting may appear in instead of the extension's
-/// own page (API 2). Sections that hold credentials, connections or keys accept none.
+/// own page. Sections that hold credentials, connections or keys accept none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SettingSection {

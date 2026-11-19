@@ -75,7 +75,7 @@
 
   // ---- Preferences ----
 
-  let notificationPrefs = $state<NotificationPreferences>({ enabled: true, mail: true, approvals: true, system: false, position: 'top', updates: true });
+  let notificationPrefs = $state<NotificationPreferences>({ enabled: true, system: false, position: 'top' });
   let accent = $state<string | null>(null);
   let font = $state(DEFAULT_FONT);
   let textSize = $state(DEFAULT_TEXT_SIZE);
@@ -208,7 +208,7 @@
   // Enabled extensions get a section of their own for settings that name no core section, or
   // for a page they draw (a settings page and no declared settings).
   let extensionPages = $derived(extensionStates.filter(e => e.enabled && (e.manifest.settings?.some(setting => !setting.section) || (e.manifest.settings_page && e.manifest.client && !e.manifest.settings?.length))));
-  /** Extensions placing settings in a core section (API 2), bundled ones first. */
+  /** Extensions placing settings in a core section, bundled ones first. */
   const contributors = (section: 'appearance' | 'notifications') => extensionStates
     .filter(e => e.enabled && e.manifest.settings?.some(setting => setting.section === section))
     .sort((a, b) => Number(b.bundled) - Number(a.bundled));

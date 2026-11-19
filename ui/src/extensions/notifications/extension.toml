@@ -2,7 +2,7 @@ id = "notifications"
 name = "Notifications"
 author = "Colecto"
 description = "Tells you about new mail, automation waiting for your approval and new Colecto releases."
-api_version = 2
+api_version = 1
 client = "client/main.js"
 capabilities = ["ui.toasts", "approvals.notify", "releases.read", "messages.list", "account.read", "extensions.bus"]
 

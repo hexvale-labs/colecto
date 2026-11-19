@@ -109,16 +109,8 @@ impl Vault {
         database: Database,
         backend: Arc<dyn SecretStore>,
     ) -> Result<Self, Error> {
-        let canonical = database.contains_record("core", "vault")?;
-        let bytes = if canonical {
-            Some(
-                database
-                    .get_record("core", "vault", 1)?
-                    .ok_or_else(|| storage("Authoritative credential vault was removed"))?,
-            )
-        } else {
-            None
-        };
+        let bytes = database.get_record("core", "vault")?;
+        let canonical = bytes.is_some();
         let state: State = match bytes {
             Some(bytes) => serde_json::from_slice(&bytes).map_err(|_| {
                 invalid("Invalid account registry; preserve colecto.db before recovery")
@@ -142,7 +134,7 @@ impl Vault {
         if state
             .accounts
             .iter()
-            .any(|a| (a.id != "demo" && !valid_id(&a.id)) || !ids.insert(a.id.clone()))
+            .any(|a| !valid_id(&a.id) || !ids.insert(a.id.clone()))
         {
             return Err(invalid("Invalid or duplicate account identifier"));
         }
@@ -206,7 +198,7 @@ impl Vault {
             let serialized = serde_json::to_vec(&vault.state).map_err(storage)?;
             let canonical = vault
                 .database
-                .initialize_record("core", "vault", 1, &serialized)?;
+                .initialize_record("core", "vault", &serialized)?;
             if canonical != serialized {
                 return Self::open(
                     vault.directory.clone(),
@@ -234,7 +226,6 @@ impl Vault {
         self.database.set_record(
             "core",
             "vault",
-            1,
             &serde_json::to_vec(state).map_err(storage)?,
         )
     }

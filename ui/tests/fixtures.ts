@@ -45,7 +45,7 @@ export const test = base.extend({
       headers: { authorization: `Bearer ${ownerToken}`, origin: testOrigin, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' },
       // A fresh Host starts with the demo account off and onboarding pending; most specs use sample mail.
       data: { workspace: {}, account: 'demo', list_density: 'full', date_groups: true, accounts_enabled: { demo: true }, onboarded: true,
-        notifications: { enabled: true, mail: true, approvals: true, system: false, position: 'top', updates: true } },
+        notifications: { enabled: true, system: false, position: 'top' } },
     });
     // Bundled extensions keep their settings in the shared Host too: start each test from defaults.
     for (const [id, values] of Object.entries(bundledDefaults)) {

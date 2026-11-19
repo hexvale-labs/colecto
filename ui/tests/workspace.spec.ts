@@ -427,7 +427,7 @@ test('appearance applies and restores typography preferences', async ({ page }) 
   let typography = { font: 'mona', font_size: 14 };
   await page.route('**/api/v1/preferences', async route => {
     if (route.request().method() !== 'GET') typography = { ...typography, ...route.request().postDataJSON() };
-    await route.fulfill({ json: { mcp: false, onboarded: true, account: null, workspace: null, accent: null, remote_images: false, notifications: { enabled: true, mail: true, approvals: true, system: false, position: 'top' }, ...typography } });
+    await route.fulfill({ json: { mcp: false, onboarded: true, account: null, workspace: null, accent: null, remote_images: false, notifications: { enabled: true, system: false, position: 'top' }, ...typography } });
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();

@@ -519,36 +519,6 @@ fn unit(command: &[String], relay: Option<&Upstream>) -> Result<String, String> 
         version = crate::VERSION
     ))
 }
-/// Colecto 0.6 and earlier installed notifications as a second unit. The mail service now
-/// shows them itself, so a Colecto-managed notifier left from then is removed at startup.
-pub(crate) async fn retire_notifier(control: Control) {
-    if !cfg!(target_os = "linux") || !control.local || control.command.is_none() {
-        return;
-    }
-    let Ok(directory) = config_home() else {
-        return;
-    };
-    let path = directory.join("systemd/user/colecto-notifications.service");
-    if !path.exists() {
-        return;
-    }
-    if let Err(error) = managed(&path) {
-        tracing::info!(%error, "Leaving colecto-notifications.service alone");
-        return;
-    }
-    let _ = control
-        .run(&["disable", "--now", "colecto-notifications.service"])
-        .await;
-    match std::fs::remove_file(&path) {
-        Ok(()) => {
-            let _ = control.run(&["daemon-reload"]).await;
-            tracing::info!(
-                "Removed colecto-notifications.service; the mail service shows notifications now"
-            );
-        }
-        Err(error) => tracing::warn!(%error, "Could not remove colecto-notifications.service"),
-    }
-}
 /// Whether `path` is an AppImage, by its magic bytes ("AI" and the type at offset 8 of the
 /// ELF header), because AppImage managers rename the file.
 fn appimage(path: &Path) -> bool {
@@ -565,9 +535,9 @@ fn release(value: &str) -> Option<(u64, u64, u64)> {
     let mut parts = value.split(['.', '-', '+']).map(|p| p.parse().ok());
     Some((parts.next()??, parts.next()??, parts.next()??))
 }
-/// The Colecto version an installed unit should be updated to, if any. Units from before
-/// versioning have no marker and count as outdated; a unit written by a newer Colecto is
-/// left alone so opening an older app never downgrades it.
+/// The Colecto version an installed unit should be updated to, if any. A unit without a
+/// readable version marker counts as outdated; a unit written by a newer Colecto is left
+/// alone so opening an older app never downgrades it.
 fn update_to(installed: &str, expected: &str) -> Option<&'static str> {
     if installed == expected {
         return None;
@@ -824,9 +794,9 @@ mod tests {
     fn unit_updates() {
         let current = unit(&["/usr/bin/colecto".into(), "daemon".into()], None).unwrap();
         assert_eq!(update_to(&current, &current), None);
-        // Units from before versioning, older versions and moved executables are offered.
-        let legacy = current.replace(&format!("# Colecto-Version: {}\n", crate::VERSION), "");
-        assert_eq!(update_to(&legacy, &current), Some(crate::VERSION));
+        // Units without a marker, older versions and moved executables are offered.
+        let unmarked = current.replace(&format!("# Colecto-Version: {}\n", crate::VERSION), "");
+        assert_eq!(update_to(&unmarked, &current), Some(crate::VERSION));
         let old = current.replace(crate::VERSION, "0.0.1");
         assert_eq!(update_to(&old, &current), Some(crate::VERSION));
         let moved = current.replace("/usr/bin", "/opt");

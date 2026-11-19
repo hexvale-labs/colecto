@@ -7,3 +7,4 @@
 /crates/colecto-app/gen/
 .vite/
 __pycache__/
+/crates/colecto-core/tests/fixtures/schema/*/colecto.db-*

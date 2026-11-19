@@ -5,7 +5,7 @@ import type { Page } from '@playwright/test';
 const origin = `http://127.0.0.1:${process.env.COLECTO_TEST_PORT ?? '4179'}`;
 const host = { authorization: `Bearer ${ownerToken}`, origin, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' };
 const savePreferences = (page: Page, data: Record<string, unknown>) => page.request.post(`${origin}/api/v1/preferences`, { headers: host, data });
-const defaultNotifications = { enabled: true, mail: true, approvals: true, system: false, position: 'top', updates: true };
+const defaultNotifications = { enabled: true, system: false, position: 'top' };
 
 async function openSettings(page: Page, section: string) {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -112,7 +112,7 @@ test('the message list has three densities and optional date headings', async ({
   await expect(page.locator('.day').first()).toBeVisible();
   const height = async () => (await row.boundingBox())!.height;
   const full = await height();
-  // The mailbox places list density and date headings in Settings → Appearance (API 2 `section`).
+  // The mailbox places list density and date headings in Settings → Appearance (`section`).
   const settings = await openSettings(page, 'Appearance');
   await settings.locator('.segmented label', { hasText: 'Medium' }).click();
   await expect.poll(height).toBeLessThan(full);

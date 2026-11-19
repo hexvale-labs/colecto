@@ -749,7 +749,7 @@ fn key_secrets_are_not_persisted_and_expiry_revocation_survive_restart() {
         )
         .unwrap();
     let persisted =
-        String::from_utf8(database.get_record("host", "api-keys", 1).unwrap().unwrap()).unwrap();
+        String::from_utf8(database.get_record("host", "api-keys").unwrap().unwrap()).unwrap();
     assert!(!persisted.contains(&secret));
     assert!(!persisted.contains(secret.split_once('.').unwrap().1));
     assert!(
@@ -790,18 +790,16 @@ fn missing_and_corrupt_policy_reject_existing_key_and_recent_use_does_not_rewrit
         )
         .unwrap();
     keys.authenticate(&secret, 100).unwrap();
-    let record = || database.get_record("host", "api-keys", 1).unwrap();
+    let record = || database.get_record("host", "api-keys").unwrap();
     let policy = record().unwrap();
     keys.authenticate(&secret, 101).unwrap();
     assert_eq!(record().unwrap(), policy);
     assert_eq!(keys.list()[0].last_used_at, Some(100));
-    database
-        .set_record("host", "api-keys", 1, b"corrupt")
-        .unwrap();
+    database.set_record("host", "api-keys", b"corrupt").unwrap();
     assert!(keys.authenticate(&secret, 102).is_err());
-    database.set_record("host", "api-keys", 1, &policy).unwrap();
+    database.set_record("host", "api-keys", &policy).unwrap();
     assert!(keys.authenticate(&secret, 102).is_ok());
-    database.remove_record("host", "api-keys", 1).unwrap();
+    database.remove_record("host", "api-keys").unwrap();
     assert!(keys.authenticate(&secret, 103).is_err());
 }
 

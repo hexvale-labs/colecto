@@ -37,26 +37,8 @@ need `libdbus-1-dev`. If the store is missing or locked, Colecto reports an erro
 there is no plaintext fallback. Account management requires the local trusted
 Host; it is not a hosted multi-user authentication system.
 
-For an existing environment-based setup, the following variables remain supported
-before `just run` (set secrets in your local environment, never in source control):
-
-| Variable | Meaning |
-| --- | --- |
-| `COLECTO_IMAP_HOST` | IMAP server hostname |
-| `COLECTO_IMAP_PORT` | Implicit TLS port, default `993` (STARTTLS needs Settings → Accounts) |
-| `COLECTO_SMTP_HOST` | SMTP server hostname |
-| `COLECTO_SMTP_PORT` | `465` uses implicit TLS; any other port (default `587`) requires STARTTLS |
-| `COLECTO_MAIL_USERNAME` | Login for both servers |
-| `COLECTO_MAIL_PASSWORD` | Password or provider app password for both servers |
-| `COLECTO_MAIL_ADDRESS` | Sender email address |
-
-Any mail variable enables account mode; missing or invalid settings stop startup.
-Certificates and hostnames are verified; plaintext authentication is unavailable.
-When unlocked, a legacy environment account is imported once into persistent
-account settings and the system credential store, retaining its existing `demo`
-identity and drafts. Saved settings then take precedence; use Settings → Accounts to
-update them. A password-protected vault suppresses environment credentials while
-locked; reconnect/import through the UI after unlocking. Secrets are never
+Accounts are added in the app (Settings → Accounts or first-run onboarding) or through
+the HTTP API; Colecto does not read mail accounts from environment variables. Secrets are never
 returned through the API or saved in the draft store. OAuth-only providers are not supported yet.
 
 Opening Inbox fetches the latest 100 messages, read-only, without marking them
@@ -84,8 +66,8 @@ values stay plain words. Non-ASCII text adds `CHARSET UTF-8` for IMAP. The demo 
 matches `from:` and `is:` locally and ignores dates. Sent uses the provider's `\Sent`
 role, then the folder names `Sent`, `Sent Items`, `Sent Messages` or `Sent Mail`,
 also nested under another folder (`INBOX.Sent`, `[Gmail]/Sent Mail`). Drafts remain local and unencrypted, namespaced by account
-inside `colecto.db`. The original `demo` account keeps its legacy identity and
-drafts; they are never assigned to a new account automatically. Disconnect
+inside `colecto.db`. The sample `demo` account keeps its own drafts; they are never
+assigned to a new account automatically. Disconnect
 forgets the saved credential and retains settings/drafts for reconnecting.
 
 Send success means SMTP acceptance, not final delivery. A failed or interrupted
@@ -209,11 +191,8 @@ In **Settings → Accounts**, choose **JMAP** and enter:
 - **Email address:** the address to send as. Colecto uses the identity with that
   address, then a `*@your-domain` wildcard identity, then the account's only identity.
 
-For a single account from the environment, set `COLECTO_JMAP_SESSION_URL`,
-`COLECTO_JMAP_TOKEN` (the token or password), `COLECTO_MAIL_ADDRESS` and optionally
-`COLECTO_JMAP_USERNAME`, and leave the IMAP/SMTP variables unset. Partial
-configuration fails startup; authentication and capability checks happen on first
-use. OAuth sign-in and token refresh are not implemented.
+Authentication and capability checks happen on first use. OAuth sign-in and token
+refresh are not implemented.
 
 What works, the same as IMAP/SMTP:
 
@@ -335,7 +314,7 @@ registry and retry obsolete-entry cleanup after interruption. If cleanup fails,
 the UI reports pending cleanup; unlock the OS store and retry. A startup cleanup
 failure stops the Host with an actionable error rather than silently leaving a
 protection transition incomplete. Preserve the data directory on corruption;
-Colecto does not overwrite unsupported or malformed records or legacy files.
+Colecto does not overwrite unsupported or malformed records.
 
 The vault also holds Host-owned secrets whose names start with `host:`, today the
 optional [AI service keys](ai.md). They share the vault's protection: locking makes them

@@ -75,7 +75,7 @@ so old targets keep working. Raise `api_version` only in the extension that uses
 new feature. For example, if a new capability is only needed by the composer, change
 only `ui/src/extensions/composer/extension.toml`.
 
-The registry was reset to a single API 1 when the extension system was rebuilt; see
+The registry was reset to a single API 1 when Colecto entered beta; see
 [API 1](API-1.md).
 
 ## Changing signatures

@@ -3,7 +3,7 @@
     {
       "version": 1,
       "breaking": false,
-      "released_in": "v0.6.0",
+      "released_in": null,
       "capabilities": [
         "extensions.bus",
         "account.read",
@@ -29,20 +29,7 @@
         "ai.configure"
       ],
       "changes": [
-        "The client-side extension model: a client part in a Web Worker that sends component trees, an optional Wasm service part in the Host, per-extension credentials, the extension bus and declarative settings. Replaces the alpha panel and overlay system, which is gone."
-      ]
-    },
-    {
-      "version": 2,
-      "breaking": false,
-      "released_in": "v0.7.0",
-      "capabilities": [],
-      "changes": [
-        "Optional `section` on each `[[settings]]` table (`appearance` or `notifications`) shows that setting in that core Settings section instead of the extension's own page.",
-        "The icon `sparkles`, and `menu_button` shows its `icon` (it was accepted but not drawn).",
-        "Row context menus: a `list` with `context_menu: true` sends a `context` event, the owner answers with a `menu` message of up to 24 items, and the choice comes back as a `menu` event.",
-        "`message_row` takes `starred`; messages carry `thread`, the provider's conversation id.",
-        "The icons `archive`, `eye`, `filter`, `folder`, `star` and `tag`."
+        "The beta extension API: a client part in a Web Worker that sends component trees, an optional Wasm service part in the Host, per-extension credentials, the extension bus, declarative settings (optionally placed in a core Settings section), row context menus, starred and threaded messages. Replaces every alpha API, which is gone."
       ]
     }
   ]

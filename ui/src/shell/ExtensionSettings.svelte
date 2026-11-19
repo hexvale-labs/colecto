@@ -4,7 +4,7 @@
   import { extensionHost, subscribeEvents, type ExtensionSetting, type ExtensionSettings, type ExtensionState } from '../lib/api';
   import { touchSlider } from '../lib/slider';
   // Without `section`, the extension's own page: its settings that name no core section.
-  // With one, only the settings it places in that core section (API 2), as a group there.
+  // With one, only the settings it places in that core section, as a group there.
   let { manifest, section = null, bundled = true }: { manifest: ExtensionState['manifest']; section?: ExtensionSetting['section'] | null; bundled?: boolean } = $props();
   type Value = ExtensionSettings['values'][string];
   let data = $state<ExtensionSettings>();

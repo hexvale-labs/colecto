@@ -446,8 +446,8 @@ There is no password input: Colecto never asks for credentials inside extension 
 
 | Type | Props | Events |
 | --- | --- | --- |
-| `list` | `label`, `mode` (`static`: `ul`/`li`; `virtual`), `rows: [{key, kind: "row"\|"heading", node}]`, `selected` (a row key), `selection` (`none`, `single`), `arrived` (row keys to animate in), `context_menu` (API 2) | `select` with `{key}`; `context` and `menu` with `{key}` / `{key, item}` |
-| `message_row` | `sender`, `date`, `date_title`, `subject`, `preview`, `unread`, `starred` (API 2), `density` (`full`, `medium`, `compact`) | Inside a `list` row; renders as today's `button.mail-item` with `aria-pressed` |
+| `list` | `label`, `mode` (`static`: `ul`/`li`; `virtual`), `rows: [{key, kind: "row"\|"heading", node}]`, `selected` (a row key), `selection` (`none`, `single`), `arrived` (row keys to animate in), `context_menu` | `select` with `{key}`; `context` and `menu` with `{key}` / `{key, item}` |
+| `message_row` | `sender`, `date`, `date_title`, `subject`, `preview`, `unread`, `starred`, `density` (`full`, `medium`, `compact`) | Inside a `list` row; renders as today's `button.mail-item` with `aria-pressed` |
 
 A `virtual` list renders all rows below 200 and virtualizes above that, measuring one
 row per kind and density. Below the threshold the DOM and accessibility tree match
@@ -834,11 +834,11 @@ The parity specs (`ui/tests/parity.spec.ts`) record these on purpose.
 | Difference | Why | Step |
 | --- | --- | --- |
 | Toasts show the sending extension's name | Trusted attribution; today only third-party bus toasts are prefixed | Notifications |
-| Toast position and desktop notifications sit in the core Settings → Notifications section, under the notifications extension's "Notify me about" group (API 2 `section`) | One place for everything about notifications | Notifications |
+| Toast position and desktop notifications sit in the core Settings → Notifications section, under the notifications extension's "Notify me about" group (`section`) | One place for everything about notifications | Notifications |
 | Settings pages from extensions show "From *name*" | Trusted attribution | Notifications |
 | Extension dialogs show the extension name in their header | Trusted attribution | AI |
 | AI contributions have a tooltip naming AI | Trusted attribution | AI |
-| List density and date headings sit in Settings → Appearance under "Mail", placed there by the inbox (API 2 `section`) | Settings go where what they change belongs, not where their owner is | Inbox |
+| List density and date headings sit in Settings → Appearance under "Mail", placed there by the inbox (`section`) | Settings go where what they change belongs, not where their owner is | Inbox |
 | Bundled names become their tab names: "Mailbox" → "Mail", "Message reader" → "Reader" | Pane tabs show the extension name | Inbox, reader |
 | The composer has its own pane tab next to Reader | One pane per extension | Composer |
 | Mail, Privacy and Notifications settings start from defaults once | Fresh reset | Runtime |
