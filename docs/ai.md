@@ -119,6 +119,11 @@ no rule matched.
 | `field` | `sender` (name or address), `subject`, `body` or `any` |
 | `pattern` | A case-insensitive [Rust `regex`](https://docs.rs/regex) pattern, at most 300 bytes; plain words work as they are |
 
+Settings → AI lists the account's labels as rows, each with its state (Off, the number of
+rules, model on) and two buttons: **Edit** opens the label editor, **Remove** forgets the
+label's rules and description (the label and its messages stay). The editor says that
+each rule is a regular expression and marks an invalid one under its field.
+
 Patterns compile with 1 MiB size limits and run in linear time. Settings with an invalid
 pattern are refused with the label's name. The label editor tests its rules against the
 account's saved Inbox (`POST /ai/labels/preview`) as the owner types, without any
@@ -129,14 +134,18 @@ built to `service.wasm`), which the Host invokes with a `mail` event when the ba
 refresh (`crates/colecto-host/src/service.rs`) sees new message ids, including IMAP IDLE
 and JMAP push refreshes. It works with no window open. It needs AI features and
 automatic labels on. Rules apply first; the model is asked only about the remaining
-model-enabled labels, through the `ai.decide` service operation.
+model-enabled labels, through the `ai.decide` service operation. The Host passes new mail
+to the service part 10 ids per invocation, and the service part reads each message on its
+own (`messages.read`): the whole saved Inbox (`messages.list`) does not fit the SDK's
+64 KiB bridge reply once it holds real mail, which made every pass fail.
 
 | Limit | Value |
 | --- | --- |
 | Model requests per mail event | 10 messages (one request each) |
 | Model requests per hour, all accounts | 120, counted by the Host |
 | Remembered handled messages per account | 500, in the extension's own storage (`seen.<account>`) |
-| Service requests per event | 64 (the service-part limit) |
+| Messages per invocation | 10 (the Host splits larger events) |
+| Service requests per invocation | 64 (the service-part limit) |
 
 Each message is handled at most once, so a label the owner removes is never re-applied.
 Mail that arrived while the Host was not running is not labelled, because the first
@@ -151,8 +160,9 @@ again** under Settings → AI (the newest 1 to 100 saved Inbox
 messages) ask the service part to label messages that were already handled, through
 `ai/v1/reclassify`. This needs AI features on but not the automatic-labels switch. Unlike
 new mail, a check both adds labels that now apply and removes labels that no longer do,
-for labels that have rules, including labels the owner set by hand. The client sends 10
-messages per request (the service takes at most 25), and the same hourly model limit
+for labels that have rules, including labels the owner set by hand. The client sends 5
+messages per request (the service takes at most 25), so reading each message and changing
+its labels stays within one invocation's 64 service requests, and the same hourly model limit
 applies; messages it could not ask about are counted and reported.
 
 ## HTTP routes

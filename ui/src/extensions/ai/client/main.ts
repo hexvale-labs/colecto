@@ -133,7 +133,9 @@ app.on('event', event => {
 
 interface Reclassified { checked: number; changed: number; unanswered: number }
 const bulk = { count: 50, busy: false, note: '', failed: false };
-const BATCH = 10;
+// Each request reads its messages one by one and may change several labels on each, all
+// within one service call's budget of 64 Host requests.
+const BATCH = 5;
 /** Run the service part's `v1/reclassify` over these messages, a batch at a time. */
 async function reclassify(ids: string[], progress?: (done: number) => void) {
   const total: Reclassified = { checked: 0, changed: 0, unanswered: 0 };
@@ -269,9 +271,16 @@ function renderSettings() {
         { type: 'toggle', id: 'autolabel', label: 'Label new mail automatically', description: 'Sorts newly arrived mail into your labels. Rules match text and need no AI service; a label can also ask the decision model. A message is only checked once, so a label you remove stays removed.', checked: settings.autolabel },
         { type: 'heading', level: 4, style: 'group', text: `Labels in ${app.account?.name || app.account?.address || 'Demo account'}` },
         ...(!accountLabels.length ? [{ type: 'text', tone: 'muted', size: 'sm', text: 'No labels yet. Create one from a message or with “Create a local label” in the command palette.' } as Node] : []),
+        // Each label reads like an account row: its name and state, then Edit and Remove (#118).
         { type: 'list', id: 'labels', label: 'Labels', rows: accountLabels.map((name, index) => ({ key: name, kind: 'row' as const, node: { type: 'stack', direction: 'row', justify: 'between', align: 'center', gap: 12, children: [
-          { type: 'button', id: `edit.${index}`, variant: 'text', label: name, detail: describe(rules()[name]), disabled: !settings.autolabel },
-          { type: 'toggle', id: `rule.${index}`, label: `Label ${name} automatically`, label_hidden: true, checked: !!rules()[name]?.enabled, disabled: !settings.autolabel },
+          { type: 'stack', gap: 2, children: [
+            { type: 'text', spans: [{ text: name, style: 'strong' }] },
+            { type: 'text', tone: 'muted', size: 'sm', text: describe(rules()[name]) },
+          ] },
+          { type: 'stack', direction: 'row', gap: 2, children: [
+            { type: 'button', id: `edit.${index}`, variant: 'icon', icon: 'pencil', label: `Edit rules for ${name}`, title: 'Edit', disabled: !settings.autolabel },
+            { type: 'button', id: `remove.${index}`, variant: 'icon', icon: 'trash', label: `Remove rules for ${name}`, title: 'Remove', disabled: !settings.autolabel || !rules()[name] },
+          ] },
         ] } })) },
       ] },
       { type: 'fieldset', legend: 'Check mail again', disabled: !settings.enabled || bulk.busy, children: [
@@ -309,7 +318,8 @@ app.on('event', event => {
   const node = String(event.node);
   if (event.surface !== 'settings') return;
   const labelAt = (prefix: string) => node.startsWith(prefix) ? accountLabels[Number(node.slice(prefix.length))] : undefined;
-  if (event.kind === 'toggle' && labelAt('rule.') !== undefined) { const name = labelAt('rule.')!; const checked = (event.value as { checked: boolean }).checked; void save(draft => { (draft.labels[account()] ??= {})[name] = { ...(rules()[name] ?? empty), enabled: checked }; }); }
+  // Removing forgets the label's rules; the label itself and its messages stay.
+  if (event.kind === 'press' && labelAt('remove.') !== undefined) { const name = labelAt('remove.')!; void save(draft => { delete draft.labels[account()]?.[name]; }); }
   if (event.kind === 'press' && labelAt('edit.') !== undefined) openEditor(labelAt('edit.')!);
 });
 
@@ -342,11 +352,11 @@ function renderEditor() {
     { type: 'text', tone: 'muted', text: 'Choose which new mail gets this label.' },
     { type: 'toggle', id: 'rule-enabled', label: 'Label new mail automatically', checked: rule.enabled },
     { type: 'fieldset', legend: 'Rules', children: [
-      { type: 'text', tone: 'muted', size: 'sm', spans: [{ text: 'A message gets the label when any rule matches. Words work as they are, ignoring case: ' }, { text: 'invoice', style: 'code' }, { text: ' matches “Invoice due”. Use ' }, { text: '|', style: 'code' }, { text: ' for “or”, like ' }, { text: 'receipt|invoice', style: 'code' }, { text: '.' }] },
+      { type: 'text', tone: 'muted', size: 'sm', spans: [{ text: 'A message gets the label when any rule matches. Each rule is a regular expression, ignoring case, so plain words work as they are: ' }, { text: 'invoice', style: 'code' }, { text: ' matches “Invoice due”, ' }, { text: 'receipt|invoice', style: 'code' }, { text: ' matches either, and ' }, { text: '^order #\\d+', style: 'code' }, { text: ' matches text that starts with an order number.' }] },
       ...rule.rules.flatMap((current, index): Node[] => [
-        { type: 'stack', direction: 'row', gap: 8, align: 'center', children: [
+        { type: 'stack', direction: 'row', gap: 8, align: 'start', children: [
           { type: 'select', id: `field:${index}`, label: `Rule ${index + 1}: where to look`, value: current.field, options: fields },
-          { type: 'input', id: `pattern:${index}`, label: `Rule ${index + 1}: text to find`, label_hidden: true, placeholder: 'Text to find', autocomplete: 'off', spellcheck: false, maxlength: 300, value: current.pattern, report: 'input', debounce_ms: 0, ...(preview?.errors[index] ? { error: preview.errors[index]! } : {}) },
+          { type: 'input', id: `pattern:${index}`, label: `Rule ${index + 1}: text or regular expression to find`, label_hidden: true, placeholder: 'Text or regular expression', autocomplete: 'off', spellcheck: false, maxlength: 300, value: current.pattern, report: 'input', debounce_ms: 0, ...(preview?.errors[index] ? { error: preview.errors[index]! } : {}) },
           { type: 'button', id: `remove:${index}`, variant: 'icon', icon: 'trash', label: `Remove rule ${index + 1}` },
         ] },
       ]),

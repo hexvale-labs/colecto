@@ -115,8 +115,8 @@ pub fn parse_any_version(source: &str) -> Result<ExtensionManifest, String> {
             );
         }
     }
-    if manifest.capabilities.contains(&Capability::AppNavigate) {
-        return Err("app.navigate is reserved for API keys".into());
+    if manifest.capabilities.iter().any(|c| c.key_only()) {
+        return Err("app.navigate and settings.* are reserved for API keys".into());
     }
     for (index, &capability) in manifest.capabilities.iter().enumerate() {
         if manifest.capabilities[..index].contains(&capability) {

@@ -20,7 +20,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Browse any folder in the UI, with paging through full history | Next |
 | Incremental refresh of cached folders instead of refetching | Next |
 | Larger offline cache (thousands of messages per account) | Next |
-| Conversation threading | In progress; the reader shows earlier saved messages of the same thread, with quoted text folded |
+| Conversation threading | In progress; the reader shows earlier and later saved messages of the same thread, collapsed to one line each, with quoted text folded |
 | Inline `cid:` images in HTML mail | Later |
 | Encryption of stored mail | Later |
 
@@ -29,6 +29,8 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Item | Status |
 | --- | --- |
 | Dockable workspace, command runner, notifications, accent colour | Done |
+| Interface zoom with `Ctrl +`, `Ctrl -` and `Ctrl 0` in the desktop app | Done |
+| MCP tools to read and change appearance, notification and extension settings, each behind its own key permission | Done |
 | Extensions: Wasm panels and overlays, install-time consent, z-index layers | Done |
 | Declarative extension settings, owner controls and per-guest reads | Done |
 | Named extension bus: guest requests/events and bundled integrations | Done |

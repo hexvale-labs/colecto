@@ -43,6 +43,7 @@ struct Input {
     #[serde(default)]
     q: String,
     target: Option<String>,
+    settings: Option<crate::settings::SettingsInput>,
 }
 const TOOLS: &[&str] = &[
     "messages.flags",
@@ -63,6 +64,8 @@ const TOOLS: &[&str] = &[
     "messages.send",
     "send.status",
     "app.navigate",
+    "settings.read",
+    "settings.update",
 ];
 fn tool(name: &str) -> Tool {
     let description = if name == "messages.send" {
@@ -77,6 +80,10 @@ fn tool(name: &str) -> Tool {
         "List this account's saved drafts. Filter them yourself by recipient, subject or body."
     } else if name == "app.navigate" {
         "Open a page in the owner's running Colecto windows, such as a folder, the composer or a Settings page. Mail folders and compose switch those windows to this account. Requires app.navigate."
+    } else if name == "settings.read" {
+        "Read the settings this key may change, by area: appearance (needs settings.appearance), notifications (settings.notifications) and each extension's settings with its schema and current value (an extension's own page needs settings.extensions; settings it places in Appearance or Notifications need that area). Credentials, connections, background services, API keys and extensions themselves are never included."
+    } else if name == "settings.update" {
+        "Change settings in the areas this key was granted. Fields you leave out stay as they are. Values are checked like Settings checks them, nothing is saved if any part is refused, and open Colecto windows update at once. Returns the settings as settings.read does."
     } else {
         "Access this account using the authenticated key's current grants."
     };
@@ -85,6 +92,7 @@ fn tool(name: &str) -> Tool {
         "messages.read" | "drafts.read" | "send.status" => required.push("id"),
         "drafts.write" | "messages.send" => required.push("draft"),
         "app.navigate" => required.push("target"),
+        "settings.update" => required.push("settings"),
         "messages.label" => required.push("label"),
         "messages.flags" | "messages.archive" | "messages.delete" => required.push("ids"),
         "messages.move" => {
@@ -112,6 +120,41 @@ fn tool(name: &str) -> Tool {
                     "recipient":{"type":"string","maxLength":320},
                     "subject":{"type":"string","maxLength":998},
                     "body":{"type":"string","maxLength":100000}
+                }
+            },
+            "settings":{
+                "type":"object", "additionalProperties":false,
+                "properties":{
+                    "appearance":{
+                        "type":"object", "additionalProperties":false,
+                        "properties":{
+                            "accent":{"type":"string","description":"#rrggbb, or empty for the default mint"},
+                            "font":{"type":"string","maxLength":64,"description":"A bundled font (mona, inter, geist, plex, atkinson) or an installed system family"},
+                            "font_size":{"type":"integer","minimum":13,"maximum":18},
+                            "text_spacing":{
+                                "type":"object", "additionalProperties":false,
+                                "properties":{
+                                    "letter":{"type":"integer","minimum":0,"maximum":2},
+                                    "word":{"type":"integer","minimum":0,"maximum":2},
+                                    "line":{"type":"integer","minimum":0,"maximum":2},
+                                    "paragraph":{"type":"integer","minimum":0,"maximum":2}
+                                }
+                            }
+                        }
+                    },
+                    "notifications":{
+                        "type":"object", "additionalProperties":false,
+                        "properties":{
+                            "enabled":{"type":"boolean"},
+                            "system":{"type":"boolean"},
+                            "position":{"type":"string","enum":["top-left","top","top-right","right","bottom-right","bottom","bottom-left","left"]}
+                        }
+                    },
+                    "extensions":{
+                        "type":"object",
+                        "description":"Extension id to {setting key: value}; settings.read lists the keys and their allowed values",
+                        "additionalProperties":{"type":"object"}
+                    }
                 }
             },
             "label":{
@@ -227,6 +270,25 @@ impl MailMcp {
                     .filter(|t| colecto_extension_api::NAVIGATION_TARGETS.contains(&t.as_str()))
                     .ok_or_else(|| crate::approval_failure("Unknown navigation target".into()))?;
                 crate::navigate(&self.host, &principal, &input.account, &target)
+            }
+            "settings.read" | "settings.update" => {
+                let Principal::ApiKey(key) = &principal else {
+                    return Err(crate::forbidden());
+                };
+                let (host, key, account) = (self.host.clone(), key.clone(), input.account);
+                let settings = input.settings;
+                let update = name == "settings.update";
+                tokio::task::spawn_blocking(move || match settings {
+                    Some(settings) if update => {
+                        crate::settings::update(&host, &key, &account, settings)
+                    }
+                    None if !update => crate::settings::read(&host, &key, &account),
+                    _ => Err(crate::approval_failure(
+                        "Invalid settings tool input".into(),
+                    )),
+                })
+                .await
+                .map_err(|_| crate::forbidden())?
             }
             "send.status" => {
                 crate::request_status(&self.host, &principal, &path.0, Some(&input.account)).await

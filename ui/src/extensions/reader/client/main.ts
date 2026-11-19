@@ -12,6 +12,9 @@ let view: { id: string; folder: string } | null = null;
 let message: Message | null = null;
 /** Other messages of the open message's conversation from the saved Inbox and Sent (#102). */
 let conversation: (Message & { folder: string })[] = [];
+/** Earlier and later messages start collapsed, so the opened one stays in view (#120). */
+let shownParts = new Set<'before' | 'after'>();
+let expanded = new Set<string>();
 let showQuoted = false;
 let content: MessageContent | null = null;
 let loading = false;
@@ -69,7 +72,7 @@ function viewing() {
   app.send({ t: 'state', surface: 'pane', back: !!view });
 }
 
-function clear() { ++generation; view = null; message = null; conversation = []; showQuoted = false; content = null; error = ''; contentError = ''; banners = []; changedBy = ''; showHtml = true; allowRemote = false; }
+function clear() { ++generation; view = null; message = null; conversation = []; shownParts = new Set(); expanded = new Set(); showQuoted = false; content = null; error = ''; contentError = ''; banners = []; changedBy = ''; showHtml = true; allowRemote = false; }
 
 async function load() {
   if (!view) return;
@@ -124,21 +127,31 @@ function plainBody(text: string): Node {
     ...(showQuoted ? [bodyText(quoted)] : []),
   ] };
 }
-/** Messages of the conversation before or after the open one, newest last. */
+/** Messages of the conversation before or after the open one, oldest first: one line each
+ *  (sender, date, first line), expanded on click, behind a small "Show n …" control (#120). */
 function conversationPart(when: 'before' | 'after'): Node[] {
   if (!message || !conversation.length) return [];
   const opened = Date.parse(message.date) || 0;
   const part = conversation.map((item, index) => ({ item, index })).filter(({ item }) => ((Date.parse(item.date) || 0) <= opened) === (when === 'before'));
   if (!part.length) return [];
-  const title = when === 'before' ? `Earlier in this conversation (${part.length})` : `Later in this conversation (${part.length})`;
-  return [{ type: 'section', preset: 'summary', label: title, children: [{ type: 'stack', gap: 16, children: [
-    { type: 'heading', level: 3, text: title },
-    ...part.map(({ item, index }) => ({ type: 'stack', gap: 4, children: [
-      { type: 'text', size: 'sm', spans: [{ text: clip(item.sender || item.address, 256), style: 'strong' }, { text: ` · ${clip(when_(item.date), 120)}`, style: 'muted' }] },
-      { type: 'text', tone: 'muted', wrap: 'pre', text: clip(splitQuoted(item.body).fresh || item.body, 4000) },
-      { type: 'button', id: `conversation.${index}`, variant: 'text', label: 'Open this message' },
-    ] } as Node)),
-  ] }] }];
+  const count = `${part.length} ${when === 'before' ? 'earlier' : 'later'} message${part.length === 1 ? '' : 's'}`;
+  const shown = shownParts.has(when);
+  const toggle: Node = { type: 'button', id: `conversation-${when}`, variant: 'text', pressed: shown, label: shown ? `Hide ${count}` : `Show ${count}` };
+  if (!shown) return [{ type: 'section', preset: 'summary', label: `${when === 'before' ? 'Earlier' : 'Later'} in this conversation`, children: [toggle] }];
+  return [{ type: 'section', preset: 'summary', label: `${when === 'before' ? 'Earlier' : 'Later'} in this conversation`, children: [
+    toggle,
+    { type: 'list', label: `${when === 'before' ? 'Earlier' : 'Later'} messages`, rows: part.map(({ item, index }) => {
+      // Text the reply quotes again is left out; its own words are what is new.
+      const fresh = splitQuoted(item.body).fresh || item.body;
+      const open = expanded.has(item.id);
+      const first = fresh.split('\n').map(line => line.trim()).find(Boolean) ?? '';
+      return { key: item.id, kind: 'row' as const, node: { type: 'stack', gap: 6, children: [
+        { type: 'button', id: `conversation-item.${index}`, variant: 'text', pressed: open, label: clip(`${item.sender || item.address} · ${when_(item.date)}`, 256), title: open ? 'Collapse' : 'Expand' },
+        open ? { type: 'text', tone: 'muted', wrap: 'pre', text: clip(fresh, 4000) } as Node : { type: 'text', tone: 'muted', size: 'sm', text: clip(first, 200) || '(No text)' } as Node,
+        ...(open ? [{ type: 'button', id: `conversation.${index}`, variant: 'text', label: 'Open this message' } as Node] : []),
+      ] } };
+    }) },
+  ] }];
 }
 const when_ = (date: string) => when(date, app.now()).full || date;
 
@@ -298,8 +311,15 @@ app.when('reply', 'press', () => reply('reply'));
 app.when('reply-all', 'press', () => reply('all'));
 app.when('forward', 'press', () => reply('forward'));
 app.when('toggle-quoted', 'press', () => { showQuoted = !showQuoted; render(); });
+app.when('conversation-before', 'press', () => { shownParts.has('before') ? shownParts.delete('before') : shownParts.add('before'); render(); });
+app.when('conversation-after', 'press', () => { shownParts.has('after') ? shownParts.delete('after') : shownParts.add('after'); render(); });
 app.on('event', event => {
   const node = String(event.node);
+  if (event.kind === 'press' && node.startsWith('conversation-item.')) {
+    const item = conversation[Number(node.slice('conversation-item.'.length))];
+    if (item) { expanded.has(item.id) ? expanded.delete(item.id) : expanded.add(item.id); render(); }
+    return;
+  }
   if (event.kind !== 'press' || !node.startsWith('conversation.')) return;
   const item = conversation[Number(node.slice('conversation.'.length))];
   if (item) open(item.id, item.folder === 'sent' ? 'Sent' : 'Inbox', item.subject || '(No subject)');

@@ -147,8 +147,10 @@ test('a reply shows its conversation and folds the quoted history', async ({ pag
   });
   await page.goto('/');
   await page.getByRole('button', { name: /Re: Lunch/ }).click();
-  const earlier = page.getByRole('region', { name: 'Earlier in this conversation (1)' });
-  await expect(earlier).toBeVisible();
+  // Earlier messages wait behind one small control, so the opened message stays in view (#120).
+  const earlier = page.getByRole('region', { name: 'Earlier in this conversation' });
+  await expect(earlier.getByText('Lunch on Friday?')).toHaveCount(0);
+  await earlier.getByRole('button', { name: 'Show 1 earlier message' }).click();
   await expect(earlier.getByText('Lunch on Friday?')).toBeVisible();
   await expect(earlier.getByText('Elsewhere')).toHaveCount(0);
   // The quoted history is folded until asked for.
@@ -157,7 +159,10 @@ test('a reply shows its conversation and folds the quoted history', async ({ pag
   await expect(letter.getByText('> Or Saturday?')).toHaveCount(0);
   await page.getByRole('button', { name: 'Show quoted text' }).click();
   await expect(letter.getByText(/> Or Saturday\?/)).toBeVisible();
+  // One line each until expanded; expanded, the message can be opened.
+  await expect(earlier.getByRole('button', { name: 'Open this message' })).toHaveCount(0);
+  await earlier.getByRole('button', { name: / · / }).click();
   await earlier.getByRole('button', { name: 'Open this message' }).click();
   await expect(page.getByRole('heading', { name: 'Lunch', exact: true, level: 2 })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Later in this conversation (1)' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Later in this conversation' }).getByRole('button', { name: 'Show 1 later message' })).toBeVisible();
 });

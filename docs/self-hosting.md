@@ -419,9 +419,10 @@ Input lines are limited to 512000 bytes and responses to 130000000 bytes; oversi
 messages fail rather than truncate. Redirects are disabled.
 
 Tools expose `account.read`, `messages.list`, `messages.read`, `drafts.list`,
-`drafts.read`, `drafts.write`, `labels.list`, `messages.label`, `messages.send`, `send.status`
-and `app.navigate`. Each takes `account`; reads/status also take `id`, writes/send take
-`draft`, label updates take `label`, and navigation takes `target`. Message lists accept
+`drafts.read`, `drafts.write`, `labels.list`, `messages.label`, `messages.send`, `send.status`,
+`app.navigate`, `settings.read` and `settings.update`. Each takes `account`; reads/status
+also take `id`, writes/send take `draft`, label updates take `label`, navigation takes
+`target` and settings updates take `settings`. Message lists accept
 `folder` and `q`; `q` searches the provider by sender, subject and text.
 
 `app.navigate` needs the `app.navigate` capability, which only API keys can hold. It
@@ -431,6 +432,32 @@ event; mail pages also switch those windows to the key's `account`. The result r
 how many windows were listening. Discovery
 confers no grants. Invalid inputs and operation failures return structured tool
 errors; authentication failures use HTTP 401. No approval tool exists.
+
+### Settings over MCP
+
+`settings.read` and `settings.update` let a key read and change some of Colecto's
+settings for the owner. Each area needs its own capability, which only API keys can hold
+and which no key has unless the owner ticks it in Settings → API keys:
+
+| Capability | Covers |
+| --- | --- |
+| `settings.appearance` | `appearance`: `accent` (`#rrggbb`, empty for the default), `font`, `font_size` (13–18), `text_spacing` (`letter`, `word`, `line`, `paragraph`, each 0–2); extension settings with `section = "appearance"` (such as list density) |
+| `settings.notifications` | `notifications`: `enabled`, `system`, `position`; extension settings with `section = "notifications"` (what to be notified about) |
+| `settings.extensions` | Settings on extensions' own pages, such as Mail's prefetch and Privacy's remote images |
+
+- `settings.read` returns only the granted areas, plus `extensions`: each extension with
+  settings in those areas, with its schema (`key`, `label`, `type`, `options`, `min`,
+  `max`, `section`, …) and current `value`.
+- `settings.update` takes `{"appearance": {…}, "notifications": {…}, "extensions":
+  {"<id>": {"<key>": value}}}`. Fields left out stay as they are. Values pass the same
+  checks as Settings (preference limits, extension setting schemas). If any part is not
+  granted or not valid, nothing is saved. The Host then emits `preferences` and
+  `extension.settings` events, so open windows update at once, and returns what
+  `settings.read` would.
+- Never reachable from a key: credentials and account passwords, accounts, the server
+  connection, background services, API keys, MCP itself, extension installation, send
+  approvals, AI settings and the workspace layout. Changes need no owner approval: they
+  only change how Colecto looks and notifies, and the owner can undo each in Settings.
 
 The HTTP equivalent is `POST /api/v1/send` with an explicit scoped bearer,
 `x-colecto-account`, matching `Origin` and a `DraftInput` JSON body. A successful
