@@ -124,12 +124,11 @@ test('approval requests arrive as notifications with decisions, a close button a
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
-  // Where toasts appear belongs to the core toast surface (Appearance); what to announce to the
-  // notifications extension (Notifications).
-  await settings.getByRole('button', { name: 'Appearance', exact: true }).click();
+  // Where toasts appear (core toast surface) and what to announce (notifications extension)
+  // share the core Notifications section.
+  await settings.getByRole('button', { name: 'Notifications', exact: true }).click();
   await settings.getByRole('radio', { name: 'Top left' }).check();
   await expect(toasts).toHaveAttribute('data-position', 'top-left');
-  await settings.getByRole('button', { name: 'Notifications', exact: true }).click();
   await settings.getByRole('checkbox', { name: 'Send approvals' }).uncheck();
   await expect(settings.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
   // Both choices are kept by the Host.

@@ -1,6 +1,6 @@
 id = "inbox"
 name = "Mail"
-api_version = 1
+api_version = 2
 client = "client/main.js"
 navigation = ["inbox", "drafts", "sent"]
 capabilities = ["extensions.bus", "account.read", "messages.organize", "messages.list", "messages.label", "drafts.list", "ui.commands"]
@@ -25,6 +25,7 @@ description = "Full rows show a preview line, medium rows drop it, compact rows 
 type = "choice"
 default = "full"
 options = [{ value = "full", label = "Full" }, { value = "medium", label = "Medium" }, { value = "compact", label = "Compact" }]
+section = "appearance"
 
 [[settings]]
 key = "date_groups"
@@ -32,6 +33,7 @@ label = "Date headings"
 description = "Group messages under headings such as Today and November."
 type = "toggle"
 default = true
+section = "appearance"
 
 [[settings]]
 key = "prefetch"

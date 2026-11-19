@@ -474,3 +474,16 @@ test('a pane menu without room stays inside the window instead of scrolling the 
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(440);
 });
+
+// Regression (#98): a hidden pane could only come back from Settings, which nothing pointed to.
+test('a hidden pane comes back from any pane’s menu', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Arrange Accounts' }).click();
+  await page.getByRole('option', { name: 'Hide this pane' }).click();
+  await expect(page.getByRole('tab', { name: 'Accounts' })).toHaveCount(0);
+  await page.getByRole('button', { name: /^Arrange/ }).first().click();
+  await page.getByRole('option', { name: 'Show Accounts' }).click();
+  await expect(page.getByRole('tab', { name: 'Accounts' })).toBeVisible();
+  await page.getByRole('button', { name: /^Arrange/ }).first().click();
+  await expect(page.getByRole('option', { name: 'Show Accounts' })).toHaveCount(0);
+});

@@ -11,8 +11,8 @@
     layout: Layout; panes: PaneInfo[]; focus: string; compact: boolean; content: Snippet<[string]>; header?: Snippet<[string]>;
     onactivate: (pane: string) => void; onchange: (layout: Layout) => void;
   } = $props();
-  type MenuAction = Edge | 'hide';
-  const menu: { value: MenuAction; label: string }[] = [
+  type MenuAction = Edge | 'hide' | `show:${string}`;
+  const arrange: { value: MenuAction; label: string; group?: string }[] = [
     { value: 'left', label: 'Dock along the left edge' }, { value: 'right', label: 'Dock along the right edge' },
     { value: 'top', label: 'Dock along the top edge' }, { value: 'bottom', label: 'Dock along the bottom edge' },
     { value: 'hide', label: 'Hide this pane' },
@@ -22,6 +22,11 @@
   let width = $state(0);
   let height = $state(0);
   let info = $derived(new Map(panes.map(pane => [pane.id, pane])));
+  // Hidden panes come back from the same menu that hid them (#98).
+  let menu = $derived([...arrange, ...layout.hidden.flatMap(pane => {
+    const meta = info.get(pane);
+    return meta ? [{ value: `show:${pane}` as MenuAction, label: `Show ${meta.title}`, group: 'Hidden panes' }] : [];
+  })]);
   let groups = $derived(leaves(layout.root));
   let measured = $derived(measure(layout.root, { x: 0, y: 0, w: width, h: height }));
   let placed = $derived(groups.flatMap(group => group.panes.filter(pane => info.has(pane)).map(pane => ({ pane, group }))));
@@ -111,7 +116,11 @@
     onchange(resize(layout, gutter.path, sizes));
   }
   function menuAction(pane: string, action: MenuAction) {
-    onchange(action === 'hide' ? setVisible(layout, pane, false) : dockEdge(layout, pane, action));
+    if (action.startsWith('show:')) {
+      const shown = action.slice('show:'.length);
+      onchange(setVisible(layout, shown, true));
+      onactivate(shown);
+    } else onchange(action === 'hide' ? setVisible(layout, pane, false) : dockEdge(layout, pane, action as Edge));
   }
   const label = (gutter: Gutter) => gutter.dir === 'row' ? 'Resize the panes on either side' : 'Resize the panes above and below';
 </script>

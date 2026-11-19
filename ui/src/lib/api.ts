@@ -1,4 +1,5 @@
 // Version 1 wire contracts mirror colecto-extension-api. Rust validates all input.
+import type { TextSpacing } from './text-spacing.svelte';
 import type { Discovery } from './discovery';
 export type Labels = Record<string, string[]>;
 export interface Message { seen: boolean; flagged: boolean; id: string; sender: string; address: string; subject: string; body: string; date: string }
@@ -71,7 +72,7 @@ export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right'
 export interface NotificationPreferences { enabled: boolean; mail: boolean; approvals: boolean; system: boolean; position: Corner; updates: boolean }
 /** Message list rows: two lines with a preview, a shorter version, or one line. */
 export type ListDensity = 'full' | 'medium' | 'compact';
-export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; notifications: NotificationPreferences; remote_images: boolean; list_density: ListDensity; date_groups: boolean; notified_release: string | null; accounts_enabled: Record<string, boolean>; onboarded: boolean; prefetch: PrefetchPreferences }
+export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; text_spacing: TextSpacing; notifications: NotificationPreferences; remote_images: boolean; list_density: ListDensity; date_groups: boolean; notified_release: string | null; accounts_enabled: Record<string, boolean>; onboarded: boolean; prefetch: PrefetchPreferences }
 /** A stable release newer than the running build, from the Host's cached GitHub check. */
 export interface LatestRelease { current: string; latest: { version: string; url: string } | null }
 /** Accounts the owner never switched use this: the demo account starts off, every other account on. */
@@ -218,5 +219,5 @@ export function subscribeEvents(onevent: EventListener): () => void {
   };
 }
 
-export interface ExtensionSetting { key: string; label: string; description?: string; type: "toggle" | "range" | "choice" | "text"; default: boolean | number | string; min?: number; max?: number; step?: number; unit?: string; options?: {value: string; label: string}[] }
+export interface ExtensionSetting { key: string; label: string; description?: string; type: "toggle" | "range" | "choice" | "text"; default: boolean | number | string; min?: number; max?: number; step?: number; unit?: string; options?: {value: string; label: string}[]; section?: 'appearance' | 'notifications' }
 export interface ExtensionSettings { schema: ExtensionSetting[]; values: Record<string, boolean | number | string> }

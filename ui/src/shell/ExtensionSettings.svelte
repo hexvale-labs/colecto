@@ -3,7 +3,9 @@
   import Select from '../Select.svelte';
   import { extensionHost, subscribeEvents, type ExtensionSetting, type ExtensionSettings, type ExtensionState } from '../lib/api';
   import { touchSlider } from '../lib/slider';
-  let { manifest }: { manifest: ExtensionState['manifest'] } = $props();
+  // Without `section`, the extension's own page: its settings that name no core section.
+  // With one, only the settings it places in that core section (API 2), as a group there.
+  let { manifest, section = null, bundled = true }: { manifest: ExtensionState['manifest']; section?: ExtensionSetting['section'] | null; bundled?: boolean } = $props();
   type Value = ExtensionSettings['values'][string];
   let data = $state<ExtensionSettings>();
   let error = $state('');
@@ -34,8 +36,12 @@
     data.values[key] = value; pending[key] = value; saved = false;
     clearTimeout(timer); timer = setTimeout(() => void flush(), delay);
   }
-  function reset() { if (data) for (const setting of data.schema) change(setting.key, setting.default); }
-  const isDefault = $derived(!!data && data.schema.every(setting => data!.values[setting.key] === setting.default));
+  const schema = $derived(data?.schema.filter(setting => (setting.section ?? null) === section) ?? []);
+  const title = $derived(manifest.settings_page?.title ?? manifest.name);
+  // Setting names sit one level below the heading they are grouped under.
+  const nameTag = $derived(section ? 'h4' : 'h3');
+  function reset() { for (const setting of schema) change(setting.key, setting.default); }
+  const isDefault = $derived(schema.every(setting => data!.values[setting.key] === setting.default));
   const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
   const shown = (setting: ExtensionSetting, value: Value) => `${number.format(Number(value))}${setting.unit ? (setting.unit === '%' ? '%' : ` ${setting.unit}`) : ''}`;
   // How far along its track a slider is, for the filled part of the track.
@@ -48,19 +54,14 @@
   });
 </script>
 
-<section class="settings-section" aria-labelledby="extension-settings-title">
-  <header class="section-head">
-    <h2 id="extension-settings-title">{manifest.settings_page?.title ?? manifest.name}</h2>
-    <p class="extension-from">From {manifest.name}</p>
-    <p>{manifest.description}</p>
-  </header>
+{#snippet body()}
   {#if data}
     <div class="settings-group">
-      {#each data.schema as setting (setting.key)}
+      {#each schema as setting (setting.key)}
         {@const value = data.values[setting.key]}
         {#if setting.type === 'toggle'}
           <div class="setting setting-row">
-            <div class="setting-text"><h3 id={`${field(setting.key)}-label`}>{setting.label}</h3>{#if setting.description}<p>{setting.description}</p>{/if}</div>
+            <div class="setting-text"><svelte:element this={nameTag} id={`${field(setting.key)}-label`}>{setting.label}</svelte:element>{#if setting.description}<p>{setting.description}</p>{/if}</div>
             <label class="switch"><input type="checkbox" aria-labelledby={`${field(setting.key)}-label`} checked={value === true} onchange={(event) => change(setting.key, event.currentTarget.checked)} /></label>
           </div>
         {:else if setting.type === 'range'}
@@ -72,23 +73,24 @@
         {:else if setting.type === 'choice' && (setting.options?.length ?? 0) <= 4}
           <fieldset class="setting setting-row">
             <legend class="sr-only">{setting.label}</legend>
-            <div class="setting-text"><h3>{setting.label}</h3>{#if setting.description}<p>{setting.description}</p>{/if}</div>
+            <div class="setting-text"><svelte:element this={nameTag}>{setting.label}</svelte:element>{#if setting.description}<p>{setting.description}</p>{/if}</div>
             <div class="segmented">{#each setting.options ?? [] as option (option.value)}<label><input type="radio" name={field(setting.key)} value={option.value} checked={value === option.value} onchange={() => change(setting.key, option.value)} />{option.label}</label>{/each}</div>
           </fieldset>
         {:else if setting.type === 'choice'}
           <div class="setting">
-            <div class="setting-text"><h3>{setting.label}</h3>{#if setting.description}<p>{setting.description}</p>{/if}</div>
+            <div class="setting-text"><svelte:element this={nameTag}>{setting.label}</svelte:element>{#if setting.description}<p>{setting.description}</p>{/if}</div>
             <div class="choice-select"><Select label={setting.label} value={String(value)} options={setting.options ?? []} onchange={(next) => change(setting.key, next)} /></div>
           </div>
         {:else}
           <div class="setting">
-            <div class="setting-text"><h3><label for={field(setting.key)}>{setting.label}</label></h3>{#if setting.description}<p>{setting.description}</p>{/if}</div>
+            <div class="setting-text"><svelte:element this={nameTag}><label for={field(setting.key)}>{setting.label}</label></svelte:element>{#if setting.description}<p>{setting.description}</p>{/if}</div>
             <input id={field(setting.key)} class="text-setting" type="text" value={String(value)} oninput={(event) => change(setting.key, event.currentTarget.value, 300)} onblur={() => void flush()} />
           </div>
         {/if}
       {/each}
       <div class="footer">
-        <button type="button" class="text-button" disabled={isDefault} onclick={reset}>Reset to defaults</button>
+        <!-- Core sections have no reset, so a group placed in one does not add its own. -->
+        {#if !section}<button type="button" class="text-button" disabled={isDefault} onclick={reset}>Reset to defaults</button>{/if}
         <span class="save-state" class:visible={saved} role="status">{saved ? 'Saved' : ''}</span>
       </div>
     </div>
@@ -96,7 +98,24 @@
     <p class="content-note">Loading settings…</p>
   {/if}
   {#if error}<p class="error-box" role="alert">{error}</p>{/if}
-</section>
+{/snippet}
+
+{#if section}
+  <section class="settings-group" aria-labelledby={`${field(section)}-group`}>
+    <h3 id={`${field(section)}-group`} class="group-label">{title}</h3>
+    {#if !bundled}<p class="extension-from">From {manifest.name}</p>{/if}
+    {@render body()}
+  </section>
+{:else}
+  <section class="settings-section" aria-labelledby="extension-settings-title">
+    <header class="section-head">
+      <h2 id="extension-settings-title">{title}</h2>
+      <p class="extension-from">From {manifest.name}</p>
+      <p>{manifest.description}</p>
+    </header>
+    {@render body()}
+  </section>
+{/if}
 
 <style>
   .range-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }

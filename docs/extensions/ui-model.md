@@ -834,11 +834,11 @@ The parity specs (`ui/tests/parity.spec.ts`) record these on purpose.
 | Difference | Why | Step |
 | --- | --- | --- |
 | Toasts show the sending extension's name | Trusted attribution; today only third-party bus toasts are prefixed | Notifications |
-| Toast position and desktop notifications move to Settings → Appearance | They configure the core toast surface, not what to notify about | Notifications |
+| Toast position and desktop notifications sit in the core Settings → Notifications section, under the notifications extension's "Notify me about" group (API 2 `section`) | One place for everything about notifications | Notifications |
 | Settings pages from extensions show "From *name*" | Trusted attribution | Notifications |
 | Extension dialogs show the extension name in their header | Trusted attribution | AI |
 | AI contributions have a tooltip naming AI | Trusted attribution | AI |
-| List density and date headings move from Appearance to Mail | The inbox owns Settings → Mail | Inbox |
+| List density and date headings sit in Settings → Appearance under "Mail", placed there by the inbox (API 2 `section`) | Settings go where what they change belongs, not where their owner is | Inbox |
 | Bundled names become their tab names: "Mailbox" → "Mail", "Message reader" → "Reader" | Pane tabs show the extension name | Inbox, reader |
 | The composer has its own pane tab next to Reader | One pane per extension | Composer |
 | Mail, Privacy and Notifications settings start from defaults once | Fresh reset | Runtime |

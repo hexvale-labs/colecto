@@ -1,5 +1,7 @@
 <script lang="ts" module>
-  export interface Command { id: string; name: string; run: () => void; disabled?: boolean }
+  import type { IconName } from './Icon.svelte';
+  /** `icon` says what the command does; commands without one show a neutral mark. */
+  export interface Command { id: string; name: string; run: () => void; disabled?: boolean; icon?: IconName }
   /** Mail an extension found for what the owner typed. */
   export interface Hit { id: string; title: string; hint?: string }
 </script>
@@ -52,7 +54,7 @@
     {#each entries as entry, index (entry.id)}
       {#if index === 0 || entries[index - 1].group !== entry.group}<p class="command-group" role="presentation">{entry.group}</p>{/if}
       <button id={`command-${index}`} role="option" aria-selected={active === index} disabled={entry.disabled} onpointermove={() => active = index} onclick={() => run(entry)}>
-        {#if entry.group === 'Messages'}<Icon name={entry.id === 'search-all' ? 'search' : 'mail'} size={15} />{/if}
+        <Icon name={entry.group === 'Messages' ? (entry.id === 'search-all' ? 'search' : 'mail') : entry.icon ?? 'command'} size={15} />
         <span class="command-name">{entry.name}</span>{#if entry.hint}<small>{entry.hint}</small>{/if}
       </button>
     {:else}<p class="command-empty" role="status">Nothing matches. Try fewer words.</p>{/each}

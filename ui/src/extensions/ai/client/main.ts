@@ -44,7 +44,7 @@ async function forget() {
 
 function contribute() {
   const current = summaryOf();
-  app.send({ t: 'contribute', slot: 'reader/v1/actions', tree: on() && message ? { type: 'menu_button', id: 'ai-menu', label: 'AI', items: [{ id: 'summarize', label: 'Summarize' }, { id: 'reply', label: 'Reply' }] } : null });
+  app.send({ t: 'contribute', slot: 'reader/v1/actions', tree: on() && message ? { type: 'menu_button', id: 'ai-menu', label: 'AI', icon: 'sparkles', items: [{ id: 'summarize', label: 'Summarize' }, { id: 'reply', label: 'Reply' }] } : null });
   app.send({ t: 'contribute', slot: 'reader/v1/above_body', tree: on() && message && (current.text !== null || current.busy || current.error) ? { type: 'section', preset: 'summary', labelled_by: 'summary-title', busy: current.busy, children: [
     { type: 'stack', direction: 'row', justify: 'between', align: 'center', children: [
       { type: 'heading', id: 'summary-title', level: 3, text: 'Summary' },
