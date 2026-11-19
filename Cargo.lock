@@ -872,13 +872,17 @@ version = "0.7.1"
 dependencies = [
  "axum",
  "colecto-host",
+ "futures-util",
  "glib",
  "open",
  "openssl",
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-colecto-native",
  "tokio",
+ "tower",
  "tracing",
  "zeroize",
 ]

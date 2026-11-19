@@ -12,7 +12,7 @@ rust:
 
 # Run UI unit tests without starting a browser or mail service.
 ui:
-    bun test ./ui/tests/api.test.mjs ./ui/tests/discovery.test.mjs ./ui/tests/reply.test.mjs ./ui/tests/when.test.mjs ./ui/tests/layout.test.mjs ./ui/tests/navigation.test.mjs ./ui/tests/paths.test.mjs
+    bun test ./ui/tests/api.test.mjs ./ui/tests/discovery.test.mjs ./ui/tests/reply.test.mjs ./ui/tests/when.test.mjs ./ui/tests/layout.test.mjs ./ui/tests/navigation.test.mjs ./ui/tests/paths.test.mjs ./ui/tests/zoom.test.mjs
 
 # Verify UI flows and restart persistence in browsers, with an isolated temporary data directory.
 browser:
@@ -61,9 +61,10 @@ mail:
     done
     COLECTO_MAIL_TEST_CERT="$certs/cert.pem" cargo test --locked --test mail_server
 
-# Linux/X11 native launch smoke check (requires xvfb and xwininfo).
+# Linux/X11 native launch smoke check and the app's own tests (requires xvfb and xwininfo).
 native:
     {{j}} build native
+    cargo test -p colecto-app --lib --locked
     xvfb-run -a bun test ./ui/tests/native.test.mjs
 
 # Test the Linux resource recorder's aggregation, isolation, and comparison rules.

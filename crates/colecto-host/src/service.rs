@@ -412,6 +412,10 @@ impl MailService {
             .lock()
             .map_or_else(|e| e.into_inner().database(), |a| a.database())
     }
+    /// Whether the owner turned MCP (and so the desktop app's API port) on.
+    pub fn mcp_enabled(&self) -> bool {
+        self.host.preferences.lock().is_ok_and(|p| p.get().mcp)
+    }
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<(&'static str, String)> {
         self.events.subscribe()
     }
