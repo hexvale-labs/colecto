@@ -1,5 +1,5 @@
 //! Installation-local automation policy. Only verifiers are persisted.
-use colecto_core::Database;
+use colecto_core::{Database, Row};
 use colecto_extension_api::Capability;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,15 +25,12 @@ pub struct KeyMetadata {
     pub last_used_at: Option<u64>,
     pub revoked_at: Option<u64>,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 struct StoredKey {
     metadata: KeyMetadata,
     verifier: [u8; 32],
 }
-#[derive(Clone, Default, Serialize, Deserialize)]
-struct Policy {
-    keys: Vec<StoredKey>,
-}
+const MAX_KEYS: usize = 128;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KeyInput {
@@ -42,9 +39,11 @@ pub struct KeyInput {
     pub capabilities: Vec<Capability>,
     pub expires_at: Option<u64>,
 }
+/// The keys are re-read from the database before every decision, so a key revoked by
+/// another session never authenticates here.
 pub struct ApiKeys {
     database: Database,
-    policy: Policy,
+    keys: Vec<StoredKey>,
 }
 pub fn now() -> u64 {
     std::time::SystemTime::now()
@@ -70,43 +69,77 @@ fn valid_metadata(key: &KeyMetadata) -> bool {
         && key.capabilities.len() <= 16
         && key.expires_at.is_none_or(|t| t > key.created_at)
 }
+fn invalid<E>(_: E) -> String {
+    "Invalid API key policy".into()
+}
+fn json_column<T: serde::de::DeserializeOwned>(row: &Row, index: usize) -> Result<T, String> {
+    serde_json::from_str(&row.text(index).map_err(invalid)?).map_err(invalid)
+}
+fn time_column(row: &Row, index: usize) -> Result<Option<u64>, String> {
+    row.optional_integer(index)
+        .map_err(invalid)?
+        .map(|t| u64::try_from(t).map_err(invalid))
+        .transpose()
+}
+fn read_key(row: &Row) -> Result<StoredKey, String> {
+    Ok(StoredKey {
+        metadata: KeyMetadata {
+            id: row.text(0).map_err(invalid)?,
+            name: row.text(1).map_err(invalid)?,
+            accounts: json_column(row, 2)?,
+            capabilities: json_column(row, 3)?,
+            created_at: time_column(row, 4)?.ok_or_else(|| invalid(()))?,
+            expires_at: time_column(row, 5)?,
+            last_used_at: time_column(row, 6)?,
+            revoked_at: time_column(row, 7)?,
+        },
+        verifier: row.blob(8).map_err(invalid)?.try_into().map_err(invalid)?,
+    })
+}
+fn json(value: &impl Serialize) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|e| e.to_string())
+}
+fn to_db(time: u64) -> Result<i64, String> {
+    i64::try_from(time).map_err(|_| "Invalid time".into())
+}
 impl ApiKeys {
     pub fn open(database: Database) -> Result<Self, String> {
-        let policy = crate::store::open(&database, "api-keys", Policy::default, |bytes| {
-            let policy: Policy =
-                serde_json::from_slice(bytes).map_err(|_| "Invalid API key policy")?;
-            if policy.keys.len() > 128
-                || policy.keys.iter().any(|k| !valid_metadata(&k.metadata))
-                || policy.keys.iter().enumerate().any(|(i, k)| {
-                    policy.keys[..i]
-                        .iter()
-                        .any(|v| v.metadata.id == k.metadata.id)
-                })
-            {
-                return Err("Invalid API key policy".into());
-            }
-            Ok(policy)
-        })?;
-        Ok(Self { database, policy })
+        let mut keys = Self {
+            database,
+            keys: Vec::new(),
+        };
+        keys.reload()?;
+        Ok(keys)
     }
     fn reload(&mut self) -> Result<(), String> {
-        self.policy = Policy::default();
-        self.policy = Self::open(self.database.clone())?.policy;
+        self.keys.clear();
+        let keys = self
+            .database
+            .query(
+                "SELECT id,name,accounts,capabilities,created_at,expires_at,last_used_at,revoked_at,verifier FROM api_keys ORDER BY rowid",
+                vec![],
+            )
+            .map_err(|e| e.to_string())?
+            .iter()
+            .map(read_key)
+            .collect::<Result<Vec<_>, _>>()?;
+        if keys.len() > MAX_KEYS || keys.iter().any(|k| !valid_metadata(&k.metadata)) {
+            return Err("Invalid API key policy".into());
+        }
+        self.keys = keys;
         Ok(())
     }
-    fn commit(&mut self, policy: Policy) -> Result<(), String> {
-        let result = crate::store::save(&self.database, "api-keys", &policy)
+    /// Write one change, then re-read: the database stays authoritative either way.
+    fn commit(&mut self, sql: &str, params: Vec<colecto_core::Value>) -> Result<(), String> {
+        let result = self
+            .database
+            .write(vec![(sql, params)])
             .map_err(|_| "Could not persist API key policy".to_string());
-        // The database stays authoritative, whether or not the write landed.
         self.reload()?;
         result
     }
     pub fn list(&self) -> Vec<KeyMetadata> {
-        self.policy
-            .keys
-            .iter()
-            .map(|k| k.metadata.clone())
-            .collect()
+        self.keys.iter().map(|k| k.metadata.clone()).collect()
     }
     pub fn mint(&mut self, input: KeyInput, current: u64) -> Result<(KeyMetadata, String), String> {
         self.reload()?;
@@ -120,16 +153,23 @@ impl ApiKeys {
             last_used_at: None,
             revoked_at: None,
         };
-        if !valid_metadata(&metadata) || self.policy.keys.len() >= 128 {
+        if !valid_metadata(&metadata) || self.keys.len() >= MAX_KEYS {
             return Err("Use a name of 1–80 bytes, explicit accounts and capabilities, and a future expiry; at most 128 keys are retained".into());
         }
         let secret = format!("colecto_{}.{}", metadata.id, random()?);
-        let mut policy = self.policy.clone();
-        policy.keys.push(StoredKey {
-            metadata: metadata.clone(),
-            verifier: Sha256::digest(secret.as_bytes()).into(),
-        });
-        self.commit(policy)?;
+        let verifier: [u8; 32] = Sha256::digest(secret.as_bytes()).into();
+        self.commit(
+            "INSERT INTO api_keys(id,name,accounts,capabilities,created_at,expires_at,verifier) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            vec![
+                metadata.id.as_str().into(),
+                metadata.name.as_str().into(),
+                json(&metadata.accounts)?.into(),
+                json(&metadata.capabilities)?.into(),
+                to_db(metadata.created_at)?.into(),
+                metadata.expires_at.map(to_db).transpose()?.into(),
+                verifier.to_vec().into(),
+            ],
+        )?;
         Ok((metadata, secret))
     }
     pub fn authenticate(&mut self, secret: &str, current: u64) -> Result<Principal, String> {
@@ -139,13 +179,11 @@ impl ApiKeys {
             .and_then(|s| s.split_once('.'))
             .map(|(id, _)| id)
             .ok_or("Invalid API key")?;
-        let index = self
-            .policy
+        let key = self
             .keys
             .iter()
-            .position(|k| k.metadata.id == id)
+            .find(|k| k.metadata.id == id)
             .ok_or("Invalid API key")?;
-        let key = &self.policy.keys[index];
         let digest: [u8; 32] = Sha256::digest(secret.as_bytes()).into();
         if digest.ct_eq(&key.verifier).unwrap_u8() != 1
             || key.metadata.revoked_at.is_some()
@@ -159,9 +197,10 @@ impl ApiKeys {
             .last_used_at
             .is_none_or(|t| current.saturating_sub(t) >= 60)
         {
-            let mut policy = self.policy.clone();
-            policy.keys[index].metadata.last_used_at = Some(current);
-            self.commit(policy)?;
+            self.commit(
+                "UPDATE api_keys SET last_used_at=?2 WHERE id=?1",
+                vec![id.into(), to_db(current)?.into()],
+            )?;
         }
         Ok(Principal::ApiKey(id.into()))
     }
@@ -175,7 +214,7 @@ impl ApiKeys {
         if self.reload().is_err() {
             return false;
         }
-        self.policy.keys.iter().any(|k| {
+        self.keys.iter().any(|k| {
             k.metadata.id == id
                 && k.metadata.revoked_at.is_none()
                 && k.metadata.expires_at.is_none_or(|t| t > current)
@@ -185,14 +224,12 @@ impl ApiKeys {
     }
     pub fn revoke(&mut self, id: &str, current: u64) -> Result<(), String> {
         self.reload()?;
-        let mut policy = self.policy.clone();
-        let key = policy
-            .keys
-            .iter_mut()
-            .find(|k| k.metadata.id == id)
-            .ok_or("API key not found")?;
-        key.metadata.revoked_at = Some(current);
-        self.commit(policy)?;
-        Ok(())
+        if !self.keys.iter().any(|k| k.metadata.id == id) {
+            return Err("API key not found".into());
+        }
+        self.commit(
+            "UPDATE api_keys SET revoked_at=?2 WHERE id=?1",
+            vec![id.into(), to_db(current)?.into()],
+        )
     }
 }

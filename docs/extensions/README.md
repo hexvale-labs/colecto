@@ -362,7 +362,10 @@ invalid defaults reject the manifest.
 `{key: value}` object, and unknown keys or invalid values reject the whole update. The
 owner and the extension itself (with its credential) may use them. Values persist per
 extension, merge over defaults, are deleted on removal, and each change emits
-`extension.settings` with `{id}`; the client part then receives `settings`. Service
+`extension.settings` with `{id}`; the client part then receives `settings`. Only values
+someone set are stored, so a later default reaches everyone who never changed it. The
+owner returns settings to their defaults from Settings
+(`POST /api/v1/extensions/{id}/settings/reset`, owner only). Service
 parts read them with `{"operation":"settings.read"}`.
 
 Without `[settings_page]`, an extension with settings gets a generated page in Settings:

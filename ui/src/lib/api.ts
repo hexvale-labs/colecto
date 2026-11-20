@@ -72,7 +72,7 @@ export type Corner = 'top-left' | 'top' | 'top-right' | 'right' | 'bottom-right'
 export interface NotificationPreferences { enabled: boolean; system: boolean; position: Corner }
 /** Message list rows: two lines with a preview, a shorter version, or one line. */
 export type ListDensity = 'full' | 'medium' | 'compact';
-export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; text_spacing: TextSpacing; notifications: NotificationPreferences; remote_images: boolean; list_density: ListDensity; date_groups: boolean; notified_release: string | null; accounts_enabled: Record<string, boolean>; onboarded: boolean; prefetch: PrefetchPreferences }
+export interface Preferences { mcp: boolean; account: string | null; workspace: unknown; accent: string | null; font: string | null; font_size: number | null; text_spacing: TextSpacing; notifications: NotificationPreferences; remote_images: boolean; list_density: ListDensity; date_groups: boolean; notified_release: string | null; accounts_enabled: Record<string, boolean>; onboarded: boolean; prefetch: PrefetchPreferences; /** Setting keys the owner changed, such as `notifications.position`; the rest follow the defaults. */ changed: string[] }
 /** A stable release newer than the running build, from the Host's cached GitHub check. */
 export interface LatestRelease { current: string; latest: { version: string; url: string } | null }
 /** Accounts the owner never switched use this: the demo account starts off, every other account on. */
@@ -81,7 +81,7 @@ export const accountOn = (choices: Record<string, boolean>, id: string) => choic
 export interface PrefetchPreferences { enabled: boolean; count: number }
 /** An empty accent restores the default. */
 /** `accounts_enabled` entries are merged into the stored choices. */
-export type PreferencesInput = Partial<Omit<Preferences, 'accent'>> & { accent?: string; /** Setting keys, such as `notifications.position`, to return to their defaults. */ reset?: string[] };
+export type PreferencesInput = Partial<Omit<Preferences, 'accent' | 'changed'>> & { accent?: string; /** Setting keys, such as `notifications.position`, to return to their defaults. */ reset?: string[] };
 export const hostService = {
   preferences: () => request<Preferences>('host', 'demo', '/preferences'),
   savePreferences: (input: PreferencesInput) => request<Preferences>('host', 'demo', '/preferences', input),
@@ -137,6 +137,8 @@ async function uploadExtension<T>(path: string, pkg: Uint8Array): Promise<T> {
 export const extensionHost = {
   settings: (id: string) => request<ExtensionSettings>("host", "demo", `/extensions/${encodeURIComponent(id)}/settings`),
   saveSettings: (id: string, values: ExtensionSettings["values"]) => request<ExtensionSettings>("host", "demo", `/extensions/${encodeURIComponent(id)}/settings`, values, "PUT"),
+  /** Owner only: return settings to their defaults. */
+  resetSettings: (id: string, keys: string[]) => request<ExtensionSettings>("host", "demo", `/extensions/${encodeURIComponent(id)}/settings/reset`, { keys }),
   /** `pkg` is a .colectoext file: a zip with manifest.toml, client/ and an optional service module. */
   install: (pkg: Uint8Array) => uploadExtension<boolean>('', pkg),
   review: (pkg: Uint8Array) => uploadExtension<ExtensionReview>('/review', pkg),

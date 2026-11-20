@@ -84,8 +84,13 @@
   $effect(() => { applySpacing(spacing); });
   $effect(() => { if (accent) document.documentElement.style.setProperty('--mint', accent); else document.documentElement.style.removeProperty('--mint'); runtimes.refreshTheme(); });
   $effect(() => { notificationPosition.value = notificationPrefs.position; });
+  /** Setting keys the owner changed; Settings offers to reset the ones on its page. */
+  let changedPrefs = $state<string[]>([]);
+  /** The changed keys among `roots` and the settings nested under them. */
+  const changedIn = (...roots: string[]) => changedPrefs.filter(key => roots.some(root => key === root || key.startsWith(`${root}.`)));
   /** The saved preferences that change how Colecto looks and notifies. */
   function applyLook(saved: Preferences | null) {
+    changedPrefs = saved?.changed ?? [];
     accent = saved?.accent ?? null;
     font = saved?.font || DEFAULT_FONT; textSize = saved?.font_size || DEFAULT_TEXT_SIZE;
     spacing = { ...NO_SPACING, ...saved?.text_spacing };
@@ -97,7 +102,10 @@
     if (input.font_size) textSize = input.font_size;
     if (input.text_spacing) spacing = input.text_spacing;
     if (input.notifications) notificationPrefs = input.notifications;
-    void hostService.savePreferences(input).catch(e => notify({ title: 'Could not save your preference', body: (e as Error).message }));
+    void hostService.savePreferences(input).then(saved => changedPrefs = saved.changed ?? []).catch(e => notify({ title: 'Could not save your preference', body: (e as Error).message }));
+  }
+  function resetPreferences(reset: string[]) {
+    void hostService.savePreferences({ reset }).then(applyLook).catch(e => notify({ title: 'Could not reset your settings', body: (e as Error).message }));
   }
 
   // ---- Workspace ----
@@ -462,12 +470,12 @@
               <section class="settings-section" aria-labelledby="extension-page-title"><header class="section-head"><h2 id="extension-page-title">{currentExtension.manifest.settings_page.title}</h2><p class="extension-from">From {pageRuntime.name}</p></header><Surface runtime={pageRuntime} surface="settings" /></section>
             {:else if currentExtension}{#key settingsPage}<ExtensionSettings manifest={currentExtension.manifest} />{/key}{:else}<p class="content-note">This extension is off or was removed.</p>{/if}
           {:else if settingsPage === 'accounts'}<AccountSettings {accounts} {security} pane={{ shown: shownPane('accounts'), toggle: (on) => workspace.toggle('accounts', on) }} enabled={isOn} ontoggle={toggleAccount} onrefresh={refreshAccounts} ondirty={(value) => settingsDirty = value} onbusy={(value) => settingsBusy = value} />
-          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} {spacing} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences}>{#each contributors('appearance') as extension (extension.manifest.id)}<ExtensionSettings manifest={extension.manifest} section="appearance" bundled={extension.bundled} />{/each}</AppearanceSettings>
+          {:else if settingsPage === 'appearance'}<AppearanceSettings value={accent} {font} {textSize} {spacing} changed={changedIn('font', 'font_size', 'text_spacing')} onreset={resetPreferences} onchange={(next) => savePreferences({ accent: next })} ontypography={savePreferences}>{#each contributors('appearance') as extension (extension.manifest.id)}<ExtensionSettings manifest={extension.manifest} section="appearance" bundled={extension.bundled} />{/each}</AppearanceSettings>
           {:else if settingsPage === 'notifications'}
             <section class="settings-section" aria-labelledby="notifications-title">
               <header class="section-head"><h2 id="notifications-title">Notifications</h2><p>Choose what Colecto tells you about, where it shows notifications and whether they reach your desktop.</p></header>
               {#each contributors('notifications') as extension (extension.manifest.id)}<ExtensionSettings manifest={extension.manifest} section="notifications" bundled={extension.bundled} />{/each}
-              <ToastSettings value={notificationPrefs} onchange={(next) => savePreferences({ notifications: next })} />
+              <ToastSettings value={notificationPrefs} changed={changedIn('notifications.system', 'notifications.position').length > 0} onchange={(next) => savePreferences({ notifications: next })} onreset={() => resetPreferences(changedIn('notifications.system', 'notifications.position'))} />
             </section>
           {:else if settingsPage === 'servers'}<ServerSettings />
           {:else if settingsPage === 'send-approvals'}<SendApprovals requestId={reviewRequest} />

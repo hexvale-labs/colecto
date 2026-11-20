@@ -748,8 +748,14 @@ fn key_secrets_are_not_persisted_and_expiry_revocation_survive_restart() {
             100,
         )
         .unwrap();
-    let persisted =
-        String::from_utf8(database.get_record("host", "api-keys").unwrap().unwrap()).unwrap();
+    let persisted = database
+        .query(
+            "SELECT id||name||accounts||capabilities||hex(verifier) FROM api_keys",
+            vec![],
+        )
+        .unwrap()[0]
+        .text(0)
+        .unwrap();
     assert!(!persisted.contains(&secret));
     assert!(!persisted.contains(secret.split_once('.').unwrap().1));
     assert!(
@@ -790,16 +796,36 @@ fn missing_and_corrupt_policy_reject_existing_key_and_recent_use_does_not_rewrit
         )
         .unwrap();
     keys.authenticate(&secret, 100).unwrap();
-    let record = || database.get_record("host", "api-keys").unwrap();
-    let policy = record().unwrap();
+    let last_used = || {
+        database
+            .query("SELECT last_used_at FROM api_keys", vec![])
+            .unwrap()[0]
+            .integer(0)
+            .unwrap()
+    };
     keys.authenticate(&secret, 101).unwrap();
-    assert_eq!(record().unwrap(), policy);
+    assert_eq!(last_used(), 100);
     assert_eq!(keys.list()[0].last_used_at, Some(100));
-    database.set_record("host", "api-keys", b"corrupt").unwrap();
+    let verifier = database
+        .query("SELECT verifier FROM api_keys", vec![])
+        .unwrap()[0]
+        .blob(0)
+        .unwrap();
+    let set = |value: Vec<u8>| {
+        database
+            .write(vec![(
+                "UPDATE api_keys SET verifier=?1",
+                vec![value.into()],
+            )])
+            .unwrap()
+    };
+    set(b"corrupt".to_vec());
     assert!(keys.authenticate(&secret, 102).is_err());
-    database.set_record("host", "api-keys", &policy).unwrap();
+    set(verifier);
     assert!(keys.authenticate(&secret, 102).is_ok());
-    database.remove_record("host", "api-keys").unwrap();
+    database
+        .write(vec![("DELETE FROM api_keys", vec![])])
+        .unwrap();
     assert!(keys.authenticate(&secret, 103).is_err());
 }
 

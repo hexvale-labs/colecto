@@ -46,16 +46,18 @@ On open, `Database::open`:
 
 ### Adding a migration
 
-1. Add the next file, for example `0002_drafts_table.sql`, and list it in `MIGRATIONS`
+1. Add the next file, for example `0003_contacts.sql`, and list it in `MIGRATIONS`
    in `database.rs`. Never edit a migration that has shipped.
-2. Convert data the owner made (drafts, labels, accounts, keys, settings). Caches
+2. Convert data the owner made (drafts, labels, accounts, keys, settings) in SQL;
+   `0002_tables.sql` shows how to read the JSON of a `records` row with `json_each`. Caches
    (`snapshots`, `message_content`, `mailbox_identity`, the `folders` record) can be
    emptied instead, since a refresh refetches them.
 3. Run `cargo test -p colecto-core --test single_database -- --ignored write_schema_fixture`
    and commit the new `crates/colecto-core/tests/fixtures/schema/v<N>/colecto.db`.
    `every_schema_fixture_opens_and_keeps_its_data` opens every fixture with the current
-   build and checks its drafts, labels and settings survive. Extend the sample data when
-   a migration converts something the fixtures do not hold yet.
+   build and checks its drafts, labels, settings, API keys and send approvals survive.
+   Extend the sample data when a migration converts something the fixtures do not hold
+   yet.
 
 Turso is still pre-1.0 and pinned to an exact version in `Cargo.toml`, so an upgrade is
 deliberate and the fixture test shows whether it still reads every schema version.
@@ -74,6 +76,11 @@ they keep the file readable this way.
 | --- | --- | --- |
 | `records` | `namespace`, `name` | Small documents owned by Core or the Host, as bytes (see below) |
 | `settings` | `scope`, `key` | Settings the owner changed; `value` is JSON |
+| `drafts` | `account`, `id` | One row per draft; `id` is the number in `draft-<id>` |
+| `labels` | `account`, `name` | Local labels, at most 50 per account |
+| `label_messages` | `account`, `label`, `message` | Messages in each label, at most 1000 per label, in the order they were added (`rowid`) |
+| `api_keys` | `id` | API key metadata and the SHA-256 `verifier` of the secret; `accounts` and `capabilities` are JSON arrays |
+| `send_approvals` | `id` | Send-approval journal: the reviewed message (`snapshot`, JSON) and its `status`; rows older than 24 hours are deleted |
 | `snapshots` | `account`, `provider`, `folder` | Cached Inbox/Sent listings with `fetched_at` |
 | `mailbox_identity` | `account`, `provider`, `folder` | IMAP `UIDVALIDITY` and similar identities that invalidate a snapshot |
 | `message_content` | `account`, `provider`, `id` | Raw cached messages, oldest evicted first |
@@ -87,9 +94,8 @@ they keep the file readable this way.
 | Namespace | Name | Contents |
 | --- | --- | --- |
 | `core` | `vault` | Account registry and the XChaCha20-Poly1305 credential vault (format version 1 inside) |
-| `account:<id>` | `drafts`, `labels`, `folders` | Drafts, local labels, the last successful folder discovery |
+| `account:<id>` | `folders` | The last successful folder discovery |
 | `host` | `extensions`, `extension-settings`, `extension-storage` | Disabled extensions and installed packages' manifests, extension settings the owner changed, each extension's key-value store |
-| `host` | `api-keys`, `send-approvals` | API key verifiers and metadata, the send-approval journal |
 | `host` | `ai-summaries` | Saved AI summaries |
 | `extension-packages` | `<extension id>` | Installed package bytes |
 
@@ -115,6 +121,11 @@ default in a release reaches everyone who never changed that setting.
 - On load, a stored key the build no longer knows, or a value that no longer
   validates, is skipped with a warning and the default applies. Settings never stop
   Colecto from starting.
+- `GET` and `POST /api/v1/preferences` return the preferences plus `changed`, the keys
+  stored now. Settings shows a reset for a group once one of its keys is in `changed`.
+- Extension settings follow the same rule: `PUT /api/v1/extensions/{id}/settings`
+  stores the values sent, and the owner-only
+  `POST /api/v1/extensions/{id}/settings/reset` with `{"keys": […]}` forgets them.
 
 The helpers are `load_settings` and `save_settings` in `crates/colecto-host/src/store.rs`.
 
@@ -146,7 +157,7 @@ discovery fails; counts describe that discovery, not necessarily the server now.
 ## Account removal
 
 Removal commits the registry and secret deletion first, then deletes the account's
-`snapshots`, `mailbox_identity` and `message_content` rows and every record in
-`account:<id>` in one transaction (`Database::remove_account_data`, safe to retry). A
+`snapshots`, `mailbox_identity`, `message_content`, `drafts`, `labels` and
+`label_messages` rows and every record in `account:<id>` in one transaction (`Database::remove_account_data`, safe to retry). A
 cleanup failure does not restore the account. Other accounts and the mail server are
 untouched.

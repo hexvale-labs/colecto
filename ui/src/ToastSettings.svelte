@@ -4,7 +4,7 @@
   import CornerPicker from './CornerPicker.svelte';
   import type { NotificationPreferences } from './lib/api';
   import { notify } from './shell/toast-store.svelte';
-  let { value, onchange }: { value: NotificationPreferences; onchange: (next: NotificationPreferences) => void } = $props();
+  let { value, changed, onchange, onreset }: { value: NotificationPreferences; /** Whether any of these differ from the defaults. */ changed: boolean; onchange: (next: NotificationPreferences) => void; onreset: () => void } = $props();
   let note = $state('');
   const supported = typeof Notification === 'function';
   const set = (change: Partial<NotificationPreferences>) => onchange({ ...value, ...change });
@@ -28,4 +28,5 @@
     <CornerPicker value={value.position} onchange={(position) => set({ position })} />
     <button type="button" class="text-button" onclick={() => notify({ title: 'This is where notifications appear', body: 'Pick another spot above to move them.' })}>Show a test notification</button>
   </div>
+  {#if changed}<button type="button" class="text-button" onclick={onreset}>Reset to defaults</button>{/if}
 </div>

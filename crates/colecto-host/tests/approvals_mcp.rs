@@ -36,19 +36,12 @@ impl SecretStore for Secrets {
     }
 }
 /// Change the fixture key's stored policy, as another owner session would.
-fn edit_keys(database: &colecto_core::Database, id: &str, change: impl FnOnce(&mut Value)) {
-    let mut policy: Value =
-        serde_json::from_slice(&database.get_record("host", "api-keys").unwrap().unwrap()).unwrap();
-    change(
-        policy["keys"]
-            .as_array_mut()
-            .unwrap()
-            .iter_mut()
-            .find(|key| key["metadata"]["id"] == id)
-            .unwrap(),
-    );
+fn edit_key(database: &colecto_core::Database, id: &str, column: &str, value: colecto_core::Value) {
     database
-        .set_record("host", "api-keys", &serde_json::to_vec(&policy).unwrap())
+        .write(vec![(
+            &format!("UPDATE api_keys SET {column}=?2 WHERE id=?1"),
+            vec![id.into(), value],
+        )])
         .unwrap();
 }
 struct Fixture {
@@ -308,9 +301,12 @@ async fn revocation_disconnect_and_expiry_prevent_submission() {
                 );
             }
             "missing-grant" => {
-                edit_keys(&service.database(), &f.key, |key| {
-                    key["metadata"]["capabilities"] = json!(["messages.list"])
-                });
+                edit_key(
+                    &service.database(),
+                    &f.key,
+                    "capabilities",
+                    r#"["messages.list"]"#.into(),
+                );
             }
             "disconnected" => {
                 assert_eq!(
@@ -658,9 +654,12 @@ async fn sdk_interop(expire: bool) {
     assert!(!result.is_error.unwrap_or(false));
     if expire {
         let expires_at = now() + 1;
-        edit_keys(&service.database(), &f.key, |key| {
-            key["metadata"]["expires_at"] = json!(expires_at)
-        });
+        edit_key(
+            &service.database(),
+            &f.key,
+            "expires_at",
+            (expires_at as i64).into(),
+        );
         while now() < expires_at {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }

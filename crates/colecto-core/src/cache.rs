@@ -333,13 +333,10 @@ mod tests {
     fn future_database_is_rejected() {
         let directory = tempfile::tempdir().unwrap();
         let cache = MailCacheStore::open(directory.path()).unwrap();
-        futures_executor::block_on(
-            cache
-                .database
-                .connection()
-                .unwrap()
-                .execute("PRAGMA user_version=2", ()),
-        )
+        futures_executor::block_on(cache.database.connection().unwrap().execute(
+            &format!("PRAGMA user_version={}", crate::SCHEMA_VERSION + 1),
+            (),
+        ))
         .unwrap();
         drop(cache);
         assert!(MailCacheStore::open(directory.path()).is_err());

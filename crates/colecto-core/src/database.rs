@@ -12,9 +12,51 @@ const MAX_RECORD_BYTES: usize = 32_000_000;
 pub const APPLICATION_ID: i64 = 0x434F_4C45;
 /// Schema steps in order. `PRAGMA user_version` counts the steps already applied. A step
 /// that has shipped never changes; a schema change adds the next file.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_initial.sql"),
+    include_str!("../migrations/0002_tables.sql"),
+];
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
+pub use turso::Value;
+
+/// One result row of [`Database::query`].
+pub struct Row(Vec<Value>);
+impl Row {
+    fn value(&self, index: usize) -> Result<&Value, Error> {
+        self.0
+            .get(index)
+            .ok_or_else(|| storage("Missing database column"))
+    }
+    pub fn text(&self, index: usize) -> Result<String, Error> {
+        self.optional_text(index)?
+            .ok_or_else(|| storage("Unexpected empty database column"))
+    }
+    pub fn optional_text(&self, index: usize) -> Result<Option<String>, Error> {
+        match self.value(index)? {
+            Value::Null => Ok(None),
+            Value::Text(text) => Ok(Some(text.clone())),
+            _ => Err(storage("Expected a text database column")),
+        }
+    }
+    pub fn integer(&self, index: usize) -> Result<i64, Error> {
+        self.optional_integer(index)?
+            .ok_or_else(|| storage("Unexpected empty database column"))
+    }
+    pub fn optional_integer(&self, index: usize) -> Result<Option<i64>, Error> {
+        match self.value(index)? {
+            Value::Null => Ok(None),
+            Value::Integer(number) => Ok(Some(*number)),
+            _ => Err(storage("Expected an integer database column")),
+        }
+    }
+    pub fn blob(&self, index: usize) -> Result<Vec<u8>, Error> {
+        match self.value(index)? {
+            Value::Blob(bytes) => Ok(bytes.clone()),
+            _ => Err(storage("Expected a blob database column")),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Database {
@@ -179,6 +221,33 @@ impl Database {
             transaction.commit().await.map_err(storage)
         })
     }
+    /// Run one statement against the schema in `migrations/` and return its rows. For Core
+    /// and the Host only; clients and extensions never send SQL.
+    pub fn query(&self, sql: &str, params: Vec<Value>) -> Result<Vec<Row>, Error> {
+        let connection = self.connection()?;
+        futures_executor::block_on(async {
+            let mut rows = connection.query(sql, params).await.map_err(storage)?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().await.map_err(storage)? {
+                out.push(Row((0..row.column_count())
+                    .map(|index| row.get_value(index))
+                    .collect::<Result<_, _>>()
+                    .map_err(storage)?));
+            }
+            Ok(out)
+        })
+    }
+    /// Run statements in one transaction: all of them apply, or none.
+    pub fn write(&self, statements: Vec<(&str, Vec<Value>)>) -> Result<(), Error> {
+        let mut connection = self.connection()?;
+        futures_executor::block_on(async {
+            let transaction = connection.transaction().await.map_err(storage)?;
+            for (sql, params) in statements {
+                transaction.execute(sql, params).await.map_err(storage)?;
+            }
+            transaction.commit().await.map_err(storage)
+        })
+    }
     /// Delete local account data. Safe to retry after a partial removal.
     pub fn remove_account_data(&self, account: &str) -> Result<(), Error> {
         let namespace = format!("account:{account}");
@@ -189,6 +258,9 @@ impl Database {
                 "DELETE FROM snapshots WHERE account=?1",
                 "DELETE FROM mailbox_identity WHERE account=?1",
                 "DELETE FROM message_content WHERE account=?1",
+                "DELETE FROM drafts WHERE account=?1",
+                "DELETE FROM labels WHERE account=?1",
+                "DELETE FROM label_messages WHERE account=?1",
             ] {
                 transaction.execute(sql, [account]).await.map_err(storage)?;
             }
