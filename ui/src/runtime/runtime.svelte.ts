@@ -58,8 +58,9 @@ export class ExtensionRuntime {
   /** What each surface reported with `state`. */
   states = $state<Record<string, SurfaceState>>({});
   dialog = $state<Node | null>(null);
-  /** A row's context menu: asked for with a `context` event, filled by the extension's `menu`. */
-  menu = $state<{ surface: string; node: string; key: string; x: number; y: number; items: MenuItem[] | null } | null>(null);
+  /** A row's context menu: asked for with a `context` event, filled by the extension's `menu`.
+   *  A menu with `choose` is the renderer's own (a component's built-in actions). */
+  menu = $state<{ surface: string; node: string; key: string; x: number; y: number; items: MenuItem[] | null; label?: string; choose?: (item: string) => void } | null>(null);
   /** Its contributions to other extensions' slots, by full slot name (`reader/v1/actions`). */
   contributions = $state<Record<string, Node | null>>({});
   commands = $state<Command[]>([]);
@@ -168,10 +169,15 @@ export class ExtensionRuntime {
     this.menu = { surface, node, key, x, y, items: null };
     this.event(surface, node, 'context', { key });
   }
+  /** A menu of a component's built-in actions, answered by the renderer, not the extension. */
+  localMenu(x: number, y: number, label: string, items: MenuItem[], choose: (item: string) => void) {
+    this.menu = { surface: '', node: '', key: '', x, y, items, label, choose };
+  }
   chooseMenu(item: string) {
     const menu = this.menu;
     this.menu = null;
-    if (menu) this.event(menu.surface, menu.node, 'menu', { key: menu.key, item });
+    if (menu?.choose) menu.choose(item);
+    else if (menu) this.event(menu.surface, menu.node, 'menu', { key: menu.key, item });
   }
 
   event(surface: string, node: string, kind: string, value?: unknown) {

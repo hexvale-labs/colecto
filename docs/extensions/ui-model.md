@@ -377,7 +377,7 @@ These are data, not trees; the shell draws them with its own components.
 
 ## Component vocabulary
 
-Every component and prop below is public API 1. Unknown types, props or values reject
+Every component and prop below is public API 1 unless marked otherwise. Unknown types, props or values reject
 the message (see [Limits](#limits)). Strings are always text: the renderer never turns
 them into HTML, CSS, URLs or script.
 
@@ -407,7 +407,7 @@ them into HTML, CSS, URLs or script.
 | `fieldset` | `legend`, `legend_hidden`, `disabled` | `fieldset` | Message labels, compose fields, AI options |
 | `form` | `role` (`search`, none) | `form`; Enter or a `submit` button sends `submit` with `{values: {id: value}}` | Search, new label, composer, label editor |
 | `nav` | `label`, `items: [{id, label, icon, current, count, disabled}]`, `placement` (`inline`, `bottom`) | `nav` of buttons with `aria-current` | Folder navigation, bottom bar |
-| `tabs` | `label`, `items: [{id, label, title, active, closable}]`, `close_all` | Message tab strip | Reader message tabs |
+| `tabs` | `label`, `items: [{id, label, title, active, closable}]`, `close_all` | Message tab strip; a vertical wheel scrolls it sideways. With `close_all`, right-clicking a tab (or Shift+F10) offers **Close tab** and **Close all tabs**, which send the same `close` and `close_all` events as the strip's buttons | Reader message tabs |
 
 ### Text and media
 
@@ -446,13 +446,19 @@ There is no password input: Colecto never asks for credentials inside extension 
 
 | Type | Props | Events |
 | --- | --- | --- |
-| `list` | `label`, `mode` (`static`: `ul`/`li`; `virtual`), `rows: [{key, kind: "row"\|"heading", node}]`, `selected` (a row key), `selection` (`none`, `single`), `arrived` (row keys to animate in), `context_menu` | `select` with `{key}`; `context` and `menu` with `{key}` / `{key, item}` |
+| `list` | `label`, `mode` (`static`: `ul`/`li`; `virtual`), `rows: [{key, kind: "row"\|"heading", node}]`, `selected` (a row key), `selection` (`none`, `single`), `arrived` (row keys to animate in), `context_menu`, `more` (API 2: `available`, `loading`, `end`, `error`) | `select` with `{key}`; `context` and `menu` with `{key}` / `{key, item}`; `end` (API 2) |
 | `message_row` | `sender`, `date`, `date_title`, `subject`, `preview`, `unread`, `starred`, `density` (`full`, `medium`, `compact`) | Inside a `list` row; renders as today's `button.mail-item` with `aria-pressed` |
 
 A `virtual` list renders all rows below 200 and virtualizes above that, measuring one
 row per kind and density. Below the threshold the DOM and accessibility tree match
 today's fully rendered list; above it, rows outside the viewport and overscan are not
 in the DOM. Lists accept up to 100,000 rows; row changes go through the `rows` patch.
+
+`more` (API 2) lets a list grow at its end. While it is `available`, scrolling within a
+screen of the end sends `end`, once for each number of rows, so a page that adds nothing
+does not ask again. `loading`, `end` and `error` draw a line under the rows ("Loading
+older messages…", "No older messages", or an error with **Try again**, which sends `end`
+again).
 
 ### States and overlays
 

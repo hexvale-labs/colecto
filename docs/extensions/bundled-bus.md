@@ -33,12 +33,12 @@ extensions talk to each other, not how they talk to Colecto.
 | `reader` | `v1/viewing` | Event | `{account,message_id}` (`null` when nothing is shown) | API 1 |
 | `reader` | `v1/labels` | Event | `{account}`: the reader changed labels | API 1 |
 | `inbox` | `v1/open` | Request | `{account?,message_id}`: switch to Inbox and open the message | API 1 |
-| `inbox` | `v1/selected` | Event | `{account,message_id,folder,subject}` | API 1 |
-| `inbox` | `v1/listed` | Event | `{account,folder,ids}`: the first rows to prefetch | API 1 |
+| `inbox` | `v1/selected` | Event | `{account,message_id,folder,subject}`: `folder` is the name shown, such as `Inbox` or a provider folder's name | API 1 |
+| `inbox` | `v1/listed` | Event | `{account,folder,ids}`: the first rows to prefetch; `folder` is `inbox`, `sent` or a provider folder id | API 1 |
 | `inbox` | `v1/labels` | Event | `{account}`: the inbox changed labels | API 1 |
 | `inbox` | `v1/add_row_action` | Request | `{id,label,icon?}` → `true`: add an entry to every message's menu; at most 4 per extension, labels cut to 64 characters | API 1 |
 | `inbox` | `v1/remove_row_action` | Request | `{id?}` → `true`: remove one of the caller's entries, or all of them | API 1 |
-| `inbox` | `v1/row_action` | Event | `{extension,action,account,message_id,folder}`: someone picked an added entry; only `extension` should act | API 1 |
+| `inbox` | `v1/row_action` | Event | `{extension,action,account,message_id,folder}`: someone picked an added entry; only `extension` should act. `folder` is `inbox`, `sent`, `drafts` or a provider folder id | API 1 |
 | `inbox` | `v1/ready` | Event | `{}`: the inbox started; add row actions again | API 1 |
 | `notifications` | `v1/notify` | Request | `{title,body}` | API 1 |
 | `ai` | `v1/labeled` | Event | `{account}`: the AI service part auto-labelled new mail | API 1 |

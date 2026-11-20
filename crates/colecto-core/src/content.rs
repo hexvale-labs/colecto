@@ -169,16 +169,11 @@ impl ContentCache {
         })
     }
     /// After an IMAP UIDVALIDITY change, drop the folder's messages from the old identity.
-    pub(crate) fn keep_identity(
-        &self,
-        provider: &str,
-        folder: &str,
-        identity: &str,
-    ) -> Result<(), Error> {
+    pub(crate) fn keep_identity(&self, provider: &str, identity: &str) -> Result<(), Error> {
         let stale: Vec<String> = self
             .ids(provider)?
             .into_iter()
-            .filter(|id| crate::imap_folder_id(id, folder) && !id.starts_with(identity))
+            .filter(|id| crate::imap_same_mailbox(id, identity) && !id.starts_with(identity))
             .collect();
         self.remove(provider, &stale)
     }
@@ -206,9 +201,14 @@ mod tests {
             vec!["imap-7-9".to_owned()]
         );
         // A new Inbox UIDVALIDITY removes old Inbox rows but keeps other folders.
-        cache.keep_identity("p", "inbox", "imap-8-").unwrap();
+        cache.keep_identity("p", "imap-8-").unwrap();
         assert!(cache.get("p", "imap-7-1").unwrap().is_none());
         assert!(cache.get("p", "imap-4f-7-3").unwrap().is_some());
+        // A new validity in one other folder keeps every other folder's rows.
+        cache.put("p", "imap-5a-7-4", b"another folder").unwrap();
+        cache.keep_identity("p", "imap-4f-8-").unwrap();
+        assert!(cache.get("p", "imap-4f-7-3").unwrap().is_none());
+        assert!(cache.get("p", "imap-5a-7-4").unwrap().is_some());
         cache.put("q", "jmap-1", b"other provider").unwrap();
         cache.keep_provider("q").unwrap();
         assert!(cache.get("p", "imap-4f-7-3").unwrap().is_none());

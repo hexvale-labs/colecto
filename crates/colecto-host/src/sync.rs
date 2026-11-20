@@ -231,6 +231,7 @@ pub(crate) fn refresh(
     account: &str,
     folder: &str,
     search: &str,
+    offset: usize,
     origin: Origin,
 ) -> Result<Option<Vec<Message>>, Error> {
     let store = host
@@ -240,13 +241,13 @@ pub(crate) fn refresh(
         .store(account)?;
     let job = {
         let mut guard = store.lock().map_err(|_| Error::Missing)?;
-        match guard.begin_query(folder, search)? {
+        match guard.begin_query(folder, search, offset)? {
             Some(job) => job,
-            None => return guard.query(folder, search).map(Some),
+            None => return guard.query_page(folder, search, offset).map(Some),
         }
     };
-    // Only plain folder refreshes count as syncing; a search is a lookup.
-    let tracked = job.search().is_empty();
+    // Only plain folder refreshes count as syncing; a search or an older page is a lookup.
+    let tracked = job.search().is_empty() && offset == 0;
     if tracked {
         let started = host
             .sync
@@ -475,7 +476,7 @@ mod tests {
     async fn demo_refresh_needs_no_provider_and_prefetch_skips_it() {
         let dir = tempfile::tempdir().unwrap();
         let host = host(dir.path());
-        let messages = refresh(&host, "demo", "inbox", "", Origin::Owner)
+        let messages = refresh(&host, "demo", "inbox", "", 0, Origin::Owner)
             .unwrap()
             .unwrap();
         assert_eq!(messages.len(), 4);

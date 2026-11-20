@@ -18,6 +18,15 @@
     void tick().then(() => items()[0]?.focus());
     return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus(); };
   });
+  // A right-click while a menu is open lands on this scrim, not on the row under it, and used
+  // to only close the menu (#133). Close it and pass the click on, as a desktop menu does.
+  function reopen(event: MouseEvent) {
+    event.preventDefault();
+    runtime.menu = null;
+    const scrim = event.currentTarget as Element;
+    const below = document.elementsFromPoint(event.clientX, event.clientY).find(element => element !== scrim && !menu?.contains(element));
+    below?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY, button: 2 }));
+  }
   function keydown(event: KeyboardEvent) {
     const buttons = items();
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -29,8 +38,8 @@
 </script>
 
 <svelte:window onresize={() => runtime.menu = null} onblur={() => runtime.menu = null} />
-<div class="select-scrim" aria-hidden="true" onpointerdown={() => runtime.menu = null} oncontextmenu={(event) => { event.preventDefault(); runtime.menu = null; }}></div>
-<div bind:this={menu} bind:clientWidth={size.width} bind:clientHeight={size.height} class="select-menu context-menu" class:still={reduced} role="menu" tabindex="-1" aria-label="Message actions" style:left={`${left}px`} style:top={`${top}px`} onkeydown={keydown}>
+<div class="select-scrim" aria-hidden="true" onpointerdown={() => runtime.menu = null} oncontextmenu={reopen}></div>
+<div bind:this={menu} bind:clientWidth={size.width} bind:clientHeight={size.height} class="select-menu context-menu" class:still={reduced} role="menu" tabindex="-1" aria-label={runtime.menu!.label ?? 'Message actions'} style:left={`${left}px`} style:top={`${top}px`} onkeydown={keydown}>
   {#each runtime.menu!.items ?? [] as item (item.id)}
     {#if item.separator}<div class="context-separator" role="separator"></div>{/if}
     <button role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={item.checked} class:destructive={item.danger} disabled={item.disabled} onclick={() => runtime.chooseMenu(item.id)}>

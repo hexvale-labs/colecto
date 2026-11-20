@@ -4,7 +4,9 @@ import { app, bus, call, clip, type Node, type Row } from '../../../extension-sd
 import { when } from '../../../lib/when';
 import type { AccountSync, Draft, Labels, Message } from '../../../lib/api';
 
-type Folder = 'Inbox' | 'Drafts' | 'Sent';
+/** The three folders the mailbox always shows, or `folder:<id>` for another provider folder. */
+type Folder = 'Inbox' | 'Drafts' | 'Sent' | `folder:${string}`;
+interface RemoteFolder { id: string; name: string; role: string }
 interface Item { id: string; name: string; address?: string; subject: string; preview: string; date: string; seen?: boolean; flagged?: boolean }
 /** An entry another extension added to every message's menu (`v1/add_row_action`). */
 interface RowAction { extension: string; id: string; label: string; icon?: string }
@@ -39,7 +41,41 @@ const cache = new Map<string, { items: Item[]; fetchedAt: number | null }>();
 const key = (folderName: Folder) => `${account}\u0000${folderName}`;
 const toItems = (messages: Message[]) => messages.map(m => ({ id: m.id, name: m.sender, address: m.address, subject: m.subject, preview: m.body, date: m.date, seen: m.seen, flagged: m.flagged }));
 let rowActions: RowAction[] = [];
-let folderList: { id: string; name: string; role: string }[] = [];
+let folderList: RemoteFolder[] = [];
+let foldersLoading: Promise<void> | null = null;
+/** Older mail below the newest page, loaded as the list is scrolled to its end (#136). */
+let older: Item[] = [];
+let olderOf = '';
+/** Whether this listing asked for older mail yet: a list shorter than a page just ends. */
+let paged = false;
+let more: 'available' | 'loading' | 'end' | 'error' = 'end';
+const PAGE = 100;
+// ---- Provider folders (#132) ----
+/** Provider folders besides Inbox, Drafts and Sent, as the folder bar and message menu show them.
+ *  Ids beyond the renderer's 128-character limit could not be named, so they are left out. */
+const otherFolders = () => folderList.filter(entry => !['inbox', 'sent', 'drafts'].includes(entry.role) && entry.id.length <= 100);
+/** Gmail files its own folders under `[Gmail]/`; the prefix says nothing here. */
+const folderLabel = (entry: RemoteFolder) => entry.name.replace(/^\[(Gmail|Google Mail)\]\//, '') || entry.name;
+const folderIcon = (role: string) => ({ archive: 'archive', trash: 'trash', junk: 'alert' } as Record<string, string>)[role] ?? 'folder';
+/** The folder's name on screen. */
+function nameOf(name: Folder) {
+  if (!name.startsWith('folder:')) return name;
+  const entry = folderList.find(item => item.id === name.slice(7));
+  return entry ? folderLabel(entry) : name.slice(7);
+}
+/** The `folder` the Host lists: `inbox`, `sent` or a provider folder id; `null` for Drafts. */
+const remoteOf = (name: Folder) => name === 'Inbox' ? 'inbox' : name === 'Sent' ? 'sent' : name === 'Drafts' ? null : name.slice(7);
+/** Folders load in the background: listing them can take seconds over IMAP, and nothing,
+ *  least of all a message's menu, waits for them (#133). */
+function loadFolders() {
+  const owner = account;
+  foldersLoading ??= call<RemoteFolder[]>('GET', '/folders').then(list => {
+    if (owner !== account) return;
+    folderList = list;
+    render();
+  }).catch(() => {}).finally(() => { if (owner === account) foldersLoading = null; });
+  return foldersLoading;
+}
 const setting = <T,>(name: string, fallback: T) => (app.settings[name] ?? fallback) as T;
 
 /** The list after the label filter, the search being typed, and sorting. */
@@ -94,15 +130,23 @@ function show(list: Item[], at: number | null) {
   // Messages that arrive with a refresh slide in, a few at a time; a first load shows all at once.
   const before = new Set(items.map(item => item.id));
   arrived = before.size && !query.trim() && !labelFilter ? list.filter(item => !before.has(item.id)).slice(0, 8).map(item => item.id) : [];
-  items = list; fetchedAt = at;
+  items = withOlder(list); fetchedAt = at;
   cache.set(key(folder), { items: list, fetchedAt: at });
 }
+
+/** The newest page followed by the older pages already loaded for this listing. */
+function withOlder(list: Item[]) {
+  const listed = new Set(list.map(item => item.id));
+  return [...list, ...older.filter(item => !listed.has(item.id))];
+}
+/** Whether older mail may exist after a newest page of `count` messages. */
+const moreAfter = (count: number) => older.length ? more : count >= PAGE ? 'available' : 'end';
 
 /** Tell the reader which messages to keep ready, as the owner chose in Settings → Mail. */
 function warm(list: Item[]) {
   if (folder === 'Drafts' || !setting('prefetch', true)) return;
   const count = Math.min(setting('prefetch_count', 50), 25);
-  if (count) void bus.emit('v1/listed', { account, folder: folder.toLowerCase(), ids: list.slice(0, count).map(item => item.id) }).catch(() => {});
+  if (count) void bus.emit('v1/listed', { account, folder: remoteOf(folder), ids: list.slice(0, count).map(item => item.id) }).catch(() => {});
 }
 
 async function load(searchOnly = false) {
@@ -111,18 +155,21 @@ async function load(searchOnly = false) {
   const requested = { folder, query: query.trim(), account };
   const current = () => mine === generation && account === requested.account;
   error = '';
+  // Older pages belong to one folder and search; anything else starts from the newest page.
+  const listing = `${requested.folder}\u0000${requested.query}`;
+  if (listing !== olderOf) { older = []; olderOf = listing; more = 'end'; paged = false; }
   if (searchOnly) searching = true; else { loading = items.length === 0; fetching = true; }
   render();
   try {
-    const remote = requested.folder === 'Sent' ? 'sent' : 'inbox';
+    const remote = remoteOf(requested.folder);
     const lower = requested.query.toLocaleLowerCase();
     // Start everything at once: the saved snapshot paints first, labels and the fresh list
-    // arrive in parallel instead of one after another.
-    const snapshot = requested.folder !== 'Drafts' && !requested.query ? call<{ messages: Message[]; fetched_at: number | null }>('GET', '/messages/cache', { query: { folder: remote } }) : null;
+    // arrive in parallel instead of one after another. Only Inbox and Sent keep one.
+    const snapshot = (remote === 'inbox' || remote === 'sent') && !requested.query ? call<{ messages: Message[]; fetched_at: number | null }>('GET', '/messages/cache', { query: { folder: remote } }) : null;
     let arrivedFirst = false;
     // Clearing a search goes back to the saved folder; it does not fetch it again.
-    const fresh = (searchOnly && !requested.query ? null : requested.folder !== 'Drafts'
-      ? call<Message[]>('POST', '/messages/refresh', { query: { ...(remote === 'sent' ? { folder: 'sent' } : {}), ...(requested.query ? { q: requested.query } : {}) }, body: {} }).then(toItems)
+    const fresh = (searchOnly && !requested.query ? null : remote
+      ? call<Message[]>('POST', '/messages/refresh', { query: { ...(remote !== 'inbox' ? { folder: remote } : {}), ...(requested.query ? { q: requested.query } : {}) }, body: {} }).then(toItems)
       : call<Draft[]>('GET', '/drafts').then(drafts => drafts.filter(d => [d.recipient, d.subject, d.body].some(text => text.toLocaleLowerCase().includes(lower))).slice().reverse()
         .map(d => ({ id: d.id, name: d.recipient || 'No recipient', subject: d.subject, preview: d.body, date: 'Draft' }))))
       ?.then(list => { arrivedFirst = true; return list; });
@@ -132,25 +179,47 @@ async function load(searchOnly = false) {
       const saved = await snapshot;
       if (!current()) return;
       // A fresh list that already arrived wins over the older snapshot.
-      if (!arrivedFirst) { show(toItems(saved.messages), saved.fetched_at); loading = false; warm(items); render(); }
+      if (!arrivedFirst) { show(toItems(saved.messages), saved.fetched_at); more = moreAfter(saved.messages.length); loading = false; warm(items); render(); }
       if (!fresh) { appliedQuery = ''; return; }
     }
     const [labelResult, result] = await Promise.all([nextLabels, fresh!]);
     if (!current()) return;
     labels = labelResult; appliedQuery = requested.query;
-    if (requested.query) items = result;
+    if (requested.query) items = withOlder(result);
     else show(result, requested.folder === 'Drafts' ? null : Math.floor(app.now().getTime() / 1000));
+    more = requested.folder === 'Drafts' ? 'end' : moreAfter(result.length);
     warm(result);
   } catch (e) { if (mine === generation) error = (e as Error).message; }
   finally { if (mine === generation) { loading = false; fetching = false; searching = false; render(); } }
 }
 
+/** Load the next older page when the list is scrolled to its end (#136). Pages overlap when
+ *  mail arrives in between, so messages already listed are dropped. */
+async function loadMore() {
+  const remote = remoteOf(folder);
+  if (more !== 'available' && more !== 'error' || !remote || labeling || loading || !items.length) return;
+  const mine = generation; const requested = { folder, query: appliedQuery };
+  more = 'loading'; paged = true; render();
+  try {
+    const page = toItems(await call<Message[]>('POST', '/messages/refresh', { query: { ...(remote !== 'inbox' ? { folder: remote } : {}), ...(requested.query ? { q: requested.query } : {}), offset: String(items.length) }, body: {} }));
+    if (mine !== generation || requested.folder !== folder || requested.query !== appliedQuery) return;
+    const listed = new Set(items.map(item => item.id));
+    const fresh = page.filter(item => !listed.has(item.id));
+    older = [...older, ...fresh];
+    items = [...items, ...fresh];
+    if (!requested.query) cache.set(key(folder), { items, fetchedAt });
+    more = page.length < PAGE || !fresh.length ? 'end' : 'available';
+  } catch { if (mine === generation) more = 'error'; }
+  render();
+}
+
 /** The Host already refreshed after new mail arrived, so its saved snapshot is current. */
 async function syncFromCache() {
-  if (folder === 'Drafts' || appliedQuery || query.trim() || fetching || searching) return;
+  const remote = remoteOf(folder);
+  if ((remote !== 'inbox' && remote !== 'sent') || appliedQuery || query.trim() || fetching || searching) return;
   const mine = generation; const requested = folder;
   try {
-    const snapshot = await call<{ messages: Message[]; fetched_at: number | null }>('GET', '/messages/cache', { query: { folder: requested === 'Sent' ? 'sent' : 'inbox' } });
+    const snapshot = await call<{ messages: Message[]; fetched_at: number | null }>('GET', '/messages/cache', { query: { folder: remote } });
     if (mine !== generation || requested !== folder) return;
     show(toItems(snapshot.messages), snapshot.fetched_at); warm(items); render();
   } catch { /* The next refresh shows it. */ }
@@ -158,15 +227,15 @@ async function syncFromCache() {
 
 function navigate(next: Folder) {
   query = ''; labelFilter = ''; searchEpoch++;
-  if (next !== folder) { const saved = cache.get(key(next)); items = saved?.items ?? []; fetchedAt = saved?.fetchedAt ?? null; appliedQuery = ''; arrived = []; }
+  if (next !== folder) { const saved = cache.get(key(next)); items = saved?.items ?? []; fetchedAt = saved?.fetchedAt ?? null; appliedQuery = ''; arrived = []; older = []; olderOf = ''; paged = false; }
   folder = next; app.send({ t: 'show', surface: 'pane' }); void load();
 }
 
 function switchAccount(next: string) {
-  ++generation; account = next; labels = {}; labelFilter = ''; labelError = ''; selected = null; folderList = [];
-  query = ''; appliedQuery = ''; searchEpoch++; folder = 'Inbox'; arrived = [];
+  ++generation; account = next; labels = {}; labelFilter = ''; labelError = ''; selected = null; folderList = []; foldersLoading = null;
+  query = ''; appliedQuery = ''; searchEpoch++; folder = 'Inbox'; arrived = []; older = []; olderOf = ''; paged = false;
   const saved = cache.get(key('Inbox')); items = saved?.items ?? []; fetchedAt = saved?.fetchedAt ?? null;
-  void load();
+  void load(); void loadFolders();
 }
 
 async function label(name: string, remove = false) {
@@ -186,7 +255,7 @@ function open(id: string) {
   if (folder === 'Drafts') void bus.request('composer', 'v1/open', { draft_id: id });
   else {
     const item = items.find(entry => entry.id === id);
-    void bus.emit('v1/selected', { account, message_id: id, folder, subject: item?.subject || '(No subject)' }).catch(() => {});
+    void bus.emit('v1/selected', { account, message_id: id, folder: nameOf(folder), subject: item?.subject || '(No subject)' }).catch(() => {});
   }
   render();
 }
@@ -226,11 +295,15 @@ function rows(list: Item[]): Row[] {
 
 function render() {
   const list = visible();
+  const title = nameOf(folder);
+  // A label filter or a search still being typed narrows the list here, so scrolling it to
+  // its end would page through the whole folder for a few matches.
+  const narrowed = !!labelFilter || (!!query.trim() && lower(query.trim()) !== lower(appliedQuery));
   const filtered = !!appliedQuery || !!query.trim() || !!labelFilter;
   const state = status();
   const off = !app.accounts.length;
   const names = Object.keys(labels);
-  const empty: Node[] = loading && !list.length ? [{ type: 'empty_state', preset: 'list', text: `Loading your ${folder.toLowerCase()}…` }]
+  const empty: Node[] = loading && !list.length ? [{ type: 'empty_state', preset: 'list', text: folder.startsWith('folder:') ? `Loading ${title}…` : `Loading your ${title.toLowerCase()}…` }]
     : searching && !list.length ? [{ type: 'empty_state', preset: 'list', text: 'Searching…' }]
     : !list.length && !error && !fetching ? [{ type: 'empty_state', preset: 'list', title: filtered ? 'No matching messages' : folder === 'Drafts' ? 'No drafts yet' : 'Nothing here yet',
       hint: [{ text: filtered ? 'Try another search, or remove a filter.' : folder === 'Drafts' ? 'Start one with Compose and save it when you’re ready.' : folder === 'Sent' ? 'Messages you send will appear here.' : 'New mail will appear here when it arrives.' }] }]
@@ -238,11 +311,17 @@ function render() {
   app.render('pane', { type: 'stack', preset: 'pane', children: [
     { type: 'stack', preset: 'pane_header', children: [
       { type: 'form', id: `search-${searchEpoch}`, role: 'search', children: [
-        { type: 'input', id: 'mail-search', kind: 'search', label: `Search ${folder}`, label_hidden: true, placeholder: `Search ${folder.toLowerCase()}`, value: query, maxlength: 1024, enterkeyhint: 'search', autocapitalize: 'none', report: 'input', debounce_ms: 0 },
+        { type: 'input', id: 'mail-search', kind: 'search', label: clip(`Search ${title}`, 128), label_hidden: true, placeholder: clip(folder.startsWith('folder:') ? `Search ${title}` : `Search ${title.toLowerCase()}`, 128), value: query, maxlength: 1024, enterkeyhint: 'search', autocapitalize: 'none', report: 'input', debounce_ms: 0 },
       ] },
       { type: 'action_ref', action: 'composer/compose' },
     ] },
-    { type: 'nav', id: 'folders', label: 'Mail folders', placement: 'bottom', items: folders.map(item => ({ id: item.name, label: item.name, icon: item.icon, current: folder === item.name, count: folder === item.name && !loading ? items.length : 0 })) },
+    { type: 'nav', id: 'folders', label: 'Mail folders', placement: 'bottom', items: [
+      ...folders.map(item => ({ id: item.name, label: item.name, icon: item.icon, current: folder === item.name, count: folder === item.name && !loading ? items.length : 0 })),
+      ...otherFolders().slice(0, 32 - folders.length).map(entry => {
+        const id: Folder = `folder:${entry.id}`;
+        return { id, label: clip(folderLabel(entry), 128), icon: folderIcon(entry.role), current: folder === id, count: folder === id && !loading ? items.length : 0 };
+      }),
+    ] },
     ...(off ? [{ type: 'text', preset: 'note', text: 'All your accounts are turned off. Turn one on in Settings → Accounts.' } as Node] : [
       ...(sort !== 'newest' ? [{ type: 'stack', preset: 'note', children: [{ type: 'icon', name: 'sort', size: 14 }, { type: 'text', text: `Sorted ${sorts[sort].toLocaleLowerCase()}` }, { type: 'button', id: 'clear-sort', variant: 'plain_remove', icon: 'close', label: 'Clear sorting' }] } as Node] : []),
       ...(folder !== 'Drafts' ? [{ type: 'group', preset: 'actions', label: 'Filters and labels', children: [
@@ -263,10 +342,10 @@ function render() {
         ] },
       ] } as Node] : []),
       ...(labelError ? [{ type: 'text', preset: 'error', text: labelError } as Node] : []),
-      { type: 'section', preset: 'mailbox', density: setting('density', 'full'), label: `${folder} messages`, busy: loading, children: [
-        { type: 'heading', level: 1, style: 'folder', text: folder },
+      { type: 'section', preset: 'mailbox', density: setting('density', 'full'), label: clip(`${title} messages`, 128), busy: loading, children: [
+        { type: 'heading', level: 1, style: 'folder', text: title },
         ...(error ? [{ type: 'empty_state', preset: 'error', text: error, ...(items.length ? { hint: [{ text: 'Showing saved mail; it may be out of date.' }] } : {}), actions: [{ type: 'button', id: 'retry', variant: 'secondary', label: 'Try again' }] } as Node] : []),
-        { type: 'list', id: 'messages', mode: 'virtual', label: `${folder} messages`, rows: rows(list), ...(selected ? { selected } : {}), arrived, context_menu: folder !== 'Drafts', children: empty },
+        { type: 'list', id: 'messages', mode: 'virtual', label: clip(`${title} messages`, 128), rows: rows(list), ...(selected ? { selected } : {}), arrived, context_menu: folder !== 'Drafts', ...(list.length && !narrowed && (more !== 'end' || paged) ? { more } : {}), children: empty },
         { type: 'stack', preset: 'footer', children: folder === 'Drafts' ? [{ type: 'text', text: 'Drafts are saved by your mail service.' }] : [
           { type: 'text', preset: 'list_status', tone: state.offline ? 'danger' : 'default', title: [state.text, state.detail].filter(Boolean).join(' · '), spans: [{ text: state.text }, ...(state.detail ? [{ text: state.detail }] : [])] },
           { type: 'button', id: 'refresh', variant: 'icon', icon: 'refresh', label: 'Refresh', title: 'Refresh', busy: state.busy, disabled: fetching },
@@ -321,6 +400,7 @@ app.on('event', message => {
 });
 app.when('new-label', 'input', ({ value }) => { const before = !newLabel.trim(); newLabel = value; if (before !== !newLabel.trim()) render(); });
 app.when('folders', 'select', ({ item }) => navigate(item as Folder));
+app.when('messages', 'end', () => void loadMore());
 app.when('messages', 'select', ({ key }) => open(key));
 app.when('add-filter', 'select', ({ item }) => {
   const choice = filterChoices.find(entry => entry.id === item);
@@ -334,24 +414,31 @@ app.when('add-filter', 'select', ({ item }) => {
 });
 function activeFilters() { return parse(query.trim()).filters; }
 // ---- A message's context menu (#95) ----
-app.when('messages', 'context', ({ key }) => void showMenu(key));
+app.when('messages', 'context', ({ key }) => showMenu(key));
 app.when('messages', 'menu', ({ key, item }) => void choose(key, item));
-async function showMenu(id: string) {
+function showMenu(id: string) {
   const item = items.find(entry => entry.id === id);
-  if (!item || folder === 'Drafts') return;
-  if (!folderList.length) folderList = await call<{ id: string; name: string; role: string }[]>('GET', '/folders').catch(() => []);
-  // Folders the menu does not already name, a few at most, so the menu stays short.
-  const others = folderList.filter(entry => !['inbox', 'sent', 'drafts', 'trash', 'archive'].includes(entry.role)).slice(0, 5);
+  // Always answer, even with nothing, so the shell never waits on a menu (#133).
+  if (!item || folder === 'Drafts') { app.send({ t: 'menu', surface: 'pane', node: 'messages', key: id, items: [] }); return; }
+  // Answer at once with the folders known so far; a first menu fetches them for the next.
+  if (!folderList.length) void loadFolders();
+  const here = remoteOf(folder);
+  const archive = folderList.find(entry => entry.role === 'archive');
   const names = Object.keys(labels).slice(0, 8);
-  app.send({ t: 'menu', surface: 'pane', node: 'messages', key: id, items: [
+  const head = [
     { id: 'read', label: item.seen ? 'Mark as unread' : 'Mark as read', icon: item.seen ? 'mail' : 'eye' },
     { id: 'star', label: item.flagged ? 'Remove star' : 'Star', icon: 'star' },
     ...rowActions.map((action, index) => ({ id: `ext:${index}`, label: clip(action.label, 64), icon: action.icon, ...(index === 0 ? { separator: true } : {}) })),
     ...names.map((name, index) => ({ id: `label:${index}`, label: clip(`Label: ${name}`, 64), checked: !!labels[name]?.includes(id), ...(index === 0 ? { separator: true } : {}) })),
-    ...(folderList.some(entry => entry.role === 'archive') && folder !== 'Sent' ? [{ id: 'archive', label: 'Archive', icon: 'archive', separator: true }] : []),
-    ...others.map((entry, index) => ({ id: `move:${entry.id}`, label: clip(`Move to ${entry.name}`, 64), icon: 'folder', ...(index === 0 && !folderList.some(f => f.role === 'archive') ? { separator: true } : {}) })),
+    ...(archive && folder !== 'Sent' && here !== archive.id ? [{ id: 'archive', label: 'Archive', icon: 'archive', separator: true }] : []),
+  ];
+  // The same folders the folder bar shows, as many as the menu's 24 entries allow.
+  const others = otherFolders().filter(entry => entry.role !== 'archive' && entry.role !== 'trash' && entry.id !== here).slice(0, 24 - head.length - 1);
+  app.send({ t: 'menu', surface: 'pane', node: 'messages', key: id, items: [
+    ...head,
+    ...others.map((entry, index) => ({ id: `move:${entry.id}`, label: clip(`Move to ${folderLabel(entry)}`, 64), icon: folderIcon(entry.role), ...(index === 0 && !head.some(entry => entry.id === 'archive') ? { separator: true } : {}) })),
     { id: 'delete', label: 'Move to Trash', icon: 'trash', danger: true, separator: true },
-  ].slice(0, 24) });
+  ] });
 }
 async function organize(action: string, ids: string[], body: Record<string, unknown> = {}) {
   await call('POST', `/messages/${action}`, { body: { ids, ...body } });
@@ -368,11 +455,12 @@ async function choose(id: string, choice: string) {
       if (name) { labels = await call<Labels>('POST', '/labels', { body: { name, message_id: id, remove: !!labels[name]?.includes(id) } }); void bus.emit('v1/labels', { account }).catch(() => {}); }
     } else if (choice.startsWith('ext:')) {
       const action = rowActions[Number(choice.slice(4))];
-      if (action) void bus.emit('v1/row_action', { extension: action.extension, action: action.id, account, message_id: id, folder: folder.toLowerCase() }).catch(() => {});
+      if (action) void bus.emit('v1/row_action', { extension: action.extension, action: action.id, account, message_id: id, folder: remoteOf(folder) ?? 'drafts' }).catch(() => {});
     } else if (choice === 'archive' || choice === 'delete' || choice.startsWith('move:')) {
       if (choice.startsWith('move:')) await organize('move', [id], { folder: choice.slice(5) });
       else await organize(choice, [id]);
       items = items.filter(entry => entry.id !== id);
+      older = older.filter(entry => entry.id !== id);
       if (selected === id) selected = null;
       cache.set(key(folder), { items, fetchedAt });
     }
@@ -437,7 +525,7 @@ app.on('start', () => {
   // Extensions that add message menu entries register (again) when Mail starts.
   void bus.emit('v1/ready', {}).catch(() => {});
   void call<AccountSync[]>('GET', '/sync').then(list => { sync = Object.fromEntries(list.map(status => [status.account, status])); render(); }).catch(() => {});
-  void load();
+  void load(); void loadFolders();
 });
 app.on('account', () => { const next = app.account?.id ?? 'demo'; if (next !== account) switchAccount(next); else render(); });
 app.on('settings', () => render());

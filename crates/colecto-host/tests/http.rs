@@ -1468,3 +1468,81 @@ async fn sync_status_lists_accounts_for_the_host_only() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+// Other folders and older pages are API 2: an extension on API 1 keeps its old refusal,
+// while the owner (and bundled Mail) can list them.
+#[tokio::test]
+async fn other_folders_and_offsets_need_api_version_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let origin = "http://127.0.0.1:4173";
+    let router = authenticated(app(
+        MailStore::open(dir.path()).unwrap(),
+        "127.0.0.1:4173".into(),
+        dir.path().into(),
+    ))
+    .await;
+    let mut package = colecto_host::package::Package {
+        manifest: include_str!("../../../docs/extensions/examples/hello-pane/manifest.toml")
+            .replace(
+                r#"capabilities = ["account.read"]"#,
+                r#"capabilities = ["account.read", "messages.list"]"#,
+            ),
+        ..Default::default()
+    };
+    package.client.insert(
+        "client/main.js".into(),
+        include_bytes!("../../../docs/extensions/examples/hello-pane/client/main.js").to_vec(),
+    );
+    let install =
+        serde_json::json!({"package": colecto_host::package::write(&package)}).to_string();
+    let response = router
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/extensions",
+            "host",
+            origin,
+            &install,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = router
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/extensions/hello-pane/credential",
+            "host",
+            origin,
+            "{}",
+        ))
+        .await
+        .unwrap();
+    let token = body(response).await["token"].as_str().unwrap().to_owned();
+    for (path, status) in [
+        ("/api/v1/messages/cache?folder=inbox", 200),
+        ("/api/v1/messages/cache?folder=archive", 400),
+        ("/api/v1/messages/refresh?offset=100", 400),
+    ] {
+        let method = if path.contains("refresh") {
+            "POST"
+        } else {
+            "GET"
+        };
+        let call = as_extension(request(method, path, "", origin, "{}"), &token);
+        let response = router.clone().oneshot(call).await.unwrap();
+        assert_eq!(response.status().as_u16(), status, "{path}");
+    }
+    // The bundled mailbox targets API 2 and pages through the sample account's Archive.
+    for (method, path) in [
+        ("GET", "/api/v1/messages/cache?folder=archive"),
+        ("POST", "/api/v1/messages/refresh?folder=archive&offset=100"),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(request(method, path, "inbox", origin, "{}"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+    }
+}

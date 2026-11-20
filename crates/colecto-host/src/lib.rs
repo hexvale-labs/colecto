@@ -1209,6 +1209,35 @@ struct MessageQuery {
     folder: String,
     #[serde(default)]
     q: String,
+    /// Messages to skip from the newest, to load an older page (API 2).
+    #[serde(default)]
+    offset: usize,
+}
+impl MessageQuery {
+    /// Other folders and older pages arrived in API 2; extensions on API 1 keep
+    /// getting the error they always got for them.
+    fn check_api_version(&self, host: &Host, principal: &Principal) -> Result<(), Failure> {
+        if matches!(self.folder.as_str(), "inbox" | "sent") && self.offset == 0 {
+            return Ok(());
+        }
+        let Principal::Extension(token) = principal else {
+            return Ok(());
+        };
+        let (id, _) = caller_extension(host, token)?;
+        if host
+            .extensions
+            .lock()
+            .map_err(|_| forbidden())?
+            .api_version(&id)
+            .is_some_and(|version| version < 2)
+        {
+            return Err(Failure(
+                StatusCode::BAD_REQUEST,
+                "Other folders and offset need api_version = 2 or later".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 fn inbox_folder() -> String {
     "inbox".into()
@@ -1316,6 +1345,7 @@ async fn cached_messages(
     Query(query): Query<MessageQuery>,
 ) -> Result<Json<colecto_core::MailSnapshot>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
+    query.check_api_version(&host, &principal)?;
     if !query.q.is_empty() {
         return Err(Failure(
             StatusCode::BAD_REQUEST,
@@ -1338,6 +1368,7 @@ async fn messages(
     Query(query): Query<MessageQuery>,
 ) -> Result<Json<Vec<Message>>, Failure> {
     let account = grant(&host, &principal, &headers, Capability::MessagesList)?;
+    query.check_api_version(&host, &principal)?;
     host.accounts
         .lock()
         .map_err(|_| forbidden())?
@@ -1345,9 +1376,16 @@ async fn messages(
         .map_err(|_| forbidden())?;
     let (worker, id) = (host.clone(), account.clone());
     let mut messages = tokio::task::spawn_blocking(move || {
-        let messages = sync::refresh(&worker, &id, &query.folder, &query.q, sync::Origin::Owner)?
-            .unwrap_or_default();
-        if query.folder == "inbox" && query.q.trim().is_empty() {
+        let messages = sync::refresh(
+            &worker,
+            &id,
+            &query.folder,
+            &query.q,
+            query.offset,
+            sync::Origin::Owner,
+        )?
+        .unwrap_or_default();
+        if query.folder == "inbox" && query.q.trim().is_empty() && query.offset == 0 {
             sync::start_prefetch(&worker, &id);
         }
         Ok::<_, Error>(messages)

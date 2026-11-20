@@ -309,6 +309,14 @@ impl Extensions {
         }
         self.commit(next)
     }
+    /// The `api_version` an installed extension targets.
+    pub fn api_version(&self, id: &str) -> Option<u32> {
+        self.manifests
+            .iter()
+            .chain(self.policy.packages.iter().map(|p| &p.manifest))
+            .find(|manifest| manifest.id == id)
+            .map(|manifest| manifest.api_version)
+    }
     pub fn list(&self, _account: &str) -> Vec<ExtensionState> {
         self.manifests
             .iter()
