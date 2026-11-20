@@ -224,7 +224,7 @@ function describe(rule: LabelRule | undefined) {
   if (!rule?.enabled) return 'Off';
   const parts = [];
   if (rule.rules.length) parts.push(`${rule.rules.length} ${rule.rules.length === 1 ? 'rule' : 'rules'}`);
-  if (rule.model) parts.push('model on');
+  if (rule.model) parts.push('Model on');
   return parts.join(' · ') || 'Nothing set up yet';
 }
 

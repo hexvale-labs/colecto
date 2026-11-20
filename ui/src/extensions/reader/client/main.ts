@@ -10,7 +10,8 @@ let account = '';
 let tabs: Tab[] = [];
 let view: { id: string; folder: string } | null = null;
 let message: Message | null = null;
-/** Other messages of the open message's conversation from the saved Inbox and Sent (#102). */
+/** The open message's conversation, oldest first and including the open message, from the
+ *  saved Inbox and Sent (#102). Empty when the message stands alone. */
 let conversation: (Message & { folder: string })[] = [];
 /** Earlier and later messages start collapsed, so the opened one stays in view (#120). */
 let shownParts = new Set<'before' | 'after'>();
@@ -74,21 +75,23 @@ function viewing() {
 
 function clear() { ++generation; view = null; message = null; conversation = []; shownParts = new Set(); expanded = new Set(); showQuoted = false; content = null; error = ''; contentError = ''; banners = []; changedBy = ''; showHtml = true; allowRemote = false; }
 
-async function load() {
+/** `saved` is a copy of the message from its conversation: it shows at once while the full
+ *  message loads, so stepping through a conversation never blanks the reader (#134). */
+async function load(saved?: Message) {
   if (!view) return;
   const mine = ++generation;
   const id = view.id;
-  loading = true; contentLoading = true; error = ''; message = null; content = null; render();
+  loading = !saved; contentLoading = true; error = ''; message = saved ?? null; content = null; render();
   // Fetch the body alongside the header instead of after it.
   const body = cachedContent(id);
   body.catch(() => {});
   try { message = await call<Message>('GET', `/messages/${encodeURIComponent(id)}`); }
-  catch (e) { if (mine === generation) error = (e as Error).message; }
+  catch (e) { if (mine === generation && !saved) error = (e as Error).message; }
   finally { if (mine === generation) loading = false; }
   if (mine !== generation) return;
   render();
   if (!message) return;
-  void loadConversation(mine, message);
+  if (!conversation.some(item => item.id === id)) void loadConversation(mine, message);
   try { content = await body; contentError = ''; }
   catch (e) { contentError = (e as Error).message; }
   if (mine !== generation) return;
@@ -99,14 +102,20 @@ async function load() {
 
 async function loadConversation(mine: number, current: Message) {
   if (!current.thread) return;
+  const folder = view?.folder.toLowerCase() ?? 'inbox';
   const saved = await Promise.all(['inbox', 'sent'].map(folder => call<{ messages: Message[] }>('GET', '/messages/cache', { query: { folder } })
     .then(result => result.messages.map(item => ({ ...item, folder }))).catch(() => [])));
   if (mine !== generation) return;
   const seen = new Set<string>([current.id]);
-  conversation = saved.flat().filter(item => item.thread === current.thread && !seen.has(item.id) && !!seen.add(item.id))
-    .sort((a, b) => (Date.parse(a.date) || 0) - (Date.parse(b.date) || 0)).slice(-20);
+  const thread = [{ ...current, folder }, ...saved.flat().filter(item => item.thread === current.thread && !seen.has(item.id) && !!seen.add(item.id))]
+    .sort((a, b) => (Date.parse(a.date) || 0) - (Date.parse(b.date) || 0));
+  // At most 20, always around the open message.
+  const at = thread.findIndex(item => item.id === current.id);
+  const start = Math.max(0, Math.min(at - 10, thread.length - 20));
+  conversation = thread.length > 1 ? thread.slice(start, start + 20) : [];
   render();
 }
+const position = () => conversation.findIndex(item => item.id === view?.id);
 /** A reply's own words, and the quoted history under them ("On … wrote:", or `>` lines to the end). */
 function splitQuoted(text: string): { fresh: string; quoted: string } {
   const lines = text.split('\n');
@@ -130,9 +139,9 @@ function plainBody(text: string): Node {
 /** Messages of the conversation before or after the open one, oldest first: one line each
  *  (sender, date, first line), expanded on click, behind a small "Show n …" control (#120). */
 function conversationPart(when: 'before' | 'after'): Node[] {
-  if (!message || !conversation.length) return [];
-  const opened = Date.parse(message.date) || 0;
-  const part = conversation.map((item, index) => ({ item, index })).filter(({ item }) => ((Date.parse(item.date) || 0) <= opened) === (when === 'before'));
+  const at = position();
+  if (!message || at < 0) return [];
+  const part = conversation.map((item, index) => ({ item, index })).filter(({ index }) => when === 'before' ? index < at : index > at);
   if (!part.length) return [];
   const count = `${part.length} ${when === 'before' ? 'earlier' : 'later'} message${part.length === 1 ? '' : 's'}`;
   const shown = shownParts.has(when);
@@ -152,6 +161,30 @@ function conversationPart(when: 'before' | 'after'): Node[] {
       ] } };
     }) },
   ] }];
+}
+/** Where the open message sits in its conversation, with steps to the one before and after. */
+function stepper(): Node[] {
+  const at = position();
+  if (at < 0) return [];
+  return [{ type: 'stack', direction: 'row', gap: 8, align: 'center', children: [
+    { type: 'button', id: 'conversation-earlier', variant: 'text', icon: 'back', label: 'Earlier', title: 'Earlier message in this conversation', disabled: at === 0 },
+    { type: 'text', tone: 'muted', size: 'sm', role: 'status', text: `Message ${at + 1} of ${conversation.length} in this conversation` },
+    { type: 'button', id: 'conversation-later', variant: 'text', icon: 'next', label: 'Later', title: 'Later message in this conversation', disabled: at === conversation.length - 1 },
+  ] }];
+}
+/** Open another message of the conversation in this tab, keeping the conversation as it was. */
+function step(index: number) {
+  const item = conversation[index];
+  if (!item || !view) return;
+  const keep = { conversation, shownParts, expanded };
+  const folder = item.folder === 'sent' ? 'Sent' : item.folder === 'inbox' ? 'Inbox' : view.folder;
+  const subject = item.subject || '(No subject)';
+  const from = view.id;
+  tabs = currentTabs().some(tab => tab.id === item.id) ? tabs.filter(tab => tab.account !== account || tab.id !== from)
+    : tabs.map(tab => tab.account === account && tab.id === from ? { account, id: item.id, subject, folder } : tab);
+  clear(); view = { id: item.id, folder };
+  ({ conversation, shownParts, expanded } = keep);
+  viewing(); void load(item); renderTabs();
 }
 const when_ = (date: string) => when(date, app.now()).full || date;
 
@@ -270,6 +303,7 @@ function render() {
     ...banners.map(banner => ({ type: 'banner', tone: banner.tone, text: banner.text }) as Node),
     ...(changedBy ? [{ type: 'banner', tone: 'info', text: `${changedBy} changed how this message is shown.` } as Node] : []),
     ...conversationPart('before'),
+    ...stepper(),
     { type: 'message_header', subject: clip(message.subject, 1024), sender: clip(message.sender, 512), address: clip(message.address, 512), ...(date?.full ? { date: clip(date.full, 128), date_title: clip(message.date, 512) } : {}) },
     ...(labelError ? [{ type: 'text', preset: 'error', text: labelError } as Node] : []),
     ...(names.length ? [{ type: 'fieldset', preset: 'chips', legend: 'Labels', legend_hidden: true, disabled: labeling, children: names.map((name, index) => ({ type: 'toggle', id: `label.${index}`, style: 'chip', label: `Label ${name}`, label_hidden: true, checked: labels[name].includes(view!.id) })) } as Node] : []),
@@ -321,9 +355,10 @@ app.on('event', event => {
     return;
   }
   if (event.kind !== 'press' || !node.startsWith('conversation.')) return;
-  const item = conversation[Number(node.slice('conversation.'.length))];
-  if (item) open(item.id, item.folder === 'sent' ? 'Sent' : 'Inbox', item.subject || '(No subject)');
+  step(Number(node.slice('conversation.'.length)));
 });
+app.when('conversation-earlier', 'press', () => step(position() - 1));
+app.when('conversation-later', 'press', () => step(position() + 1));
 // Stars use the provider's flag (IMAP \\Flagged, JMAP $flagged), so other clients see them (#111).
 app.when('star', 'press', async () => {
   const current = message;

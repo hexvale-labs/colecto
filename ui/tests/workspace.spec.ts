@@ -151,10 +151,12 @@ test('worst-case mail remains usable at narrow widths and enlarged text', async 
   });
   for (const width of [320, 390, 1280]) {
     await page.setViewportSize({ width, height: 900 });
-    // Leave the previous page first: going to the same URL while its requests are still
-    // in flight is sometimes aborted by Chromium (net::ERR_ABORTED).
-    await page.goto('about:blank');
-    await page.goto('/');
+    // Going to the same URL while the previous page's requests are still in flight is
+    // sometimes aborted by Chromium (net::ERR_ABORTED), even via about:blank. Try once more.
+    await page.goto('/').catch(error => {
+      if (!String(error).includes('ERR_ABORTED')) throw error;
+      return page.goto('/');
+    });
     await page.getByRole('button', { name: /Aleksandra/ }).click();
     await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
     await expect(page.getByRole('heading', { name: worst[0].subject })).toBeVisible();
@@ -509,6 +511,66 @@ test('a message’s menu stars it and moves it to the Trash, by mouse or keyboar
   await row.click({ button: 'right' });
   await menu.getByRole('menuitem', { name: 'Move to Trash' }).click();
   await expect(page.getByRole('button', { name: /Studio North/ })).toHaveCount(0);
+});
+
+// #133: a menu never waits for the folder list, and a right-click on another row while a
+// menu is open opens that row's menu instead of only closing the first.
+test('a message’s menu opens at once and follows the next right-click', async ({ page }) => {
+  await page.route('**/api/v1/folders', async route => { await new Promise(resolve => setTimeout(resolve, 4000)); await route.fallback().catch(() => {}); });
+  await page.goto('/');
+  const menu = page.getByRole('menu', { name: 'Message actions' });
+  const rows = page.locator('.mail-item');
+  await rows.nth(0).click({ button: 'right' });
+  await expect(menu).toBeVisible({ timeout: 1500 });
+  // The open menu's scrim covers the rows, so click where the second row is, as a person would.
+  const second = (await rows.nth(1).boundingBox())!;
+  await page.mouse.click(second.x + 40, second.y + second.height / 2, { button: 'right' });
+  await expect(menu).toHaveCount(1);
+  await expect.poll(async () => Math.abs((await menu.boundingBox())!.y - (second.y + second.height / 2))).toBeLessThan(4);
+});
+
+// #132: the provider's other folders sit in the folder bar, list their mail, and match the
+// folders a message's menu offers.
+test('provider folders show in the folder bar and in a message’s menu', async ({ page }) => {
+  const work = { id: 'w1', sender: 'Priya Shah', address: 'priya@example.test', subject: 'Quarterly plan', body: 'Draft attached.', date: 'Today', seen: true, flagged: false };
+  await page.route('**/api/v1/folders', route => route.fulfill({ json: [
+    { id: 'INBOX', name: 'INBOX', role: 'inbox', unread: 0, total: 4 },
+    { id: 'Work', name: 'Work', role: 'other', unread: 0, total: 1 },
+    { id: '[Gmail]/Spam', name: '[Gmail]/Spam', role: 'junk', unread: 0, total: 0 },
+  ] }));
+  await page.route('**/api/v1/messages/refresh**', route => new URL(route.request().url()).searchParams.get('folder') === 'Work' ? route.fulfill({ json: [work] }) : route.fallback());
+  await page.goto('/');
+  const folders = page.getByRole('navigation', { name: 'Mail folders' });
+  await expect(folders.getByRole('button', { name: 'Spam' })).toBeVisible();
+  await folders.getByRole('button', { name: 'Work' }).click();
+  await expect(page.getByRole('heading', { name: 'Work', level: 1 })).toBeVisible();
+  const row = page.getByRole('button', { name: /Priya Shah/ });
+  await row.click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Message actions' });
+  await expect(menu.getByRole('menuitem', { name: 'Move to Spam' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Move to Work' })).toHaveCount(0);
+});
+
+// #136: scrolling to the end of the list loads older mail, page by page, until there is none.
+test('scrolling to the end loads older mail until there is none', async ({ page }) => {
+  const make = (from: number, count: number) => Array.from({ length: count }, (_, i) => ({ id: `p${from + i}`, sender: `Sender ${from + i}`, address: 's@example.test', subject: `Page message ${from + i}`, body: '- hello', date: 'Today', seen: true, flagged: false }));
+  const offsets: number[] = [];
+  await page.route('**/api/v1/messages/**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/cache')) return route.fulfill({ json: { folder: 'inbox', messages: [], fetched_at: null } });
+    if (!url.pathname.endsWith('/refresh')) return route.fallback();
+    const offset = Number(url.searchParams.get('offset') ?? 0);
+    offsets.push(offset);
+    return route.fulfill({ json: offset === 0 ? make(0, 100) : offset === 100 ? make(100, 30) : [] });
+  });
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: /Page message 99\b/ })).toBeAttached();
+  const list = page.locator('.message-list');
+  await list.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await expect(page.getByRole('button', { name: /Page message 129\b/ })).toBeAttached();
+  await list.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await expect(page.getByText('No older messages')).toBeVisible();
+  expect(offsets.filter(offset => offset > 0)).toEqual([100]);
 });
 
 // #103: filters run on the mail service and show as chips that can be removed.

@@ -463,10 +463,14 @@ Cookies never establish authority. See
 
 ### Cached folders and error categories
 
-`POST /api/v1/messages/refresh?folder=inbox|sent&q=...` queries the provider; an empty
-search updates that folder's bounded snapshot. `GET /api/v1/messages/cache?folder=inbox|sent`
-reads without provider access and returns `{folder, messages, fetched_at}`. Cached
-searches are rejected. Failed refreshes keep earlier snapshots; Disconnect and Lock clear
+`POST /api/v1/messages/refresh?folder=inbox|sent|<folder id>&q=...&offset=N` queries
+the provider for at most 100 messages, newest first. Folder ids other than `inbox` and
+`sent` come from `GET /api/v1/folders`, and `offset` skips that many of the newest
+messages to load an older page; an empty page means there is nothing older. Both need
+API 2. An empty search at offset 0 updates the bounded snapshot of Inbox or Sent.
+`GET /api/v1/messages/cache?folder=...` reads that snapshot without provider access and
+returns `{folder, messages, fetched_at}`; other folders have none. Cached searches are
+rejected. Failed refreshes keep earlier snapshots; Disconnect and Lock clear
 active ones. For API keys, message bodies need `messages.read` and draft bodies
 `drafts.read`. Errors carry a stable `category` and a readable `error`;
 `delivery_uncertain` means check Sent before sending again.

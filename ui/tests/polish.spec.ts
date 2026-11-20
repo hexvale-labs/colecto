@@ -170,6 +170,27 @@ test('the accent colour can be chosen and is remembered', async ({ page }) => {
   await expect.poll(accent).toBe('#a2d6b1');
 });
 
+// #131: a vertical wheel scrolls the tab strip sideways, and a tab's menu closes every tab.
+test('the wheel scrolls the tab strip and a tab’s menu closes every tab', async ({ page }) => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ id: `t${i}`, sender: `Sender ${i}`, address: 's@example.test', subject: `A fairly long subject for tab ${i}`, body: 'Hi', date: 'Today' }));
+  await inbox(page, many);
+  await page.goto('/');
+  for (let i = 0; i < many.length; i++) await page.locator('.mail-item').nth(i).click();
+  const strip = page.getByRole('navigation', { name: 'Open messages' });
+  await expect(strip.getByRole('button', { name: /^Close (?!all)/ })).toHaveCount(12);
+  const left = () => strip.evaluate(element => element.scrollLeft);
+  await strip.evaluate(element => { element.scrollLeft = 0; });
+  await strip.hover({ position: { x: 40, y: 10 } });
+  await page.mouse.wheel(0, 240);
+  await expect.poll(left).toBeGreaterThan(0);
+  await strip.getByRole('button', { name: 'A fairly long subject for tab 11', exact: true }).click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Tab actions' });
+  await expect(menu.getByRole('menuitem', { name: 'Close tab' })).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Close all tabs' }).click();
+  await expect(strip).toHaveCount(0);
+  await expect(page.getByText('Pick a message and it will open here.')).toBeVisible();
+});
+
 test('closes every message tab at once', async ({ page }) => {
   await inbox(page, pair);
   await page.goto('/');

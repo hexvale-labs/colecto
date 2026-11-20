@@ -89,4 +89,14 @@ fn queries_sample_mail_without_losing_reader_state() {
     assert!(store.message(&inbox[0].id).is_some());
     assert!(store.query("../other", "").is_err());
     assert!(store.query("inbox", "bad\r\nquery").is_err());
+    // Older pages skip the newest messages; past the end there is nothing left.
+    assert_eq!(store.query_page("inbox", "", 3).unwrap().len(), 1);
+    assert!(store.query_page("inbox", "", 4).unwrap().is_empty());
+    assert!(store.query_page("inbox", "", 100_001).is_err());
+    // A paged listing never replaces the saved Inbox.
+    assert_eq!(store.messages().len(), 4);
+    // The sample account's other folders list what was moved there.
+    assert!(store.query("archive", "").unwrap().is_empty());
+    store.archive(&[inbox[0].id.clone()]).unwrap();
+    assert_eq!(store.query("archive", "").unwrap()[0].id, inbox[0].id);
 }
