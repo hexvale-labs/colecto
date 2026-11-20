@@ -26,6 +26,10 @@
   <a href="docs/roadmap.md"><b>Roadmap</b></a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/reader.png" alt="Colecto showing the inbox on the left and an open message on the right, with the Reader and Composer panes as tabs" width="820">
+</p>
+
 > [!NOTE]
 > Colecto is in beta. It works with real mail accounts, and updates migrate your data
 > forward; going back to an older version is not supported.
@@ -38,6 +42,17 @@
   swap views, or write your own.
 - **Safe by default.** HTML mail renders in a script-free sandbox, remote images wait
   for your OK, and automation never sends anything without your approval.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/command-palette.png" alt="The command palette, opened with Ctrl+K, listing commands such as compose, go to Inbox and open Settings"></td>
+    <td width="50%"><img src="docs/screenshots/tabs.png" alt="Several messages open as tabs in the reading pane"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Jump anywhere with <kbd>Ctrl</kbd>+<kbd>K</kbd></sub></td>
+    <td align="center"><sub>Messages open as tabs in panes you can rearrange</sub></td>
+  </tr>
+</table>
 
 ## Features
 
