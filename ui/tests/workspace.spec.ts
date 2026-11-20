@@ -151,10 +151,12 @@ test('worst-case mail remains usable at narrow widths and enlarged text', async 
   });
   for (const width of [320, 390, 1280]) {
     await page.setViewportSize({ width, height: 900 });
-    // Leave the previous page first: going to the same URL while its requests are still
-    // in flight is sometimes aborted by Chromium (net::ERR_ABORTED).
-    await page.goto('about:blank');
-    await page.goto('/');
+    // Going to the same URL while the previous page's requests are still in flight is
+    // sometimes aborted by Chromium (net::ERR_ABORTED), even via about:blank. Try once more.
+    await page.goto('/').catch(error => {
+      if (!String(error).includes('ERR_ABORTED')) throw error;
+      return page.goto('/');
+    });
     await page.getByRole('button', { name: /Aleksandra/ }).click();
     await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
     await expect(page.getByRole('heading', { name: worst[0].subject })).toBeVisible();
