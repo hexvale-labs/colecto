@@ -151,6 +151,9 @@ test('worst-case mail remains usable at narrow widths and enlarged text', async 
   });
   for (const width of [320, 390, 1280]) {
     await page.setViewportSize({ width, height: 900 });
+    // Leave the previous page first: going to the same URL while its requests are still
+    // in flight is sometimes aborted by Chromium (net::ERR_ABORTED).
+    await page.goto('about:blank');
     await page.goto('/');
     await page.getByRole('button', { name: /Aleksandra/ }).click();
     await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
