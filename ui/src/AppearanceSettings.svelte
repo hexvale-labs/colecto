@@ -3,9 +3,12 @@
   import Select from './Select.svelte';
   import { bundledFonts, canListAllFonts, familyOf, listAllFonts, loadBundled, probeSystemFonts, textSizes } from './lib/typography';
   import type { TextSpacing } from './lib/text-spacing.svelte';
-  let { value, font, textSize, spacing, onchange, ontypography, children }: {
+  let { value, font, textSize, spacing, changed, onchange, ontypography, onreset, children }: {
     value: string | null; font: string; textSize: number; spacing: TextSpacing;
-    onchange: (accent: string) => void; ontypography: (change: { font?: string; font_size?: number; text_spacing?: TextSpacing }) => void; children?: import('svelte').Snippet;
+    /** Text setting keys the owner changed, such as `font` or `text_spacing.line`. */
+    changed: string[];
+    onchange: (accent: string) => void; ontypography: (change: { font?: string; font_size?: number; text_spacing?: TextSpacing }) => void;
+    onreset: (keys: string[]) => void; children?: import('svelte').Snippet;
   } = $props();
   // More room around letters, words, lines and paragraphs helps many readers with dyslexia.
   const spacings: { key: keyof TextSpacing; name: string; text: string }[] = [
@@ -79,6 +82,7 @@
         </div>
       </fieldset>
     {/each}
+    {#if changed.length}<button type="button" class="text-button" onclick={() => onreset(changed)}>Reset text to defaults</button>{/if}
   </div>
   <div class="settings-group">
     <h3 class="group-label">Colour</h3>

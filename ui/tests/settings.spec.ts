@@ -183,3 +183,29 @@ test('text spacing widens letters, words, lines and paragraphs and is kept', asy
   for (const name of ['Letter spacing', 'Line height']) await page.getByRole('group', { name }).getByText('Normal').click();
   await expect.poll(() => root('--letter-spacing')).toBe('0em');
 });
+
+test('changed settings offer a reset that returns them to the defaults', async ({ page }) => {
+  await page.goto('/');
+  const settings = await openSettings(page, 'Appearance');
+  const resetText = settings.getByRole('button', { name: 'Reset text to defaults' });
+  await expect(resetText).toHaveCount(0);
+  await settings.getByRole('group', { name: 'Word spacing' }).getByText('Most').click();
+  await settings.locator('.segmented label', { hasText: 'Compact' }).click();
+  await resetText.click();
+  await expect(settings.getByRole('group', { name: 'Word spacing' }).getByRole('radio', { name: 'Normal' })).toBeChecked();
+  await expect(resetText).toHaveCount(0);
+  // Text and the mailbox's own group reset separately; nothing stays stored after a reset.
+  const preferences = async () => (await (await page.request.get(`${origin}/api/v1/preferences`, { headers: host })).json()).changed;
+  await expect.poll(preferences).not.toContain('text_spacing.word');
+  const mailbox = settings.getByRole('region', { name: 'Mail' });
+  await mailbox.getByRole('button', { name: 'Reset to defaults' }).click();
+  await expect(mailbox.getByRole('radio', { name: 'Full' })).toBeChecked();
+  await expect(mailbox.getByRole('button', { name: 'Reset to defaults' })).toHaveCount(0);
+
+  await settings.getByRole('button', { name: 'Notifications', exact: true }).click();
+  await settings.locator('.corner-spot[data-corner="bottom-right"]').click();
+  await expect.poll(preferences).toContain('notifications.position');
+  await settings.getByRole('button', { name: 'Reset to defaults' }).click();
+  await expect(settings.getByRole('radio', { name: 'Top center' })).toBeChecked();
+  await expect.poll(preferences).not.toContain('notifications.position');
+});

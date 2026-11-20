@@ -189,6 +189,10 @@ fn build_app(host: Host, assets: Assets) -> Router {
             get(get_extension_settings).put(put_extension_settings),
         )
         .route(
+            "/extensions/{id}/settings/reset",
+            axum::routing::post(reset_extension_settings),
+        )
+        .route(
             "/preferences",
             get(get_preferences).post(update_preferences),
         )
@@ -1693,21 +1697,17 @@ async fn security_action(
 async fn get_preferences(
     State(host): State<Host>,
     headers: HeaderMap,
-) -> Result<Json<preferences::Preferences>, Failure> {
+) -> Result<Json<preferences::PreferencesView>, Failure> {
     host_grant(&headers)?;
     Ok(Json(
-        host.preferences
-            .lock()
-            .map_err(|_| forbidden())?
-            .get()
-            .clone(),
+        host.preferences.lock().map_err(|_| forbidden())?.view(),
     ))
 }
 async fn update_preferences(
     State(host): State<Host>,
     headers: HeaderMap,
     input: Result<Json<preferences::PreferencesInput>, JsonRejection>,
-) -> Result<Json<preferences::Preferences>, Failure> {
+) -> Result<Json<preferences::PreferencesView>, Failure> {
     host_grant(&headers)?;
     let Json(input) =
         input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid preferences".into()))?;
@@ -1723,7 +1723,7 @@ async fn update_preferences(
                 .events
                 .send(("mcp", serde_json::json!({"on": saved.mcp}).to_string()));
         }
-        Ok(saved)
+        Ok(store.view())
     })
     .await
     .map_err(|_| forbidden())?
@@ -2016,6 +2016,34 @@ async fn put_extension_settings(
         .lock()
         .map_err(|_| forbidden())?
         .update_settings(&id, values)
+        .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
+    let _ = host.events.send((
+        "extension.settings",
+        serde_json::json!({"id":id}).to_string(),
+    ));
+    Ok(Json(result))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResetInput {
+    keys: Vec<String>,
+}
+/// Return an extension's settings to their defaults. Owner only, from Settings.
+async fn reset_extension_settings(
+    State(host): State<Host>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    input: Result<Json<ResetInput>, JsonRejection>,
+) -> Result<Json<serde_json::Value>, Failure> {
+    host_grant(&headers)?;
+    let Json(input) =
+        input.map_err(|_| Failure(StatusCode::BAD_REQUEST, "Invalid settings".into()))?;
+    let result = host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .reset_settings(&id, &input.keys)
         .map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
     let _ = host.events.send((
         "extension.settings",

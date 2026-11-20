@@ -2,11 +2,15 @@ import { test as base, expect, type Page } from '@playwright/test';
 const testOrigin = `http://127.0.0.1:${process.env.COLECTO_TEST_PORT ?? '4179'}`;
 export const ownerToken = 'b'.repeat(64);
 const owner = { authorization: `Bearer ${'b'.repeat(64)}`, origin: testOrigin, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' };
-const bundledDefaults: Record<string, Record<string, unknown>> = {
-  inbox: { density: 'full', date_groups: true, prefetch: true, prefetch_count: 50 },
-  reader: { remote_images: false },
-  notifications: { mail: true, approvals: true, updates: true },
+/** Bundled extensions' setting keys, returned to their defaults before each test. */
+const bundledSettings: Record<string, string[]> = {
+  inbox: ['density', 'date_groups', 'prefetch', 'prefetch_count'],
+  reader: ['remote_images'],
+  notifications: ['mail', 'approvals', 'updates'],
 };
+/** Core settings shown in Settings, returned to their defaults before each test. */
+const coreSettings = ['accent', 'font', 'font_size', 'text_spacing.letter', 'text_spacing.word', 'text_spacing.line', 'text_spacing.paragraph',
+  'notifications.enabled', 'notifications.system', 'notifications.position'];
 
 /** Change a bundled extension's settings, as Settings would. */
 export async function setExtensionSettings(page: Page, id: string, values: Record<string, unknown>) {
@@ -45,11 +49,11 @@ export const test = base.extend({
       headers: { authorization: `Bearer ${ownerToken}`, origin: testOrigin, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' },
       // A fresh Host starts with the demo account off and onboarding pending; most specs use sample mail.
       data: { workspace: {}, account: 'demo', list_density: 'full', date_groups: true, accounts_enabled: { demo: true }, onboarded: true,
-        notifications: { enabled: true, system: false, position: 'top' } },
+        reset: coreSettings },
     });
     // Bundled extensions keep their settings in the shared Host too: start each test from defaults.
-    for (const [id, values] of Object.entries(bundledDefaults)) {
-      await page.request.put(`${testOrigin}/api/v1/extensions/${id}/settings`, { headers: owner, data: values });
+    for (const [id, keys] of Object.entries(bundledSettings)) {
+      await page.request.post(`${testOrigin}/api/v1/extensions/${id}/settings/reset`, { headers: owner, data: { keys } });
     }
     await page.addInitScript(({ token, origin }) => {
       // `window.origin` is null in sandboxed frames (extension runtimes), unlike location.origin.

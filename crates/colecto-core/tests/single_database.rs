@@ -14,16 +14,34 @@ fn sample_data(dir: &Path) -> String {
         })
         .unwrap();
     store.update_label("Work", None, false).unwrap();
+    store.update_label("Work", Some("welcome"), false).unwrap();
     drop(store);
-    Database::open(dir)
-        .unwrap()
+    let database = Database::open(dir).unwrap();
+    database
         .write_settings(
             "core",
             &[("list_density".into(), Some("\"compact\"".into()))],
         )
         .unwrap();
+    database
+        .write(vec![
+            (
+                "INSERT INTO api_keys(id,name,accounts,capabilities,created_at,verifier) VALUES (?1,'Assistant','[\"demo\"]','[\"messages.list\"]',100,?2)",
+                vec![KEY_ID.into(), VERIFIER.to_vec().into()],
+            ),
+            (
+                "INSERT INTO send_approvals(id,requester,account,sender,snapshot,created_at,expires_at,status) VALUES ('request','key','demo','me@example.com',NULL,100,700,'pending')",
+                vec![],
+            ),
+        ])
+        .unwrap();
     draft.id
 }
+const KEY_ID: &str = "abababababababababababababababababababababababababababababababab";
+const VERIFIER: [u8; 32] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+    26, 27, 28, 29, 30, 31,
+];
 
 #[test]
 fn drafts_and_labels_live_in_the_database() {
@@ -36,25 +54,24 @@ fn drafts_and_labels_live_in_the_database() {
 
 #[test]
 fn invalid_drafts_are_kept_and_rejected() {
-    for content in [
-        "invalid",
-        r#"{"drafts":[{"id":"draft-1","recipient":"","subject":"","body":""},{"id":"draft-1","recipient":"","subject":"","body":""}]}"#,
-    ] {
-        let dir = tempfile::tempdir().unwrap();
-        drop(MailStore::open(dir.path()).unwrap());
-        let database = Database::open(dir.path()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    drop(MailStore::open(dir.path()).unwrap());
+    let database = Database::open(dir.path()).unwrap();
+    database
+        .write(vec![(
+            "INSERT INTO drafts(account,id,recipient,cc,subject,body,in_reply_to,message_references) VALUES ('demo',1,'','','two\nlines','','','')",
+            vec![],
+        )])
+        .unwrap();
+    assert!(MailStore::open(dir.path()).is_err());
+    assert_eq!(
         database
-            .set_record("account:demo", "drafts", content.as_bytes())
-            .unwrap();
-        assert!(MailStore::open(dir.path()).is_err());
-        assert_eq!(
-            database
-                .get_record("account:demo", "drafts")
-                .unwrap()
-                .unwrap(),
-            content.as_bytes()
-        );
-    }
+            .query("SELECT subject FROM drafts", vec![])
+            .unwrap()[0]
+            .text(0)
+            .unwrap(),
+        "two\nlines"
+    );
 }
 
 /// Every database a released schema version wrote must still open and keep its data.
@@ -69,14 +86,30 @@ fn every_schema_fixture_opens_and_keeps_its_data() {
         std::fs::copy(&fixture, dir.path().join("colecto.db")).unwrap();
         let store = MailStore::open(dir.path()).unwrap();
         assert_eq!(store.drafts()[0].subject, "kept", "{}", fixture.display());
-        assert!(store.labels().unwrap().contains_key("Work"));
+        assert_eq!(store.labels().unwrap()["Work"], ["welcome"]);
         drop(store);
+        let database = Database::open(dir.path()).unwrap();
         assert_eq!(
-            Database::open(dir.path())
-                .unwrap()
-                .settings("core")
-                .unwrap(),
+            database.settings("core").unwrap(),
             vec![("list_density".to_string(), "\"compact\"".to_string())]
+        );
+        let key = &database
+            .query("SELECT id,name,accounts,verifier FROM api_keys", vec![])
+            .unwrap()[0];
+        assert_eq!(key.text(0).unwrap(), KEY_ID);
+        assert_eq!(key.text(1).unwrap(), "Assistant");
+        assert_eq!(key.text(2).unwrap(), r#"["demo"]"#);
+        assert_eq!(key.blob(3).unwrap(), VERIFIER);
+        let request = &database
+            .query("SELECT sender,status FROM send_approvals", vec![])
+            .unwrap()[0];
+        assert_eq!(request.text(0).unwrap(), "me@example.com");
+        assert_eq!(request.text(1).unwrap(), "pending");
+        assert!(
+            database
+                .query("SELECT name FROM records WHERE name IN ('drafts','labels','api-keys','send-approvals')", vec![])
+                .unwrap()
+                .is_empty()
         );
         versions += 1;
     }

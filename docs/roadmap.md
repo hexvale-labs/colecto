@@ -41,8 +41,8 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | --- | --- |
 | Versioned schema migrations, a copy before each migration, refuse alpha and newer databases | Done |
 | Settings store only what the owner changed; `reset` returns a setting to its default | Done |
-| Separate tables for drafts, labels, API keys and send approvals instead of one document each | Next |
-| "Reset to default" buttons in Settings | Next |
+| Separate tables for drafts, labels, API keys and send approvals instead of one document each | Done |
+| "Reset to defaults" in Settings for changed text, notification and extension settings | Done |
 | `colecto-daemon export` of accounts (without secrets), settings, drafts and labels | Later |
 
 ## App

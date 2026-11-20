@@ -40,7 +40,14 @@
   const title = $derived(manifest.settings_page?.title ?? manifest.name);
   // Setting names sit one level below the heading they are grouped under.
   const nameTag = $derived(section ? 'h4' : 'h3');
-  function reset() { for (const setting of schema) change(setting.key, setting.default); }
+  // Forget the stored values rather than saving the defaults, so a later default applies.
+  async function reset() {
+    await flush();
+    const keys = schema.map(setting => setting.key);
+    for (const key of keys) delete pending[key];
+    try { const next = await extensionHost.resetSettings(manifest.id, keys); if (!disposed) { data = next; error = ''; } }
+    catch (e) { if (!disposed) error = (e as Error).message; }
+  }
   const isDefault = $derived(schema.every(setting => data!.values[setting.key] === setting.default));
   const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
   const shown = (setting: ExtensionSetting, value: Value) => `${number.format(Number(value))}${setting.unit ? (setting.unit === '%' ? '%' : ` ${setting.unit}`) : ''}`;
@@ -89,8 +96,8 @@
         {/if}
       {/each}
       <div class="footer">
-        <!-- Core sections have no reset, so a group placed in one does not add its own. -->
-        {#if !section}<button type="button" class="text-button" disabled={isDefault} onclick={reset}>Reset to defaults</button>{/if}
+        <!-- In a core section, a group offers its reset only once something changed, like the core groups. -->
+        {#if !section || !isDefault}<button type="button" class="text-button" disabled={isDefault} onclick={() => void reset()}>Reset to defaults</button>{/if}
         <span class="save-state" class:visible={saved} role="status">{saved ? 'Saved' : ''}</span>
       </div>
     </div>

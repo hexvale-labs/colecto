@@ -5,7 +5,7 @@ mod content;
 mod database;
 pub use cache::{MailCacheStore, MailSnapshot, SnapshotHandle};
 pub use content::{MAX_CONTENT_BYTES, MAX_CONTENT_MESSAGES};
-pub use database::{Database, SCHEMA_VERSION};
+pub use database::{Database, Row, SCHEMA_VERSION, Value};
 mod credentials;
 pub use accounts::Accounts;
 pub use credentials::SecretStore;
@@ -18,9 +18,7 @@ pub use jmap::JmapAccount;
 pub use remote::MailAccount;
 
 use colecto_extension_api::{AttachmentInfo, Draft, DraftInput, Message, MessageContent};
-use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, Weak},
@@ -55,10 +53,7 @@ fn storage(error: impl std::fmt::Display) -> Error {
     Error::Storage(error.to_string())
 }
 
-#[derive(Serialize, Deserialize)]
-struct SavedMail {
-    drafts: Vec<Draft>,
-}
+const MAX_DRAFTS: usize = 1000;
 
 #[derive(Clone)]
 enum Account {
@@ -204,6 +199,8 @@ type PushCredentials = Mutex<Option<Arc<Account>>>;
 pub struct MailStore {
     directory: PathBuf,
     database: Database,
+    /// The account ID, which keys its rows in `drafts`, `labels` and the caches.
+    id: String,
     namespace: String,
     drafts: Vec<Draft>,
     messages: Vec<Message>,
@@ -251,11 +248,7 @@ impl MailStore {
             Some(database) => database,
             None => Database::open(&directory)?,
         };
-        let bytes = match database.get_record(&namespace, "drafts")? {
-            Some(bytes) => bytes,
-            None => serde_json::to_vec(&SavedMail { drafts: vec![] }).map_err(storage)?,
-        };
-        let drafts = validate_drafts(&bytes)?;
+        let drafts = load_drafts(&database, account)?;
         let cache = MailCacheStore::with_database(database.clone(), account)?;
         let store = Self {
             cache,
@@ -272,6 +265,7 @@ impl MailStore {
             )),
             directory,
             database,
+            id: account.into(),
             namespace,
             drafts,
             messages: sample_messages(),
@@ -818,41 +812,48 @@ impl MailStore {
             forward_of: input.forward_of,
         };
         validate(&draft)?;
-        let mut drafts = self.drafts.clone();
-        let index = match input.id.as_ref() {
-            Some(id) => Some(
-                drafts
-                    .iter()
-                    .position(|d| &d.id == id)
-                    .ok_or(Error::Missing)?,
-            ),
-            None => None,
-        };
-        let id = match input.id {
-            Some(id) => id,
+        let number = match input.id.as_ref() {
+            Some(id) => {
+                self.draft(id).ok_or(Error::Missing)?;
+                draft_number(id).ok_or(Error::Missing)?
+            }
             None => {
-                let next = drafts
+                if self.drafts.len() >= MAX_DRAFTS {
+                    return Err(Error::Invalid(format!(
+                        "An account can have at most {MAX_DRAFTS} drafts"
+                    )));
+                }
+                self.drafts
                     .iter()
-                    .filter_map(|d| d.id.strip_prefix("draft-")?.parse::<u64>().ok())
+                    .filter_map(|d| draft_number(&d.id))
                     .max()
                     .unwrap_or(0)
                     .checked_add(1)
-                    .ok_or_else(|| Error::Invalid("Draft ID limit reached".into()))?;
-                format!("draft-{next}")
+                    .ok_or_else(|| Error::Invalid("Draft ID limit reached".into()))?
             }
         };
-        let draft = Draft { id, ..draft };
-        match index {
-            Some(index) => drafts[index] = draft.clone(),
-            None => drafts.push(draft.clone()),
+        let draft = Draft {
+            id: format!("draft-{number}"),
+            ..draft
+        };
+        self.database.write(vec![(
+            "INSERT OR REPLACE INTO drafts(account,id,recipient,cc,subject,body,in_reply_to,message_references,forward_of) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            vec![
+                self.id.as_str().into(),
+                number.into(),
+                draft.recipient.as_str().into(),
+                draft.cc.as_str().into(),
+                draft.subject.as_str().into(),
+                draft.body.as_str().into(),
+                draft.in_reply_to.as_str().into(),
+                draft.references.as_str().into(),
+                draft.forward_of.as_deref().into(),
+            ],
+        )])?;
+        match self.drafts.iter_mut().find(|d| d.id == draft.id) {
+            Some(slot) => *slot = draft.clone(),
+            None => self.drafts.push(draft.clone()),
         }
-        let saved = SavedMail { drafts };
-        self.database.set_record(
-            &self.namespace,
-            "drafts",
-            &serde_json::to_vec(&saved).map_err(storage)?,
-        )?;
-        self.drafts = saved.drafts;
         Ok(draft)
     }
 }
@@ -862,22 +863,38 @@ fn imap_folder_id(id: &str, folder: &str) -> bool {
         .is_some_and(|rest| rest.matches('-').count() == if folder == "inbox" { 1 } else { 2 })
 }
 
-fn validate_drafts(bytes: &[u8]) -> Result<Vec<Draft>, Error> {
-    if bytes.len() > 32_000_000 {
-        return Err(storage("Draft store exceeds its size limit"));
+/// The number in a draft ID `draft-<n>`.
+fn draft_number(id: &str) -> Option<i64> {
+    id.strip_prefix("draft-")?
+        .parse::<i64>()
+        .ok()
+        .filter(|n| *n > 0)
+}
+
+fn load_drafts(database: &Database, account: &str) -> Result<Vec<Draft>, Error> {
+    let rows = database.query(
+        "SELECT id,recipient,cc,subject,body,in_reply_to,message_references,forward_of FROM drafts WHERE account=?1 ORDER BY id",
+        vec![account.into()],
+    )?;
+    if rows.len() > MAX_DRAFTS {
+        return Err(storage("Too many stored drafts"));
     }
-    let saved: SavedMail = serde_json::from_slice(bytes).map_err(storage)?;
-    let mut ids = HashSet::new();
-    for draft in &saved.drafts {
-        if !draft.id.starts_with("draft-")
-            || draft.id[6..].parse::<u64>().is_err()
-            || !ids.insert(&draft.id)
-        {
-            return Err(storage("Invalid or duplicate draft ID"));
-        }
-        validate(draft)?;
-    }
-    Ok(saved.drafts)
+    rows.iter()
+        .map(|row| {
+            let draft = Draft {
+                id: format!("draft-{}", row.integer(0)?),
+                recipient: row.text(1)?,
+                cc: row.text(2)?,
+                subject: row.text(3)?,
+                body: row.text(4)?,
+                in_reply_to: row.text(5)?,
+                references: row.text(6)?,
+                forward_of: row.optional_text(7)?,
+            };
+            validate(&draft).map_err(|e| storage(format!("Invalid stored draft: {e}")))?;
+            Ok(draft)
+        })
+        .collect()
 }
 
 fn message_bytes(message: &Message) -> usize {
@@ -1182,10 +1199,16 @@ mod cache_tests {
             ..Default::default()
         };
         let draft = store.save_draft(input.clone()).unwrap();
-        let before = store
-            .database
-            .get_record(&store.namespace, "drafts")
-            .unwrap();
+        let stored = |store: &MailStore| {
+            store
+                .database
+                .query("SELECT subject FROM drafts", vec![])
+                .unwrap()
+                .iter()
+                .map(|row| row.text(0).unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(stored(&store), ["Saved"]);
         futures_executor::block_on(
             store
                 .database
@@ -1204,13 +1227,7 @@ mod cache_tests {
                 .is_err()
         );
         assert_eq!(store.draft(&draft.id).unwrap().subject, "Saved");
-        assert_eq!(
-            store
-                .database
-                .get_record(&store.namespace, "drafts")
-                .unwrap(),
-            before
-        );
+        assert_eq!(stored(&store), ["Saved"]);
     }
     #[test]
     fn reader_cache_bounds_memory_across_many_searches() {

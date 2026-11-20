@@ -5,7 +5,7 @@
 //! The UI owns the layout's shape; the Host only bounds it, because it never acts on it.
 use colecto_core::Database;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_WORKSPACE_BYTES: usize = 64 * 1024;
 
@@ -251,26 +251,42 @@ fn validate(preferences: &Preferences) -> Result<(), String> {
 /// Settings scope of the owner preferences in the `settings` table.
 const SCOPE: &str = "core";
 
+/// What `/api/v1/preferences` returns: the preferences, and the setting keys the owner
+/// changed, so Settings can offer to reset them.
+#[derive(Serialize)]
+pub struct PreferencesView {
+    #[serde(flatten)]
+    pub preferences: Preferences,
+    pub changed: BTreeSet<String>,
+}
+
 pub struct PreferenceStore {
     database: Database,
     value: Preferences,
+    changed: BTreeSet<String>,
 }
 impl PreferenceStore {
     pub fn open(database: Database) -> Result<Self, String> {
-        let (value, _) = crate::store::load_settings(&database, SCOPE, validate)?;
-        Ok(Self { database, value })
+        let (value, changed) = crate::store::load_settings(&database, SCOPE, validate)?;
+        Ok(Self {
+            database,
+            value,
+            changed,
+        })
     }
     fn save(&mut self, next: Preferences, reset: &[String]) -> Result<(), String> {
         crate::store::save_settings(&self.database, SCOPE, &self.value, &next, reset)?;
-        self.value = if reset.is_empty() {
-            next
-        } else {
-            crate::store::load_settings(&self.database, SCOPE, validate)?.0
-        };
+        (self.value, self.changed) = crate::store::load_settings(&self.database, SCOPE, validate)?;
         Ok(())
     }
     pub fn get(&self) -> &Preferences {
         &self.value
+    }
+    pub fn view(&self) -> PreferencesView {
+        PreferencesView {
+            preferences: self.value.clone(),
+            changed: self.changed.clone(),
+        }
     }
     /// Forget a removed account's selection and on/off choice.
     pub fn clear_account(&mut self, id: &str) -> Result<(), String> {
@@ -458,6 +474,7 @@ mod tests {
             .map(|(key, _)| key)
             .collect();
         assert_eq!(keys, ["accent", "notifications.position"]);
+        assert_eq!(store.view().changed, keys.iter().cloned().collect());
         assert_eq!(store.get().accent.as_deref(), Some("#aabbcc"));
         // An empty accent and `reset` both return to the default.
         let value = store
@@ -471,6 +488,7 @@ mod tests {
         assert_eq!(value.accent, None);
         assert_eq!(value.notifications.position, Corner::Top);
         assert!(database.settings(SCOPE).unwrap().is_empty());
+        assert!(store.view().changed.is_empty());
     }
     #[test]
     fn mcp_starts_off_and_preferences_survive_restart_within_bounds() {
