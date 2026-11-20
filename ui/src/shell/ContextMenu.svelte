@@ -3,6 +3,7 @@
   // It opens at the pointer, or under the row from the keyboard, and stays inside the window.
   import { tick } from 'svelte';
   import Icon from '../Icon.svelte';
+  import { prefersReducedMotion } from '../lib/ui';
   import type { ExtensionRuntime } from '../runtime/runtime.svelte';
   let { runtime }: { runtime: ExtensionRuntime } = $props();
   let menu = $state<HTMLElement>();
@@ -10,7 +11,6 @@
   const MARGIN = 8;
   const left = $derived(Math.max(MARGIN, Math.min(runtime.menu!.x, window.innerWidth - size.width - MARGIN)));
   const top = $derived(Math.max(MARGIN, runtime.menu!.y + size.height + MARGIN > window.innerHeight ? runtime.menu!.y - size.height : runtime.menu!.y));
-  const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const items = () => [...(menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
   let opener: Element | null = null;
   $effect(() => {
@@ -39,7 +39,7 @@
 
 <svelte:window onresize={() => runtime.menu = null} onblur={() => runtime.menu = null} />
 <div class="select-scrim" aria-hidden="true" onpointerdown={() => runtime.menu = null} oncontextmenu={reopen}></div>
-<div bind:this={menu} bind:clientWidth={size.width} bind:clientHeight={size.height} class="select-menu context-menu" class:still={reduced} role="menu" tabindex="-1" aria-label={runtime.menu!.label ?? 'Message actions'} style:left={`${left}px`} style:top={`${top}px`} onkeydown={keydown}>
+<div bind:this={menu} bind:clientWidth={size.width} bind:clientHeight={size.height} class="select-menu context-menu" class:still={prefersReducedMotion()} role="menu" tabindex="-1" aria-label={runtime.menu!.label ?? 'Message actions'} style:left={`${left}px`} style:top={`${top}px`} onkeydown={keydown}>
   {#each runtime.menu!.items ?? [] as item (item.id)}
     {#if item.separator}<div class="context-separator" role="separator"></div>{/if}
     <button role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={item.checked} class:destructive={item.danger} disabled={item.disabled} onclick={() => runtime.chooseMenu(item.id)}>

@@ -333,8 +333,8 @@ function render() {
         ...(names.length ? [{ type: 'button', id: 'label-all', variant: 'chip', label: 'All', pressed: !labelFilter }] : []),
         // Label names can hold any character, so nodes are named by position.
         ...names.map((name, index) => ({ type: 'stack', preset: 'chip_group', children: [
-          { type: 'button', id: `label.${index}`, variant: 'chip', label: name, pressed: labelFilter === name },
-          ...(labelFilter === name ? [{ type: 'button', id: `delete-label.${index}`, variant: 'chip_remove', icon: 'close', label: `Delete label ${name}`, disabled: labeling || loading }] : []),
+          { type: 'button', id: `label.${index}`, variant: 'chip', label: clip(name, 128), pressed: labelFilter === name },
+          ...(labelFilter === name ? [{ type: 'button', id: `delete-label.${index}`, variant: 'chip_remove', icon: 'close', label: clip(`Delete label ${name}`, 128), disabled: labeling || loading }] : []),
         ] })),
         { type: 'form', id: `new-label-form-${labelEpoch}`, preset: 'chip_input', children: [
           { type: 'input', id: 'new-label', preset: 'chip', label: 'New label', placeholder: 'New label', maxlength: 80, report: 'input', debounce_ms: 0 },
@@ -363,7 +363,7 @@ function commands() {
     ...(labelFilter || sort !== 'newest' || appliedQuery ? [{ id: 'clear-filters', name: 'Clear search, sorting and filters' }] : []),
     { id: 'new-label', name: 'Create a local label' },
     { id: 'refresh', name: 'Refresh current mailbox' },
-    ...Object.keys(labels).map(name => ({ id: `label:${name}`, name: clip(`Filter label: ${name}`, 96) })),
+    ...Object.keys(labels).map((name, index) => ({ id: `label:${index}`, name: clip(`Filter label: ${name}`, 96) })),
   ].slice(0, 64) });
 }
 
@@ -424,19 +424,22 @@ function showMenu(id: string) {
   if (!folderList.length) void loadFolders();
   const here = remoteOf(folder);
   const archive = folderList.find(entry => entry.role === 'archive');
-  const names = Object.keys(labels).slice(0, 8);
+  const showArchive = Boolean(archive && folder !== 'Sent' && here !== archive.id);
+  const fixed = 3 + (showArchive ? 1 : 0);
+  const actions = rowActions.slice(0, Math.max(0, 24 - fixed));
+  const names = Object.keys(labels).slice(0, Math.min(8, Math.max(0, 24 - fixed - actions.length)));
   const head = [
     { id: 'read', label: item.seen ? 'Mark as unread' : 'Mark as read', icon: item.seen ? 'mail' : 'eye' },
     { id: 'star', label: item.flagged ? 'Remove star' : 'Star', icon: 'star' },
-    ...rowActions.map((action, index) => ({ id: `ext:${index}`, label: clip(action.label, 64), icon: action.icon, ...(index === 0 ? { separator: true } : {}) })),
+    ...actions.map((action, index) => ({ id: `ext:${index}`, label: clip(action.label, 64), icon: action.icon, ...(index === 0 ? { separator: true } : {}) })),
     ...names.map((name, index) => ({ id: `label:${index}`, label: clip(`Label: ${name}`, 64), checked: !!labels[name]?.includes(id), ...(index === 0 ? { separator: true } : {}) })),
-    ...(archive && folder !== 'Sent' && here !== archive.id ? [{ id: 'archive', label: 'Archive', icon: 'archive', separator: true }] : []),
+    ...(showArchive ? [{ id: 'archive', label: 'Archive', icon: 'archive', separator: true }] : []),
   ];
   // The same folders the folder bar shows, as many as the menu's 24 entries allow.
-  const others = otherFolders().filter(entry => entry.role !== 'archive' && entry.role !== 'trash' && entry.id !== here).slice(0, 24 - head.length - 1);
+  const others = otherFolders().filter(entry => entry.role !== 'archive' && entry.role !== 'trash' && entry.id !== here).slice(0, Math.max(0, 24 - head.length - 1));
   app.send({ t: 'menu', surface: 'pane', node: 'messages', key: id, items: [
     ...head,
-    ...others.map((entry, index) => ({ id: `move:${entry.id}`, label: clip(`Move to ${folderLabel(entry)}`, 64), icon: folderIcon(entry.role), ...(index === 0 && !head.some(entry => entry.id === 'archive') ? { separator: true } : {}) })),
+    ...others.map((entry, index) => ({ id: `move:${entry.id}`, label: clip(`Move to ${folderLabel(entry)}`, 64), icon: folderIcon(entry.role), ...(index === 0 && !showArchive ? { separator: true } : {}) })),
     { id: 'delete', label: 'Move to Trash', icon: 'trash', danger: true, separator: true },
   ] });
 }
@@ -505,7 +508,10 @@ app.on('command', message => {
   else if (id === 'clear-filters') { sort = 'newest'; labelFilter = ''; if (appliedQuery) { query = ''; searchEpoch++; void runSearch(); } render(); }
   else if (id === 'new-label') { if (folder === 'Drafts') navigate('Inbox'); app.send({ t: 'show', surface: 'pane' }); app.send({ t: 'focus', surface: 'pane', node: 'new-label' }); }
   else if (id === 'refresh') void load();
-  else if (id.startsWith('label:')) { if (folder !== 'Inbox') navigate('Inbox'); labelFilter = id.slice(6); render(); }
+  else if (id.startsWith('label:')) {
+    const name = Object.keys(labels)[Number(id.slice(6))];
+    if (name) { if (folder !== 'Inbox') navigate('Inbox'); labelFilter = name; render(); }
+  }
   else if (id.startsWith('open:')) open(id.slice(5));
 });
 
@@ -515,7 +521,7 @@ app.on('command_query', message => {
   // The command runner takes the same filters as the search field.
   const parsed = parse(String(message.query).trim());
   const hits = parsed.words.length || parsed.filters.length ? items.filter(item => matches(item, parsed)).slice(0, 6)
-    .map(item => ({ id: `open:${item.id}`, title: item.subject || '(No subject)', hint: item.name })) : [];
+    .map(item => ({ id: `open:${item.id}`, title: clip(item.subject || '(No subject)', 128), hint: clip(item.name, 128) })) : [];
   app.send({ t: 'command_hits', seq: message.seq, hits });
 });
 app.on('command_submit', message => { query = String(message.query); searchEpoch++; if (folder === 'Drafts') navigate('Inbox'); void load(true); });

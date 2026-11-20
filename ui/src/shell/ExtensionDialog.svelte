@@ -3,6 +3,7 @@
   // never pass as Colecto's own. Escape always closes it.
   import { setContext } from 'svelte';
   import Icon from '../Icon.svelte';
+  import { modal } from '../lib/ui';
   import Node from '../renderer/Node.svelte';
   import type { SurfaceContext } from '../renderer/Surface.svelte';
   import type { ExtensionRuntime } from '../runtime/runtime.svelte';
@@ -16,13 +17,12 @@
     menu: (node, key, x, y) => runtime.openMenu('dialog', node, key, x, y),
     localMenu: (x, y, label, items, choose) => runtime.localMenu(x, y, label, items, choose),
   });
-  function open(node: HTMLDialogElement) { node.showModal(); return { destroy() { node.close(); } }; }
   function close() { runtime.dialog = null; runtime.event('dialog', '', 'close'); }
 </script>
 
 {#if runtime.dialog}
   <!-- Named by the extension's own label when it gives one; the header still names the extension. -->
-  <dialog class="sheet x-dialog" aria-label={typeof runtime.dialog.label === 'string' ? runtime.dialog.label : `${runtime.name} dialog`} use:open oncancel={(event) => { event.preventDefault(); close(); }}>
+  <dialog class="sheet x-dialog" aria-label={typeof runtime.dialog.label === 'string' ? runtime.dialog.label : `${runtime.name} dialog`} use:modal oncancel={(event) => { event.preventDefault(); close(); }}>
     <header class="sheet-head x-dialog-head">
       <span class="x-dialog-source"><Icon name="extension" size={14} />{runtime.name}</span>
       <button type="button" class="icon-button" aria-label="Close" onclick={close}><Icon name="close" size={16} /></button>

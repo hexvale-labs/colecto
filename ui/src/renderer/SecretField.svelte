@@ -3,7 +3,7 @@
   // extension's Worker. Once saved, the Host only says that a key exists.
   import { request } from '../lib/api';
   let { label, target, saved, onsaved }: { label: string; target: 'ai.text' | 'ai.decision'; saved: boolean; onsaved: (saved: boolean) => void } = $props();
-  const uid = Math.random().toString(36).slice(2);
+  const uid = $props.id();
   let replacing = $state(false);
   let value = $state('');
   let busy = $state(false);

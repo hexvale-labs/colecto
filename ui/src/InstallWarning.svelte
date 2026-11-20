@@ -1,18 +1,19 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { capabilityLabel } from './lib/capabilities';
   import type { Capability } from './lib/api';
+  import { modal } from './lib/ui';
   import Icon from './Icon.svelte';
   let { name, capabilities, onconfirm, oncancel }: { name: string; capabilities: Capability[]; onconfirm: () => void; oncancel: () => void } = $props();
   // A short, unskippable pause, so the warning is read rather than clicked through.
   let left = $state(5);
-  function show(node: HTMLDialogElement) {
-    node.showModal();
+  onMount(() => {
     const timer = setInterval(() => { left -= 1; if (left <= 0) clearInterval(timer); }, 1000);
-    return { destroy() { clearInterval(timer); node.close(); } };
-  }
+    return () => clearInterval(timer);
+  });
 </script>
 
-<dialog class="install-warning" aria-labelledby="install-warning-title" aria-describedby="install-warning-text" use:show oncancel={(event) => { event.preventDefault(); oncancel(); }}>
+<dialog class="install-warning" aria-labelledby="install-warning-title" aria-describedby="install-warning-text" use:modal oncancel={(event) => { event.preventDefault(); oncancel(); }}>
   <span class="warning-mark" aria-hidden="true"><Icon name="alert" size={22} /></span>
   <h2 id="install-warning-title">Only install extensions you trust</h2>
   <div id="install-warning-text" class="warning-text">

@@ -3,6 +3,7 @@
 //! so opening the app many times makes at most one request every few hours.
 use serde::{Deserialize, Serialize};
 use std::{
+    io::Read,
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -63,7 +64,9 @@ fn newer(current: &str, release: GitHubRelease) -> Option<Release> {
 }
 
 fn fetch(current: &str) -> Result<Option<Release>, String> {
-    let failed = |_| "Could not check for updates".to_string();
+    fn failed<E>(_: E) -> String {
+        "Could not check for updates".to_string()
+    }
     let response = reqwest::blocking::Client::builder()
         .timeout(TIMEOUT)
         .user_agent(format!("colecto/{current}"))
@@ -74,12 +77,14 @@ fn fetch(current: &str) -> Result<Option<Release>, String> {
         .send()
         .and_then(|response| response.error_for_status())
         .map_err(failed)?;
-    let body = response.bytes().map_err(failed)?;
+    let mut body = Vec::new();
+    std::io::Read::take(response, MAX_BODY as u64 + 1)
+        .read_to_end(&mut body)
+        .map_err(failed)?;
     if body.len() > MAX_BODY {
-        return Err("Could not check for updates".into());
+        return Err(failed(()));
     }
-    let release: GitHubRelease =
-        serde_json::from_slice(&body).map_err(|_| "Could not check for updates".to_string())?;
+    let release: GitHubRelease = serde_json::from_slice(&body).map_err(failed)?;
     Ok(newer(current, release))
 }
 

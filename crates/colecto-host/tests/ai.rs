@@ -421,3 +421,227 @@ async fn label_rules_are_validated_and_previewed_against_the_saved_inbox() {
     assert_eq!(body["checked"], 4);
     assert_eq!(body["count"], 3);
 }
+
+#[tokio::test]
+async fn changing_base_url_clears_saved_key_and_requires_unlocked_vault() {
+    let (url1, seen1) = services().await;
+    let (url2, seen2) = services().await;
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path());
+    let (status, _, _) = call(
+        &router,
+        "POST",
+        "/api/v1/security",
+        "host",
+        serde_json::json!({"action":"protect","password":"a strong master password"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = call(
+        &router,
+        "POST",
+        "/api/v1/ai/settings",
+        "host",
+        settings(&url1, "chat-model"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for (kind, key) in [
+        ("text", "sk-text-secret"),
+        ("decision", "sk-decision-secret"),
+    ] {
+        let (status, body, _) = call(
+            &router,
+            "POST",
+            "/api/v1/ai/keys",
+            "host",
+            serde_json::json!({"kind":kind,"key":key}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["keys"][kind], true);
+    }
+
+    // Changing only the model name or a trailing slash keeps both saved keys.
+    let mut same_origin = settings(&url1, "other-model");
+    same_origin["text"]["base_url"] = serde_json::json!(format!("{url1}/v1"));
+    same_origin["decision"]["base_url"] = serde_json::json!(format!("{url1}/"));
+    let (status, body, _) = call(&router, "POST", "/api/v1/ai/settings", "ai", same_origin).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["keys"],
+        serde_json::json!({"text": true, "decision": true})
+    );
+
+    // Changing text.base_url (even via an extension with ai.configure) clears the text key so
+    // it can never be forwarded to a new endpoint, while keeping the decision key intact.
+    let mut moved_text = settings(&url1, "chat-model");
+    moved_text["text"]["base_url"] = serde_json::json!(format!("{url2}/v1"));
+    let (status, body, _) = call(&router, "POST", "/api/v1/ai/settings", "ai", moved_text).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["keys"],
+        serde_json::json!({"text": false, "decision": true})
+    );
+    let (status, _, _) = call(
+        &router,
+        "POST",
+        "/api/v1/ai/test",
+        "ai",
+        serde_json::json!({"kind":"text"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(seen1.lock().unwrap().is_empty());
+    assert_eq!(seen2.lock().unwrap().last().unwrap().1, None);
+
+    // Changing decision.base_url likewise clears the decision key before any request is sent.
+    let (status, body, _) = call(
+        &router,
+        "POST",
+        "/api/v1/ai/settings",
+        "ai",
+        settings(&url2, "chat-model"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["keys"],
+        serde_json::json!({"text": false, "decision": false})
+    );
+    let (status, _, _) = call(
+        &router,
+        "POST",
+        "/api/v1/ai/test",
+        "ai",
+        serde_json::json!({"kind":"decision"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(seen2.lock().unwrap().last().unwrap().1, None);
+
+    // Re-save a key, lock the vault, and verify changing base_url is refused with 409 and
+    // leaves the saved address untouched until the vault is unlocked.
+    let (status, _, _) = call(
+        &router,
+        "POST",
+        "/api/v1/ai/keys",
+        "host",
+        serde_json::json!({"kind":"text","key":"sk-locked-secret"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = call(
+        &router,
+        "POST",
+        "/api/v1/security",
+        "host",
+        serde_json::json!({"action":"lock"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = call(
+        &router,
+        "POST",
+        "/api/v1/ai/settings",
+        "ai",
+        settings(&url1, "chat-model"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, body, _) = call(
+        &router,
+        "GET",
+        "/api/v1/ai/settings",
+        "host",
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["settings"]["text"]["base_url"], format!("{url2}/v1/"));
+
+    // Once unlocked, changing base_url succeeds and clears the key.
+    let (status, _, _) = call(
+        &router,
+        "POST",
+        "/api/v1/security",
+        "host",
+        serde_json::json!({"action":"unlock","password":"a strong master password"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body, _) = call(
+        &router,
+        "POST",
+        "/api/v1/ai/settings",
+        "ai",
+        settings(&url1, "chat-model"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["keys"]["text"], false);
+}
+
+#[tokio::test]
+async fn preview_requires_messages_read_for_extensions() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = app(dir.path());
+    let mut pkg = colecto_host::package::Package {
+        manifest: r#"
+id = "ai-config-only"
+name = "AI Config Only"
+description = "Has ai.configure without messages.read"
+author = "Test"
+api_version = 1
+client = "client/main.js"
+capabilities = ["ai.configure"]
+"#
+        .into(),
+        ..Default::default()
+    };
+    pkg.client
+        .insert("client/main.js".into(), b"export default {};".to_vec());
+    let (status, _, text) = call(
+        &router,
+        "POST",
+        "/api/v1/extensions",
+        "host",
+        serde_json::json!({"package": colecto_host::package::write(&pkg)}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+
+    let preview_body = serde_json::json!({"rule": {"enabled": true, "model": false, "description": "", "rules": [
+        {"field":"sender","pattern":"example\\.test$"}
+    ]}});
+    // Can read AI settings, but cannot probe saved mail via preview without messages.read.
+    let (status, _, _) = call(
+        &router,
+        "GET",
+        "/api/v1/ai/settings",
+        "ai-config-only",
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = call(
+        &router,
+        "POST",
+        "/api/v1/ai/labels/preview",
+        "ai-config-only",
+        preview_body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // Bundled `ai` has both ai.configure and messages.read.
+    let (status, body, _) = call(
+        &router,
+        "POST",
+        "/api/v1/ai/labels/preview",
+        "ai",
+        preview_body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 3);
+}

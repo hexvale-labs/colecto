@@ -155,7 +155,7 @@ function conversationPart(when: 'before' | 'after'): Node[] {
       const open = expanded.has(item.id);
       const first = fresh.split('\n').map(line => line.trim()).find(Boolean) ?? '';
       return { key: item.id, kind: 'row' as const, node: { type: 'stack', gap: 6, children: [
-        { type: 'button', id: `conversation-item.${index}`, variant: 'text', pressed: open, label: clip(`${item.sender || item.address} · ${when_(item.date)}`, 256), title: open ? 'Collapse' : 'Expand' },
+        { type: 'button', id: `conversation-item.${index}`, variant: 'text', pressed: open, label: clip(`${item.sender || item.address} · ${when_(item.date)}`, 128), title: open ? 'Collapse' : 'Expand' },
         open ? { type: 'text', tone: 'muted', wrap: 'pre', text: clip(fresh, 4000) } as Node : { type: 'text', tone: 'muted', size: 'sm', text: clip(first, 200) || '(No text)' } as Node,
         ...(open ? [{ type: 'button', id: `conversation.${index}`, variant: 'text', label: 'Open this message' } as Node] : []),
       ] } };
@@ -237,7 +237,7 @@ async function save(file: AttachmentInfo) {
   downloading = file.index; contentError = ''; render();
   try {
     const data = await call<ArrayBuffer>('GET', `/messages/${encodeURIComponent(view.id)}/attachments/${file.index}`, { bytes: true });
-    app.send({ t: 'download', name: file.name, data: { $buffer: 0 } }, [data]);
+    app.send({ t: 'download', name: clip(file.name, 128), data: { $buffer: 0 } }, [data]);
   } catch (e) { contentError = (e as Error).message; }
   finally { downloading = null; render(); }
 }
@@ -306,7 +306,7 @@ function render() {
     ...stepper(),
     { type: 'message_header', subject: clip(message.subject, 1024), sender: clip(message.sender, 512), address: clip(message.address, 512), ...(date?.full ? { date: clip(date.full, 128), date_title: clip(message.date, 512) } : {}) },
     ...(labelError ? [{ type: 'text', preset: 'error', text: labelError } as Node] : []),
-    ...(names.length ? [{ type: 'fieldset', preset: 'chips', legend: 'Labels', legend_hidden: true, disabled: labeling, children: names.map((name, index) => ({ type: 'toggle', id: `label.${index}`, style: 'chip', label: `Label ${name}`, label_hidden: true, checked: labels[name].includes(view!.id) })) } as Node] : []),
+    ...(names.length ? [{ type: 'fieldset', preset: 'chips', legend: 'Labels', legend_hidden: true, disabled: labeling, children: names.map((name, index) => ({ type: 'toggle', id: `label.${index}`, style: 'chip', label: clip(`Label ${name}`, 128), label_hidden: true, checked: labels[name].includes(view!.id) })) } as Node] : []),
     ...(content?.attachments.length ? [{ type: 'attachments', id: 'attachments', label: 'Attachments', disabled: downloading !== null, items: content.attachments.map(file => ({ index: file.index, name: file.name, detail: downloading === file.index ? 'Downloading…' : size(file.size) })) } as Node] : []),
     { type: 'slot', id: 'summary-slot', name: 'v1/above_body', context: { account, message_id: view.id } },
     ...(contentError ? [{ type: 'text', preset: 'note', role: 'status', text: `Showing saved text. ${contentError}` } as Node] : []),

@@ -26,8 +26,10 @@ let scheduled = false;
 // history, or the traversal would cancel that navigation.
 let leaving = false;
 
+import { prefersReducedMotion } from './ui';
+
 const levelOf = (state: unknown) => typeof (state as { colectoBack?: unknown } | null)?.colectoBack === 'number' ? (state as { colectoBack: number }).colectoBack : 0;
-const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reduced = prefersReducedMotion;
 
 // History changes are batched to a microtask so closing one thing and opening another in the
 // same update moves history once, and never pushes while a traversal is still in flight.

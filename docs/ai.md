@@ -40,8 +40,10 @@ Navigation id `ai` (`settings/ai` for `app.navigate`). The page belongs to the b
 | Automatic labels (`autolabel`) | Off | Runs only while AI features are also on |
 
 API keys are write-only. `POST /ai/keys` stores or removes one; the settings response
-only says whether a key is saved. Keys are optional: without one, no `Authorization`
-header is sent, which suits services running on the owner's own computer.
+only says whether a key is saved. Changing a model's base URL clears its saved key (and
+is refused with HTTP 409 while the credential vault is locked), so a saved key is never
+sent to a different address. Keys are optional: without one, no `Authorization` header
+is sent, which suits services running on the owner's own computer.
 
 ## Requests and answers
 
@@ -176,7 +178,7 @@ and is reached only from the trusted key field the shell draws.
 | `GET`/`POST /ai/settings` | Owner, or an extension with `ai.configure` | Read or replace the settings; returns `{settings, keys:{text,decision}}` |
 | `POST /ai/keys` | Owner only | `{kind:"text"\|"decision", key:string\|null}` |
 | `POST /ai/test` | Owner, or `ai.configure` | `{kind}`; checks the saved connection |
-| `POST /ai/labels/preview` | Owner, or `ai.configure` (+ `x-colecto-account`) | `{rule}` → `{errors, checked, count, matches}` |
+| `POST /ai/labels/preview` | Owner, or an extension with `ai.configure` and `messages.read` (+ `x-colecto-account`) | `{rule}` → `{errors, checked, count, matches}` |
 | `GET`/`POST`/`DELETE /ai/summaries/{id}` | An extension with `ai.text` and `messages.read` | Read, create or delete the saved summary |
 | `POST /ai/reply` | An extension with `ai.text` and `messages.read` | `{message_id, input, tone}` → `{text}` |
 

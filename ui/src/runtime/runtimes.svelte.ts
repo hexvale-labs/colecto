@@ -53,12 +53,16 @@ class Runtimes {
     for (const runtime of this.list.filter(runtime => !wanted.some(extension => extension.manifest.id === runtime.id))) runtime.stop();
     const kept = this.list.filter(runtime => wanted.some(extension => extension.manifest.id === runtime.id));
     for (const extension of wanted.filter(extension => !kept.some(runtime => runtime.id === extension.manifest.id))) {
-      const runtime = new ExtensionRuntime(extension, () => ({ account: this.#account, accounts: this.#accounts, theme: this.#theme ??= currentTheme(), shell: this.shell }));
+      const runtime = new ExtensionRuntime(
+        extension,
+        () => ({ account: this.#account, accounts: this.#accounts, theme: this.#theme ??= currentTheme(), shell: this.shell }),
+        () => {
+          this.#listen();
+          for (const [full, context] of this.#slots) this.#tellSlot(runtime, full, context);
+        },
+      );
       kept.push(runtime);
-      void runtime.start().then(() => {
-        this.#listen();
-        for (const [full, context] of this.#slots) this.#tellSlot(runtime, full, context);
-      });
+      void runtime.start();
     }
     this.list = kept;
     this.#listen();

@@ -209,13 +209,6 @@ fn mode(protocol: &str, connected: bool, entry: &Entry) -> (Mode, Option<String>
     }
 }
 
-fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
 /// Whether a refresh was asked for or runs in the background.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Origin {
@@ -287,7 +280,7 @@ pub(crate) fn refresh(
                 Ok(_) => {
                     entry.error = None;
                     if folder == "inbox" {
-                        entry.updated_at = Some(now());
+                        entry.updated_at = Some(crate::api_keys::now());
                     }
                 }
                 // Transport and validation errors are already redacted for display.
@@ -377,41 +370,9 @@ fn prefetch(host: &Host, account: &str, count: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     fn host(dir: &std::path::Path) -> Host {
-        let accounts = colecto_core::Accounts::open(
-            colecto_core::MailStore::open(dir).unwrap(),
-            Arc::new(crate::UnavailableSecrets),
-        )
-        .unwrap();
-        let database = accounts.database();
-        Host {
-            ai: Arc::new(crate::ai::Ai::open(database.clone()).unwrap()),
-            events: tokio::sync::broadcast::channel(16).0,
-            bus_replies: Default::default(),
-            keys: Arc::new(Mutex::new(
-                crate::api_keys::ApiKeys::open(database.clone()).unwrap(),
-            )),
-            preferences: Arc::new(Mutex::new(
-                crate::preferences::PreferenceStore::open(database.clone()).unwrap(),
-            )),
-            approvals: Arc::new(Mutex::new(
-                crate::approvals::Approvals::open(database.clone(), crate::api_keys::now())
-                    .unwrap(),
-            )),
-            status_polls: Arc::default(),
-            accounts: Arc::new(Mutex::new(accounts)),
-            extensions: Arc::new(Mutex::new(
-                crate::extensions::Extensions::open(database).unwrap(),
-            )),
-            authority: "127.0.0.1:4173".into(),
-            origin: "http://127.0.0.1:4173".into(),
-            execution: Arc::new(tokio::sync::Semaphore::new(2)),
-            sync: Arc::default(),
-            credentials: Arc::default(),
-            windows: Arc::default(),
-        }
+        crate::test_host(dir)
     }
 
     #[test]

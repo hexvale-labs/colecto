@@ -377,7 +377,7 @@ async fn post_json(
         request = request.bearer_auth(secret.as_str());
     }
     drop(secret);
-    let mut response = request.send().await.map_err(|error| {
+    let response = request.send().await.map_err(|error| {
         if error.is_timeout() {
             unavailable(&format!(
                 "The AI service did not answer within {timeout} seconds. Try again, or allow more time in Settings → AI."
@@ -390,13 +390,9 @@ async fn post_json(
         return Err(status_failure(response.status()));
     }
     let unreadable = || unavailable("The AI service sent an answer Colecto could not read.");
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| unreadable())? {
-        if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES {
-            return Err(unreadable());
-        }
-        bytes.extend_from_slice(&chunk);
-    }
+    let bytes = crate::read_bounded(response, MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|_| unreadable())?;
     serde_json::from_slice(&bytes).map_err(|_| unreadable())
 }
 
@@ -643,6 +639,19 @@ pub(crate) async fn get_settings(
     view(&host).map(Json)
 }
 
+fn normalized_base_url(url: &str) -> Option<String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return None;
+    }
+    let parsed = reqwest::Url::parse(url).ok()?;
+    Some(format!(
+        "{}{}",
+        parsed.origin().ascii_serialization(),
+        parsed.path().trim_end_matches('/')
+    ))
+}
+
 pub(crate) async fn put_settings(
     State(host): State<Host>,
     axum::Extension(principal): axum::Extension<crate::Principal>,
@@ -656,7 +665,39 @@ pub(crate) async fn put_settings(
     validate(&input).map_err(bad)?;
     let host2 = host.clone();
     tokio::task::spawn_blocking(move || {
+        // Lock accounts before settings (same order as `view`) so key checks and URL updates
+        // stay serialized against `put_key`.
+        let mut accounts = host2.accounts.lock().map_err(|_| forbidden())?;
         let mut settings = host2.ai.settings.lock().map_err(|_| forbidden())?;
+        let mut clear = Vec::new();
+        for (old, new, key_name) in [
+            (&settings.text.base_url, &input.text.base_url, TEXT_KEY),
+            (
+                &settings.decision.base_url,
+                &input.decision.base_url,
+                DECISION_KEY,
+            ),
+        ] {
+            if normalized_base_url(old) != normalized_base_url(new) {
+                match accounts.host_secret(key_name) {
+                    Ok(Some(_)) => clear.push(key_name),
+                    Ok(None) => {}
+                    Err(_) => {
+                        return Err(Failure(
+                            StatusCode::CONFLICT,
+                            "Unlock your credentials before changing the AI service address."
+                                .into(),
+                        ));
+                    }
+                }
+            }
+        }
+        // Clear keys before persisting the new URL so a saved key can never be sent elsewhere.
+        for key_name in clear {
+            accounts
+                .set_host_secret(key_name, None)
+                .map_err(Failure::from)?;
+        }
         crate::store::save_settings(&host2.ai.database, SCOPE, &*settings, &input, &[])
             .map_err(|e| Failure(StatusCode::INTERNAL_SERVER_ERROR, e))?;
         *settings = input;
@@ -757,10 +798,14 @@ pub(crate) async fn preview(
     input: Result<Json<PreviewInput>, JsonRejection>,
 ) -> Result<Json<serde_json::Value>, Failure> {
     configure_grant(&host, &principal, &headers)?;
-    let account = headers
-        .get("x-colecto-account")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(forbidden)?;
+    let account = match &principal {
+        crate::Principal::Owner => headers
+            .get("x-colecto-account")
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(forbidden)?
+            .to_owned(),
+        _ => crate::grant(&host, &principal, &headers, Capability::MessagesRead)?,
+    };
     let Json(input) = input.map_err(|_| bad("Invalid rules"))?;
     if input.rule.rules.len() > MAX_RULES {
         return Err(bad(format!("A label can have at most {MAX_RULES} rules.")));
@@ -783,7 +828,7 @@ pub(crate) async fn preview(
         .accounts
         .lock()
         .map_err(|_| forbidden())?
-        .cached(account, "inbox")
+        .cached(&account, "inbox")
         .map_err(Failure::from)?;
     let matched = snapshot
         .messages
@@ -810,12 +855,6 @@ fn matches_any(rules: &[(Field, regex::Regex)], message: &Message) -> bool {
             Field::Any => sender() || re.is_match(&message.subject) || re.is_match(&message.body),
         }
     })
-}
-
-fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
 }
 
 pub(crate) async fn get_summary(
@@ -851,7 +890,7 @@ pub(crate) async fn create_summary(
         account,
         message: id,
         text: text.clone(),
-        created_at: now(),
+        created_at: crate::api_keys::now(),
     };
     let host2 = host.clone();
     tokio::task::spawn_blocking(move || {
@@ -1013,37 +1052,8 @@ mod tests {
     }
 
     fn host() -> (Host, tempfile::TempDir) {
-        use crate::{UnavailableSecrets, api_keys, approvals, extensions, preferences};
-        use colecto_core::{Accounts, MailStore};
         let dir = tempfile::tempdir().unwrap();
-        let accounts = Accounts::open(
-            MailStore::open(dir.path()).unwrap(),
-            Arc::new(UnavailableSecrets),
-        )
-        .unwrap();
-        let db = accounts.database();
-        let host = Host {
-            events: tokio::sync::broadcast::channel(16).0,
-            bus_replies: Default::default(),
-            keys: Arc::new(Mutex::new(api_keys::ApiKeys::open(db.clone()).unwrap())),
-            ai: Arc::new(Ai::open(db.clone()).unwrap()),
-            preferences: Arc::new(Mutex::new(
-                preferences::PreferenceStore::open(db.clone()).unwrap(),
-            )),
-            approvals: Arc::new(Mutex::new(
-                approvals::Approvals::open(db, api_keys::now()).unwrap(),
-            )),
-            status_polls: Arc::default(),
-            accounts: Arc::new(Mutex::new(accounts)),
-            extensions: Arc::new(Mutex::new(extensions::Extensions::bundled())),
-            authority: "localhost".into(),
-            origin: "http://localhost".into(),
-            execution: Arc::new(tokio::sync::Semaphore::new(2)),
-            sync: Arc::default(),
-            credentials: Arc::default(),
-            windows: Arc::default(),
-        };
-        (host, dir)
+        (crate::test_host(dir.path()), dir)
     }
 
     /// The real AI service part, built for wasm32 (`cargo build -p colecto-ai-service`).

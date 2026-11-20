@@ -3,10 +3,10 @@
   import { quintOut } from 'svelte/easing';
   import { onMount } from 'svelte';
   import Icon from '../Icon.svelte';
+  import { prefersReducedMotion } from '../lib/ui';
   import { dismiss, notificationPosition, toasts, type Toast } from './toast-store.svelte';
   let region: HTMLElement;
   let position = $derived(notificationPosition.value);
-  const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   // The region lives in the browser's top layer, so notifications show over Settings and other
   // overlays. A modal dialog opened later goes above it; a new notification raises it again.
   const popover = () => typeof region?.showPopover === 'function';
@@ -29,7 +29,7 @@
   }
   function slide(_node: HTMLElement, { duration }: { duration: number }) {
     const [x, y] = offset();
-    return { duration: reduced ? 0 : duration, easing: quintOut, css: (t: number) => `opacity:${t};translate:${(1 - t) * x}px ${(1 - t) * y}px;scale:${0.97 + 0.03 * t}` };
+    return { duration: prefersReducedMotion() ? 0 : duration, easing: quintOut, css: (t: number) => `opacity:${t};translate:${(1 - t) * x}px ${(1 - t) * y}px;scale:${0.97 + 0.03 * t}` };
   }
   // A toast waits while the pointer or focus is on it, so nobody loses a message mid-read.
   function timer(node: HTMLElement, toast: Toast) {
@@ -46,7 +46,7 @@
 
 <section class="toasts" bind:this={region} popover="manual" data-position={position} aria-label="Notifications">
   {#each toasts as toast (toast.id)}
-    <div class="toast" role={toast.duration === 0 ? 'alertdialog' : 'status'} aria-label={toast.title} animate:flip={{ duration: reduced ? 0 : 240, easing: quintOut }} in:slide={{ duration: 260 }} out:slide={{ duration: 180 }} use:timer={toast}>
+    <div class="toast" role={toast.duration === 0 ? 'alertdialog' : 'status'} aria-label={toast.title} animate:flip={{ duration: prefersReducedMotion() ? 0 : 240, easing: quintOut }} in:slide={{ duration: 260 }} out:slide={{ duration: 180 }} use:timer={toast}>
       <span class="toast-mark" aria-hidden="true"><Icon name={toast.icon ?? (toast.duration === 0 ? 'shield' : 'mail')} size={15} /></span>
       <div class="toast-text">{#if toast.source}<span class="toast-source">{toast.source}</span>{/if}<strong>{toast.title}</strong>{#if toast.body}<p>{toast.body}</p>{/if}</div>
       <button class="toast-close" aria-label="Dismiss notification" onclick={() => dismiss(toast.id)}><Icon name="close" size={13} /></button>

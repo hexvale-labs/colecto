@@ -110,16 +110,17 @@ async fn publish(host: Host, bus: String, account: String, input: Input) {
             let mut clients = false;
             let mut targets = Vec::new();
             for s in subscribers {
+                if s.manifest.client.is_some() {
+                    clients = true;
+                }
                 if let Some((epoch, module)) = e.service(&s.manifest.id) {
                     targets.push((s.manifest.id, epoch, module));
-                } else {
-                    clients = true;
                 }
             }
             (targets, clients)
         })
         .unwrap_or_default();
-    // Subscribers without a service part live in the UI and receive it over the event stream.
+    // Subscribers with a client part receive it over the event stream.
     if clients {
         let _ = host.events.send((
             "bus.event",
@@ -313,38 +314,8 @@ pub(super) async fn reply_http(
 mod tests {
     use super::*;
     fn host() -> (Host, tempfile::TempDir) {
-        use colecto_core::{Accounts, MailStore};
         let dir = tempfile::tempdir().unwrap();
-        let accounts = Accounts::open(
-            MailStore::open(dir.path()).unwrap(),
-            Arc::new(UnavailableSecrets),
-        )
-        .unwrap();
-        let db = accounts.database();
-        (
-            Host {
-                events: tokio::sync::broadcast::channel(16).0,
-                bus_replies: Default::default(),
-                keys: Arc::new(Mutex::new(ApiKeys::open(db.clone()).unwrap())),
-                ai: Arc::new(crate::ai::Ai::open(db.clone()).unwrap()),
-                preferences: Arc::new(Mutex::new(
-                    preferences::PreferenceStore::open(db.clone()).unwrap(),
-                )),
-                approvals: Arc::new(Mutex::new(
-                    approvals::Approvals::open(db, api_keys::now()).unwrap(),
-                )),
-                status_polls: Arc::default(),
-                accounts: Arc::new(Mutex::new(accounts)),
-                extensions: Arc::new(Mutex::new(extensions::Extensions::bundled())),
-                authority: "localhost".into(),
-                origin: "http://localhost".into(),
-                execution: Arc::new(tokio::sync::Semaphore::new(2)),
-                sync: Arc::default(),
-                credentials: Arc::default(),
-                windows: Arc::default(),
-            },
-            dir,
-        )
+        (crate::test_host(dir.path()), dir)
     }
     fn install(host: &Host, id: &str, output: &str, request: bool) {
         let escaped: String = output.bytes().map(|b| format!("\\{b:02x}")).collect();
@@ -472,5 +443,58 @@ mod tests {
         let request =
             json!({"operation":"bus.request","bus":"answer","name":"v1/test","payload":null});
         assert!(service(&host, "ai", "demo", 0, request).is_err());
+    }
+    #[tokio::test]
+    async fn publish_delivers_to_both_client_and_service_when_extension_has_both() {
+        let (host, _dir) = host();
+        let req = r#"{"operation":"storage.set","key":"ran","value":true}"#;
+        let escaped: String = req.bytes().map(|b| format!("\\{b:02x}")).collect();
+        let module = format!(
+            r#"(module (import "colecto" "request" (func $request (param i32 i32 i32 i32) (result i32))) (memory (export "memory") 1) (data (i32.const 0) "{escaped}") (func (export "run") i32.const 0 i32.const {} i32.const 512 i32.const 1024 call $request drop))"#,
+            req.len()
+        );
+        let source = r#"
+id = "both"
+name = "Both"
+description = "Has both client and service"
+author = "Test"
+api_version = 1
+client = "client/main.js"
+capabilities = ["extensions.bus"]
+[bus]
+subscribe = ["inbox/v1/ready"]
+"#;
+        host.extensions
+            .lock()
+            .unwrap()
+            .install(&extensions::tests::package(
+                source,
+                Some(wat::parse_str(module).unwrap()),
+            ))
+            .unwrap();
+        let mut events = host.events.subscribe();
+        publish(
+            host.clone(),
+            "inbox".into(),
+            "demo".into(),
+            Input {
+                name: "v1/ready".into(),
+                payload: json!({"ok": true}),
+            },
+        )
+        .await;
+        // Client part received the event over the event stream.
+        let (event, payload) = events
+            .try_recv()
+            .expect("client event stream received bus.event");
+        assert_eq!(event, "bus.event");
+        let payload: Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(payload["bus"], "inbox");
+        assert_eq!(payload["name"], "v1/ready");
+        // Service part also ran and persisted its storage marker.
+        assert_eq!(
+            host.extensions.lock().unwrap().stored("both", "ran"),
+            json!(true)
+        );
     }
 }

@@ -371,53 +371,43 @@ impl Accounts {
             locked: self.vault.locked(),
         }
     }
-    pub fn protect(&mut self, password: &str) -> Result<(), Error> {
-        let handles: Vec<_> = self.stores.values().cloned().collect();
-        let _guards: Vec<_> = handles
-            .iter()
-            .map(|s| s.try_lock().map_err(|_| busy()))
-            .collect::<Result<_, _>>()?;
-        self.vault.protect(password)
-    }
-    pub fn unprotect(&mut self) -> Result<(), Error> {
-        let handles: Vec<_> = self.stores.values().cloned().collect();
-        let _guards: Vec<_> = handles
-            .iter()
-            .map(|s| s.try_lock().map_err(|_| busy()))
-            .collect::<Result<_, _>>()?;
-        self.vault.unprotect()
-    }
-    pub fn lock(&mut self) -> Result<(), Error> {
-        let handles: Vec<_> = self.stores.values().cloned().collect();
-        let mut guards: Vec<_> = handles
-            .iter()
-            .map(|s| s.try_lock().map_err(|_| busy()))
-            .collect::<Result<_, _>>()?;
-        self.vault.lock()?;
-        for store in &mut guards {
-            store.disconnect();
-        }
-        Ok(())
-    }
-    pub fn unlock(&mut self, password: &str) -> Result<(), Error> {
-        let entries: Vec<_> = self
+    fn with_all_stores<R>(
+        &mut self,
+        run: impl FnOnce(
+            &mut Vault,
+            &mut [(&str, std::sync::MutexGuard<'_, MailStore>)],
+        ) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        let mut guards: Vec<(&str, std::sync::MutexGuard<'_, MailStore>)> = self
             .stores
             .iter()
-            .map(|(id, store)| (id.clone(), store.clone()))
-            .collect();
-        let mut guards: Vec<_> = entries
-            .iter()
-            .map(|(_, store)| store.try_lock().map_err(|_| busy()))
-            .collect::<Result<_, _>>()?;
-        self.vault.unlock(password)?;
-        let result = entries
-            .iter()
-            .zip(guards.iter_mut())
-            .try_for_each(|((id, _), store)| {
-                if let Some(record) = self.vault.accounts().iter().find(|a| &a.id == id) {
+            .map(|(id, store)| Ok((id.as_str(), store.try_lock().map_err(|_| busy())?)))
+            .collect::<Result<_, Error>>()?;
+        run(&mut self.vault, &mut guards)
+    }
+    pub fn protect(&mut self, password: &str) -> Result<(), Error> {
+        self.with_all_stores(|vault, _| vault.protect(password))
+    }
+    pub fn unprotect(&mut self) -> Result<(), Error> {
+        self.with_all_stores(|vault, _| vault.unprotect())
+    }
+    pub fn lock(&mut self) -> Result<(), Error> {
+        self.with_all_stores(|vault, guards| {
+            vault.lock()?;
+            for (_, store) in guards {
+                store.disconnect();
+            }
+            Ok(())
+        })
+    }
+    pub fn unlock(&mut self, password: &str) -> Result<(), Error> {
+        self.with_all_stores(|vault, guards| {
+            vault.unlock(password)?;
+            let result = guards.iter_mut().try_for_each(|(id, store)| {
+                if let Some(record) = vault.accounts().iter().find(|a| a.id == *id) {
                     store.disconnect();
                     if record.configured
-                        && let Some(secret) = self.vault.secrets.as_ref().and_then(|s| s.get(id))
+                        && let Some(secret) = vault.secrets.as_ref().and_then(|s| s.get(*id))
                     {
                         connect(store, &record.settings, &secret.0)?;
                     }
@@ -426,30 +416,28 @@ impl Accounts {
                 }
                 Ok(())
             });
-        if result.is_err() {
-            for store in &mut guards {
-                store.disconnect();
+            if result.is_err() {
+                for (_, store) in guards {
+                    store.disconnect();
+                }
+                vault.lock()?;
             }
-            self.vault.lock()?;
-        }
-        result
+            result
+        })
     }
     pub fn cleanup(&mut self) -> Result<(), Error> {
         self.vault.cleanup()
     }
     pub fn reset(&mut self) -> Result<(), Error> {
-        let handles: Vec<_> = self.stores.values().cloned().collect();
-        let mut guards: Vec<_> = handles
-            .iter()
-            .map(|s| s.try_lock().map_err(|_| busy()))
-            .collect::<Result<_, _>>()?;
-        let result = self.vault.reset();
-        if !self.vault.protected() {
-            for store in &mut guards {
-                store.disconnect();
+        self.with_all_stores(|vault, guards| {
+            let result = vault.reset();
+            if !vault.protected() {
+                for (_, store) in guards {
+                    store.disconnect();
+                }
             }
-        }
-        result
+            result
+        })
     }
 }
 

@@ -2,6 +2,7 @@ import { installLayers } from './lib/layers';
 import { installBack } from './lib/back';
 import { installPressFeedback, platform } from './lib/native';
 import { installZoom } from './lib/zoom';
+import { prefersReducedMotion } from './lib/ui';
 installLayers();
 installBack();
 installPressFeedback();
@@ -58,7 +59,7 @@ async function revealApp() {
   app.inert = false;
   // Clicks reach the app while the splash fades.
   if (startup) startup.style.pointerEvents = 'none';
-  if (startup && !fast && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (startup && !fast && !prefersReducedMotion()) {
     await startup.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: 'cubic-bezier(0.23, 1, 0.32, 1)', fill: 'forwards' }).finished;
   }
   startup?.remove();
