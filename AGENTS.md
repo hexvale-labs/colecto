@@ -1,124 +1,114 @@
 # Agent instructions
 
-Colecto is run by AI agents with a human maintainer. These rules apply to every agent.
-Start with [docs/README.md](docs/README.md) (index, technologies, where files live) and
-[docs/architecture.md](docs/architecture.md).
+Colecto is built by AI agents with one human maintainer. These rules apply to every
+agent. `CLAUDE.md` is a symlink to this file.
 
-## Skills
+## Before you start
 
-- Before starting, list the skills available to you and read the `SKILL.md` of every
-  one that fits the task. Follow their workflows. The project's shared skills live in
-  `.agents/skills/` (pinned in `skills-lock.json`); `.claude/skills` is a symlink to
-  it so Claude Code loads the same set, and `CLAUDE.md` is a symlink to this file.
-  Your global skills (for example `~/.agents/skills/`) apply as well.
-- Interface and interaction work (Svelte components, layout, motion, mobile): use the
-  design-engineering skills, for example `emil-design-eng`, plus the relevant
-  animation, accessibility and mobile skills, and review with `break-ui` when you
-  finish a visible change.
-- Rust work: use any Rust, API-design, security or performance skills you have.
-- Svelte and TypeScript work: use Svelte or front-end skills you have, alongside the
-  design skills above.
-- Other tasks: pick the matching domain skills rather than forcing a UI workflow.
-- Do not use the `caveman`, `ultracave` or `megacave` styles unless the maintainer asks
-  in the current session. Write chat updates, comments and docs in plain, natural
-  language.
-
-## Interface work goes into extensions
-
-- Write every UI feature as a bundled extension under `ui/src/extensions/<id>/`, unless
-  it truly cannot be one (bootstrapping, permission prompts, credential controls and
-  recovery stay in the shell). "It is quicker in the shell" is not a reason.
-- Extensions never reach into each other: no imports between extension folders, no
-  shared mutable stores, no reading another extension's state. When one extension
-  should be usable by others, expose a versioned interface on its bus (the
-  `extensions.bus` capability, see [docs/extensions/README.md](docs/extensions/README.md)),
-  for example the request `v1/add_button` rather than `add_button`. Bundled bus names
-  use whole-number versions only, listed in
-  [docs/extensions/bundled-bus.md](docs/extensions/bundled-bus.md).
-
-## Where settings go
-
-- Put a setting in the Settings section that matches what it changes, not the extension
-  that owns it. Everything about how Colecto looks (text, colour, density, layout of
-  lists and panes) goes in **Appearance**; what to be notified about and how goes in
-  **Notifications**. Extensions place settings there with `section` (API 2, see
-  [docs/extensions/README.md](docs/extensions/README.md#placing-settings-in-a-core-section)).
-
-## Extension API versions
-
-- Every change to what extensions can rely on adds one sequential API version (1, 2,
-  3, …) in `crates/colecto-extension-api/api-versions.json`. Follow
-  [docs/extensions/api-versions/README.md](docs/extensions/api-versions/README.md).
-- Raise `api_version` only in the extensions that need the new feature, never in every
-  bundled extension and example.
-- Change existing signatures in a new version rather than adding a `request2`. Ask the
-  maintainer before adding a parallel variant.
+- Read [docs/README.md](docs/README.md) (index, technologies, where files live) and
+  [docs/architecture.md](docs/architecture.md).
+- List the skills available to you and read the `SKILL.md` of each one that fits the
+  task, then follow it. Shared project skills live in `.agents/skills/` (pinned in
+  `skills-lock.json`; `.claude/skills` links to the same folder). Your global skills
+  apply too.
+- For interface work (Svelte components, layout, motion, mobile), use the design skills
+  such as `emil-design-eng`, the matching animation and mobile skills, and finish each
+  visible change with `break-ui`.
 
 ## How to work
 
 - Make the smallest complete change. Reuse existing patterns. No speculative
-  abstractions, unused dependencies, empty frameworks or boilerplate nobody maintains.
-  Remove code you supersede.
-- Decide routine, reversible details yourself and state your assumptions. Ask only
-  when missing intent would materially change the work; the maintainer may not know
-  better.
+  abstractions, unused dependencies or boilerplate. Remove code you replace.
+- Decide routine, reversible details yourself and state your assumptions. Ask only when
+  missing intent would materially change the work.
 - Never describe a planned feature, platform or security property as working. Report
   what you verified and what you did not.
-- Add code comments only where the reason is not obvious, in plain language.
+- Write chat updates, comments and docs in plain, natural language. Comment code only
+  where the reason is not obvious.
+
+## Code rules
+
+### Interface work goes into extensions
+
+- Build every UI feature as a bundled extension in `ui/src/extensions/<id>/`.
+  Only bootstrapping, permission prompts, credential controls and recovery stay in the
+  shell. "Quicker in the shell" is not a reason.
+- Extensions never reach into each other: no imports between extension folders, no
+  shared mutable stores, no reading another extension's state. To make an extension
+  usable by others, expose a versioned request on its bus (the `extensions.bus`
+  capability, see [docs/extensions/README.md](docs/extensions/README.md)), such as
+  `v1/add_button`. Bundled bus names use whole-number versions and are listed in
+  [docs/extensions/bundled-bus.md](docs/extensions/bundled-bus.md).
+
+### Settings
+
+Put each setting in the Settings section that matches what it changes, not in the
+extension that owns it, using `section` (see
+[placing settings](docs/extensions/README.md#placing-settings-in-a-core-section)).
+
+| Section | Holds |
+| --- | --- |
+| **Appearance** | How Colecto looks: text, colour, density, layout of lists and panes |
+| **Notifications** | What to be notified about, and how |
+
+### Extension API versions
+
+- Every change to what extensions can rely on adds the next API version in
+  `crates/colecto-extension-api/api-versions.json`. Follow
+  [docs/extensions/api-versions/README.md](docs/extensions/api-versions/README.md).
+- Raise `api_version` only in the extensions that use the new feature.
+- Change an existing signature in a new version instead of adding a variant such as
+  `request2`. Ask the maintainer before adding a parallel variant.
 
 ## Documentation
 
-Document as you go. Every relevant detail belongs in the docs, but nothing more.
-
 - Update the page that owns the topic (see the index in `docs/README.md`) in the same
-  change as the code. Add a new page only when no existing page fits, and link it from
-  the index.
-- Write for humans and agents alike: a one-line summary at the top, short sections
-  with descriptive headings, tables for limits, options and mappings, and exact names
-  of files, routes, fields and commands.
-- Record behaviour, limits, security boundaries and the reasons behind non-obvious
-  decisions. Do not record session logs, test counts or history; git keeps those.
-- Keep [docs/roadmap.md](docs/roadmap.md) current when you finish or start a roadmap
-  item.
+  change as the code. Add a new page only when none fits, and link it from the index.
+- Start each page with a one-line summary, then short sections with descriptive
+  headings. Use tables for limits, options and mappings, and give exact names of files,
+  routes, fields and commands.
+- Record behaviour, limits, security boundaries and the reasons for non-obvious
+  decisions. Leave out session logs, test counts and history; git keeps those.
+- Keep [docs/roadmap.md](docs/roadmap.md) current when you start or finish an item.
 
 ## Checks
 
-- Use the `just` recipes for repeatable operations (`just` lists them).
-- Rust changes: run `just verify`. UI changes: also `just test browser`.
-- Tests target changed behaviour, important edge cases and regression risks. Avoid
-  redundant, implementation-mirroring or oversized suites for small changes.
-- After feature changes, run `just perf-check` (verification plus three isolated
-  resource samples). Keep the timestamped history in `docs/performance/results/`
-  locally, and refresh `docs/performance/baseline.json` from the final integrated run.
-  Compare only runs with matching workload, build and environment metadata; deltas are
-  report-only for now. See `docs/performance/README.md`.
+Use the `just` recipes (`just` lists them; details in
+[docs/development.md](docs/development.md#check-changes)).
 
-## Machine resources
+| Change | Run |
+| --- | --- |
+| Rust | `just verify` |
+| UI | `just verify` and `just test browser` |
+| Features | `just perf-check` as well, following [docs/performance/README.md](docs/performance/README.md) |
 
-Before heavy builds, linkers, tests or benchmarks, check available memory and the
-effective limits (including ancestor cgroups), free storage, CPU quota and affinity,
-and current load and I/O pressure; do not rely on host RAM totals. Choose concurrency
-that fits. On constrained machines use `CARGO_BUILD_JOBS=1` and never overlap heavy
-Cargo builds that share a target directory. Let resource pressure settle before
-taking performance measurements.
+- Test changed behaviour, important edge cases and regression risks. Skip redundant
+  or implementation-mirroring tests.
+- Before heavy builds, tests or benchmarks, check free memory against the effective
+  cgroup limits (not host RAM), disk space, CPU quota and current load. On constrained
+  machines use `CARGO_BUILD_JOBS=1` and never run two Cargo builds on the same target
+  directory at once. Let load settle before measuring performance.
 
-## Shipping
+## Commits, pull requests and issues
 
-Work goes into `develop`; `main` only moves when a release ships (see "Branches" in
-[docs/development.md](docs/development.md)). When a task is done and its checks pass,
-commit, push and merge it yourself: branch off `develop`, open a pull request against
-`develop` (`gh pr create --base develop`), and merge it once the required checks pass.
-Wait for a human only when something truly needs one: failing checks you cannot fix,
-merge conflicts with unclear intent, missing access, or destructive history changes.
+- Write commit messages and pull request titles as
+  [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary`,
+  with `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci` or `chore`,
+  and `!` after the type for a breaking change. The scope is optional.
+- End every pull request and issue description with one final line naming the models
+  that helped with it, for example `Assisted by Opus 5.5 and Gemini 4 Neon.`
+- Branch off `develop` and open pull requests against it; `main` moves only when a
+  release ships (see [Branches](docs/development.md#branches)). When the checks pass,
+  merge the pull request yourself. Wait for the maintainer only for failing checks
+  you cannot fix, merge conflicts with unclear intent, missing access or destructive
+  history changes.
+- When a merged change is something users would notice, tell the maintainer in plain
+  words that a release may be worth shipping: once when you open the pull request,
+  and again after the merge.
 
-Ship a release only when the maintainer asks for one in the current session, for
-example "ship a new release". Then follow "Shipping a release" in
-[docs/development.md](docs/development.md): read what changed since the last tag,
-write the release notes, choose a minor or patch version yourself, bump it, merge
-`develop` into `main`, and push the tag. Never pick a major version unless the
-maintainer asks for one. Never tag or publish at any other time.
+## Releases
 
-When you merge a change that users would notice, remind the maintainer that a release
-might be worth shipping. Say it in plain words, twice: once when you open the pull
-request, before waiting on CI, and again in your final message after the merge. CI
-takes a while, so the first reminder may be the one they see.
+Ship a release only when the maintainer asks for one in the current session. Then
+follow [Shipping a release](docs/development.md#shipping-a-release), which covers
+picking the version, the notes and tagging. Never choose a major version unless the
+maintainer asks for one, and never tag or publish at any other time.
