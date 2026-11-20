@@ -35,7 +35,7 @@
     {
       "version": 2,
       "breaking": false,
-      "released_in": null,
+      "released_in": "v0.8.2",
       "capabilities": [],
       "changes": [
         "Mail lists reach every folder and older mail: `/messages/refresh` and `/messages/cache` take any folder id from `/folders` as `folder`, and `/messages/refresh` takes `offset` to load an older page.",
