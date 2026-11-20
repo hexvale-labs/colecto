@@ -6,9 +6,11 @@ Start with [docs/README.md](docs/README.md) (index, technologies, where files li
 
 ## Skills
 
-- Before starting, list the skills installed for *you* (your global skills, for
-  example `~/.agents/skills/` or your client's equivalent) and read the `SKILL.md` of
-  every one that fits the task. Follow their workflows.
+- Before starting, list the skills available to you and read the `SKILL.md` of every
+  one that fits the task. Follow their workflows. The project's shared skills live in
+  `.agents/skills/` (pinned in `skills-lock.json`); `.claude/skills` is a symlink to
+  it so Claude Code loads the same set, and `CLAUDE.md` is a symlink to this file.
+  Your global skills (for example `~/.agents/skills/`) apply as well.
 - Interface and interaction work (Svelte components, layout, motion, mobile): use the
   design-engineering skills, for example `emil-design-eng`, plus the relevant
   animation, accessibility and mobile skills, and review with `break-ui` when you
