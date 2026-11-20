@@ -1,6 +1,6 @@
 //! Durable, immutable automation delivery requests.
 use crate::api_keys::random;
-use colecto_core::Database;
+use colecto_core::{Database, Row, Value};
 use colecto_extension_api::DraftInput;
 use serde::{Deserialize, Serialize};
 
@@ -28,64 +28,108 @@ pub struct PendingSend {
     pub expires_at: u64,
     pub status: Status,
 }
-#[derive(Clone, Default, Serialize, Deserialize)]
-struct Journal {
-    requests: Vec<PendingSend>,
-}
+/// The journal lives in `send_approvals`; this is its copy in memory, which every change
+/// updates first so a request that began submitting is never offered again, even if the
+/// write fails.
 pub struct Approvals {
     database: Database,
-    journal: Journal,
+    requests: Vec<PendingSend>,
 }
+impl Status {
+    fn as_str(self) -> &'static str {
+        match self {
+            Status::Pending => "pending",
+            Status::Rejected => "rejected",
+            Status::Expired => "expired",
+            Status::Submitting => "submitting",
+            Status::Sent => "sent",
+            Status::Uncertain => "uncertain",
+        }
+    }
+}
+fn invalid<E>(_: E) -> String {
+    "Invalid approval journal".into()
+}
+fn read_request(row: &Row) -> Result<PendingSend, String> {
+    let time = |index| {
+        row.integer(index)
+            .map_err(invalid)
+            .and_then(|t| u64::try_from(t).map_err(invalid))
+    };
+    Ok(PendingSend {
+        id: row.text(0).map_err(invalid)?,
+        requester: row.text(1).map_err(invalid)?,
+        account: row.text(2).map_err(invalid)?,
+        from: row.text(3).map_err(invalid)?,
+        snapshot: row
+            .optional_text(4)
+            .map_err(invalid)?
+            .map(|json| serde_json::from_str(&json).map_err(invalid))
+            .transpose()?,
+        created_at: time(5)?,
+        expires_at: time(6)?,
+        status: serde_json::from_value(serde_json::Value::String(row.text(7).map_err(invalid)?))
+            .map_err(invalid)?,
+    })
+}
+fn time(value: u64) -> Value {
+    i64::try_from(value).unwrap_or(i64::MAX).into()
+}
+const PERSIST_FAILED: &str = "Could not persist delivery request; do not retry delivery";
 impl Approvals {
     pub fn open(database: Database, now: u64) -> Result<Self, String> {
-        let mut journal =
-            crate::store::open(&database, "send-approvals", Journal::default, |bytes| {
-                let journal: Journal =
-                    serde_json::from_slice(bytes).map_err(|_| "Invalid approval journal")?;
-                if journal.requests.len() > MAX_REQUESTS {
-                    return Err("Invalid approval journal".into());
-                }
-                Ok(journal)
-            })?;
-        for request in &mut journal.requests {
-            if request.status == Status::Submitting {
-                request.status = Status::Uncertain;
-            }
-        }
-        let mut result = Self { database, journal };
-        result.maintain(now)?;
         // Persist crash recovery before accepting new decisions.
-        if !result.journal.requests.is_empty() {
-            result.persist(&result.journal)?;
+        database
+            .write(vec![(
+                "UPDATE send_approvals SET status='uncertain' WHERE status='submitting'",
+                vec![],
+            )])
+            .map_err(|_| PERSIST_FAILED)?;
+        let requests = database
+            .query(
+                "SELECT id,requester,account,sender,snapshot,created_at,expires_at,status FROM send_approvals ORDER BY rowid",
+                vec![],
+            )
+            .map_err(|_| "Invalid approval journal")?
+            .iter()
+            .map(read_request)
+            .collect::<Result<Vec<_>, _>>()?;
+        if requests.len() > MAX_REQUESTS {
+            return Err("Invalid approval journal".into());
         }
+        let mut result = Self { database, requests };
+        result.maintain(now)?;
         Ok(result)
     }
-    fn persist(&self, journal: &Journal) -> Result<(), String> {
-        crate::store::save(&self.database, "send-approvals", journal)
-            .map_err(|_| "Could not persist delivery request; do not retry delivery".into())
-    }
-    fn commit(&mut self, journal: Journal) -> Result<(), String> {
-        // Keep the advanced state even if the write fails, so a submitting request is never retried.
-        self.journal = journal;
-        self.persist(&self.journal)
+    fn persist(&self, statements: Vec<(&str, Vec<Value>)>) -> Result<(), String> {
+        self.database
+            .write(statements)
+            .map_err(|_| PERSIST_FAILED.into())
     }
     pub(crate) fn maintain(&mut self, now: u64) -> Result<(), String> {
-        if !self.journal.requests.iter().any(|r| {
+        if !self.requests.iter().any(|r| {
             now >= r.created_at.saturating_add(RETENTION)
                 || (r.status == Status::Pending && now >= r.expires_at)
         }) {
             return Ok(());
         }
-        let mut journal = self.journal.clone();
-        journal
-            .requests
+        self.requests
             .retain(|r| now < r.created_at.saturating_add(RETENTION));
-        for r in &mut journal.requests {
+        for r in &mut self.requests {
             if r.status == Status::Pending && now >= r.expires_at {
                 r.status = Status::Expired;
             }
         }
-        self.commit(journal)
+        self.persist(vec![
+            (
+                "DELETE FROM send_approvals WHERE created_at + ?1 <= ?2",
+                vec![time(RETENTION), time(now)],
+            ),
+            (
+                "UPDATE send_approvals SET status='expired' WHERE status='pending' AND expires_at <= ?1",
+                vec![time(now)],
+            ),
+        ])
     }
     pub fn create(
         &mut self,
@@ -96,9 +140,8 @@ impl Approvals {
         now: u64,
     ) -> Result<PendingSend, String> {
         self.maintain(now)?;
-        if self.journal.requests.len() >= MAX_REQUESTS
+        if self.requests.len() >= MAX_REQUESTS
             || self
-                .journal
                 .requests
                 .iter()
                 .filter(|r| r.requester == requester && r.status == Status::Pending)
@@ -114,11 +157,8 @@ impl Approvals {
         if !snapshot.attachments.is_empty() || snapshot.forward_of.is_some() {
             return Err("Delivery requests cannot include attachments or forwards".into());
         }
-        if serde_json::to_vec(&snapshot)
-            .map_err(|_| "Invalid outgoing message")?
-            .len()
-            > 110_000
-        {
+        let json = serde_json::to_string(&snapshot).map_err(|_| "Invalid outgoing message")?;
+        if json.len() > 110_000 {
             return Err("Outgoing message exceeds approval limit".into());
         }
         let request = PendingSend {
@@ -131,72 +171,74 @@ impl Approvals {
             expires_at: now.saturating_add(600),
             status: Status::Pending,
         };
-        let mut journal = self.journal.clone();
-        journal.requests.push(request.clone());
-        self.commit(journal)?;
+        self.persist(vec![(
+            "INSERT INTO send_approvals(id,requester,account,sender,snapshot,created_at,expires_at,status) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            vec![
+                request.id.as_str().into(),
+                requester.into(),
+                account.into(),
+                from.into(),
+                json.into(),
+                time(request.created_at),
+                time(request.expires_at),
+                request.status.as_str().into(),
+            ],
+        )])?;
+        self.requests.push(request.clone());
         Ok(request)
     }
     pub fn list(&mut self, now: u64) -> Result<Vec<PendingSend>, String> {
         self.maintain(now)?;
-        Ok(self.journal.requests.clone())
+        Ok(self.requests.clone())
     }
     pub fn get(&mut self, id: &str, now: u64) -> Result<PendingSend, String> {
         self.maintain(now)?;
-        self.journal
-            .requests
+        self.requests
             .iter()
             .find(|r| r.id == id)
             .cloned()
             .ok_or_else(|| "Delivery request not found".into())
     }
+    /// Move a request from `from` to `to`, in memory first so the advanced state holds
+    /// even if the write fails.
+    fn advance(&mut self, id: &str, from: Status, to: Status) -> Result<PendingSend, String> {
+        let request = self
+            .requests
+            .iter_mut()
+            .find(|r| r.id == id)
+            .ok_or("Delivery request not found")?;
+        if request.status != from {
+            return Err(match from {
+                Status::Submitting => "Delivery request is not submitting",
+                _ => "Delivery request is no longer pending",
+            }
+            .into());
+        }
+        request.status = to;
+        let request = request.clone();
+        self.persist(vec![(
+            "UPDATE send_approvals SET status=?2 WHERE id=?1",
+            vec![id.into(), to.as_str().into()],
+        )])?;
+        Ok(request)
+    }
     pub fn reject(&mut self, id: &str, now: u64) -> Result<PendingSend, String> {
         self.get(id, now)?;
-        let mut journal = self.journal.clone();
-        let request = journal
-            .requests
-            .iter_mut()
-            .find(|r| r.id == id)
-            .ok_or("Delivery request not found")?;
-        if request.status != Status::Pending {
-            return Err("Delivery request is no longer pending".into());
-        }
-        request.status = Status::Rejected;
-        let result = request.clone();
-        self.commit(journal)?;
-        Ok(result)
+        self.advance(id, Status::Pending, Status::Rejected)
     }
     pub fn begin(&mut self, id: &str, now: u64) -> Result<DraftInput, String> {
-        self.get(id, now)?;
-        let mut journal = self.journal.clone();
-        let request = journal
-            .requests
-            .iter_mut()
-            .find(|r| r.id == id)
-            .ok_or("Delivery request not found")?;
-        if request.status != Status::Pending {
-            return Err("Delivery request is no longer pending".into());
-        }
-        let snapshot = request.snapshot.clone().ok_or("Snapshot unavailable")?;
-        request.status = Status::Submitting;
-        self.commit(journal)?;
+        let request = self.get(id, now)?;
+        let snapshot = request.snapshot.ok_or("Snapshot unavailable")?;
+        self.advance(id, Status::Pending, Status::Submitting)?;
         Ok(snapshot)
     }
     pub fn finish(&mut self, id: &str, sent: bool) -> Result<(), String> {
-        let mut journal = self.journal.clone();
-        let request = journal
-            .requests
-            .iter_mut()
-            .find(|r| r.id == id)
-            .ok_or("Delivery request not found")?;
-        if request.status != Status::Submitting {
-            return Err("Delivery request is not submitting".into());
-        }
-        request.status = if sent {
+        let to = if sent {
             Status::Sent
         } else {
             Status::Uncertain
         };
-        self.commit(journal)
+        self.advance(id, Status::Submitting, to).map(drop)
     }
 }
 #[cfg(test)]

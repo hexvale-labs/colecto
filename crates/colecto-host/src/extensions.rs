@@ -252,6 +252,30 @@ impl Extensions {
         self.commit(next)?;
         self.settings(id)
     }
+    /// Forget the stored values of `keys`, so their defaults apply again. Owner only: it is
+    /// not part of the extension API.
+    pub fn reset_settings(
+        &mut self,
+        id: &str,
+        keys: &[String],
+    ) -> Result<serde_json::Value, String> {
+        let manifest = self.manifest(id).ok_or("Unknown extension")?;
+        if let Some(key) = keys
+            .iter()
+            .find(|key| !manifest.settings.iter().any(|s| s.key == **key))
+        {
+            return Err(format!("Invalid setting: {key}"));
+        }
+        let mut next = self.clone();
+        if let Some(stored) = next.setting_values.get_mut(id) {
+            stored.retain(|key, _| !keys.contains(key));
+            if stored.is_empty() {
+                next.setting_values.remove(id);
+            }
+        }
+        self.commit(next)?;
+        self.settings(id)
+    }
     /// One value from an extension's own store.
     pub fn stored(&self, id: &str, key: &str) -> serde_json::Value {
         self.storage
@@ -739,6 +763,20 @@ mod settings_tests {
                 .settings("hello-pane")
                 .unwrap()["values"]["speed"],
             12
+        );
+        // A reset forgets the stored value, so the default applies again.
+        assert!(
+            extensions
+                .reset_settings("hello-pane", &["unknown".into()])
+                .is_err()
+        );
+        extensions
+            .reset_settings("hello-pane", &["speed".into()])
+            .unwrap();
+        assert!(!extensions.setting_values.contains_key("hello-pane"));
+        assert_eq!(
+            extensions.settings("hello-pane").unwrap()["values"]["speed"],
+            10
         );
         extensions.remove("hello-pane").unwrap();
         extensions
