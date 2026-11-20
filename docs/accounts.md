@@ -42,7 +42,11 @@ the HTTP API; Colecto does not read mail accounts from environment variables. Se
 returned through the API or saved in the draft store. OAuth-only providers are not supported yet.
 
 Opening Inbox fetches the latest 100 messages, read-only, without marking them
-seen. Reopen Inbox to refresh. Messages larger than 2000000 bytes are skipped;
+seen. Reopen Inbox to refresh. Scrolling to the end of a list loads the next 100 older
+messages, as far back as the folder goes (up to 100000 messages back). Every folder the
+provider has (Gmail labels included) appears in the folder bar next to Inbox, Drafts
+and Sent; folders other than Inbox and Sent are fetched each time they are opened and
+have no saved snapshot. Messages larger than 2000000 bytes are skipped;
 HTML-only messages show a placeholder. The latest successful Inbox and Sent
 snapshots persist in the shared `colecto.db`, bounded to 100 messages and 12 MB
 per account. They are plain text, keyed to provider identity, and restored on

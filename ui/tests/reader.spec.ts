@@ -165,4 +165,14 @@ test('a reply shows its conversation and folds the quoted history', async ({ pag
   await earlier.getByRole('button', { name: 'Open this message' }).click();
   await expect(page.getByRole('heading', { name: 'Lunch', exact: true, level: 2 })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Later in this conversation' }).getByRole('button', { name: 'Show 1 later message' })).toBeVisible();
+  // #134: the conversation stays one place: its position shows, steps stay in the same tab.
+  await expect(page.getByText('Message 1 of 2 in this conversation')).toBeVisible();
+  const tabs = page.getByRole('navigation', { name: 'Open messages' }).getByRole('button', { name: /^Close / });
+  await expect(tabs).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Earlier', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Later', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Re: Lunch', exact: true, level: 2 })).toBeVisible();
+  await expect(page.getByText('Message 2 of 2 in this conversation')).toBeVisible();
+  await expect(tabs).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Hide 1 earlier message' })).toBeVisible();
 });

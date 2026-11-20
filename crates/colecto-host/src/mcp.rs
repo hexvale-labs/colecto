@@ -46,6 +46,8 @@ struct Input {
     folder: Option<String>,
     #[serde(default)]
     q: String,
+    #[serde(default)]
+    offset: usize,
     target: Option<String>,
     settings: Option<crate::settings::SettingsInput>,
 }
@@ -79,7 +81,7 @@ fn tool(name: &str) -> Tool {
     } else if name == "messages.cached" {
         "Read the last successful local folder snapshot immediately, without provider access. Search is unsupported. Includes fetched_at; null means freshness is unknown."
     } else if matches!(name, "messages.list" | "messages.refresh") {
-        "List or search Inbox or Sent. Set q to search the provider by sender, subject and text; an empty q lists the folder and updates the bounded local cache. Requires messages.list; full bodies also require messages.read."
+        "List or search a folder: inbox, sent, or a folder id from folders.list. Set q to search the provider by sender, subject and text; an empty q lists the newest 100 messages and, for Inbox and Sent, updates the bounded local cache. Set offset to skip that many of the newest messages and read an older page. Requires messages.list; full bodies also require messages.read."
     } else if name == "drafts.list" {
         "List this account's saved drafts. Filter them yourself by recipient, subject or body."
     } else if name == "app.navigate" {
@@ -112,6 +114,7 @@ fn tool(name: &str) -> Tool {
             "id":{"type":"string","minLength":1,"maxLength":256},
             "folder":{"type":"string"},
             "q":{"type":"string","maxLength":1024},
+            "offset":{"type":"integer","minimum":0,"maximum":colecto_core::MAX_LIST_OFFSET},
             "ids":{"type":"array","minItems":1,"maxItems":500,"items":{"type":"string"}},
             "seen":{"type":"boolean"},
             "flagged":{"type":"boolean"},
@@ -224,7 +227,8 @@ impl MailMcp {
                 headers,
                 axum::extract::Query(crate::MessageQuery {
                     folder: input.folder.unwrap_or_else(crate::inbox_folder),
-                    q: input.q
+                    q: input.q,
+                    offset: input.offset
                 })
             )),
             "messages.cached" => value!(crate::cached_messages(
@@ -233,7 +237,8 @@ impl MailMcp {
                 headers,
                 axum::extract::Query(crate::MessageQuery {
                     folder: input.folder.unwrap_or_else(crate::inbox_folder),
-                    q: input.q
+                    q: input.q,
+                    offset: input.offset
                 })
             )),
             "messages.read" => value!(crate::message(state, identity, headers, path)),

@@ -33,6 +33,30 @@
     clearTimeout(timer);
     timer = setTimeout(() => emit('input', { value }), p<number>('debounce_ms') ?? 0);
   }
+  /** A tab strip only scrolls sideways, so a vertical wheel scrolls it sideways too (#131). */
+  function sideways(strip: HTMLElement) {
+    const wheel = (event: WheelEvent) => {
+      if (event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY) || strip.scrollWidth <= strip.clientWidth) return;
+      event.preventDefault();
+      strip.scrollLeft += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * strip.clientWidth : event.deltaY;
+    };
+    strip.addEventListener('wheel', wheel, { passive: false });
+    return { destroy: () => strip.removeEventListener('wheel', wheel) };
+  }
+  /** Right-click, or the Menu key or Shift+F10, on a tab of a strip with `close_all`: close it
+   *  or every tab of this strip, through the same events as the strip's buttons (#131). */
+  function tabMenu(event: MouseEvent | KeyboardEvent, item: { id: string; closable?: boolean; disabled?: boolean }) {
+    const key = event instanceof KeyboardEvent;
+    if (key && !(event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) return;
+    if (!p('close_all') || !surface.localMenu || item.disabled) return;
+    event.preventDefault();
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const [x, y] = key ? [rect.left + 12, rect.bottom] : [(event as MouseEvent).clientX, (event as MouseEvent).clientY];
+    surface.localMenu(x, y, 'Tab actions', [
+      ...(item.closable !== false ? [{ id: 'close', label: 'Close tab', icon: 'close' as const }] : []),
+      { id: 'close_all', label: 'Close all tabs' },
+    ], choice => choice === 'close' ? emit('close', { item: item.id }) : emit('close_all'));
+  }
   /** Fit a textarea's height to its text, without a scrollbar. */
   function grow(field: HTMLTextAreaElement) {
     const fit = () => { field.style.height = 'auto'; field.style.height = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`; };
@@ -139,10 +163,10 @@
   </nav>{/if}
 {:else if node.type === 'tabs'}
   {@const items = p<{ id: string; label: string; title?: string; active?: boolean; closable?: boolean; disabled?: boolean }[]>('items')}
-  {#if items.length}<nav class="tab-strip" aria-label={p('label')}>
+  {#if items.length}<nav class="tab-strip" aria-label={p('label')} use:sideways>
     {#each items as item (item.id)}<div class="message-tab" class:active={item.active}>
-      <button class="tab-title" aria-pressed={!!item.active} disabled={item.disabled} title={item.title ?? item.label} onclick={() => emit('select', { item: item.id })}>{item.label}</button>
-      {#if item.closable !== false}<button class="tab-close" aria-label={`Close ${item.label}`} disabled={item.disabled} onclick={() => emit('close', { item: item.id })}><Icon name="close" size={13} /></button>{/if}
+      <button class="tab-title" aria-pressed={!!item.active} disabled={item.disabled} title={item.title ?? item.label} onclick={() => emit('select', { item: item.id })} oncontextmenu={(event) => tabMenu(event, item)} onkeydown={(event) => tabMenu(event, item)}>{item.label}</button>
+      {#if item.closable !== false}<button class="tab-close" aria-label={`Close ${item.label}`} disabled={item.disabled} onclick={() => emit('close', { item: item.id })} oncontextmenu={(event) => tabMenu(event, item)}><Icon name="close" size={13} /></button>{/if}
     </div>{/each}
     {#if p('close_all') && items.length > 1}<button class="tab-close-all" aria-label="Close all message tabs" title="Close all tabs" onclick={() => emit('close_all')}><Icon name="close" size={13} /><span>Close all</span></button>{/if}
   </nav>{/if}
@@ -284,7 +308,7 @@
   <SecretField label={p<string>('label')} target={p<'ai.text' | 'ai.decision'>('target')} saved={p<boolean>('saved')} onsaved={(saved) => emit('saved', { saved })} />
 {:else if node.type === 'list'}
   {#if p('mode') === 'virtual'}
-    <List rows={p<Row[]>('rows')} selected={p<string>('selected')} arrived={p<string[]>('arrived') ?? []} onselect={(key) => emit('select', { key })} onmenu={p('context_menu') && node.id && surface.menu ? (key, x, y) => surface.menu!(node.id!, key, x, y) : undefined} empty={children} />
+    <List rows={p<Row[]>('rows')} selected={p<string>('selected')} arrived={p<string[]>('arrived') ?? []} more={p('more')} onend={() => emit('end')} onselect={(key) => emit('select', { key })} onmenu={p('context_menu') && node.id && surface.menu ? (key, x, y) => surface.menu!(node.id!, key, x, y) : undefined} empty={children} />
   {:else}
     <ul class="x-list" aria-label={p('label')}>{#each p<Row[]>('rows') as row (row.key)}<li data-kind={row.kind}><Self node={row.node} /></li>{/each}</ul>
   {/if}

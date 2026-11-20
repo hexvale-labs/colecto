@@ -28,7 +28,7 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 | Discover every server folder with its role and counts (`GET /folders`) | Done |
 | Read/unread and star flags; move, archive and delete, also from each message's context menu | In progress |
 | Search filters (`from:`, `to:`, `is:`, `after:`, `before:`) run on the server | Done |
-| Browse any folder in the UI, with paging through full history | Next |
+| Browse any folder in the UI, with paging through full history | Done |
 | Incremental refresh of cached folders instead of refetching | Next |
 | Larger offline cache (thousands of messages per account) | Next |
 | Conversation threading | In progress; the reader shows earlier and later saved messages of the same thread, collapsed to one line each, with quoted text folded |

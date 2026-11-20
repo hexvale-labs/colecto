@@ -456,6 +456,7 @@ impl MailService {
                         &account,
                         "inbox",
                         "",
+                        0,
                         crate::sync::Origin::Background,
                     ) {
                         // Another refresh of this account is already running.

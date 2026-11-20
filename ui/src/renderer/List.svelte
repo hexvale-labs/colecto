@@ -4,7 +4,7 @@
   import type { Snippet } from 'svelte';
   import type { Row } from '../runtime/protocol';
   import Icon from '../Icon.svelte';
-  let { rows, selected, arrived, onselect, onmenu, empty }: { rows: Row[]; selected?: string; arrived: string[]; onselect: (key: string) => void; onmenu?: (key: string, x: number, y: number) => void; empty: Snippet } = $props();
+  let { rows, selected, arrived, more, onselect, onmenu, onend, empty }: { rows: Row[]; selected?: string; arrived: string[]; more?: 'available' | 'loading' | 'end' | 'error'; onselect: (key: string) => void; onmenu?: (key: string, x: number, y: number) => void; onend?: () => void; empty: Snippet } = $props();
   // Right-click or long-press, and the Menu key or Shift+F10 on a focused row, open its menu.
   function context(event: MouseEvent, key: string) {
     if (!onmenu) return;
@@ -51,6 +51,15 @@
     observer.observe(viewport);
     return () => observer.disconnect();
   });
+  // Older rows load when the end comes within a screen of view (#136): once for each length
+  // of the list, so a page that adds nothing never asks again by itself.
+  let askedAt = -1;
+  $effect(() => {
+    if (more !== 'available' || !viewport || rows.length === askedAt) return;
+    if (scrollTop + height < viewport.scrollHeight - height) return;
+    askedAt = rows.length;
+    onend?.();
+  });
 </script>
 
 {#snippet row(item: Row)}
@@ -77,5 +86,12 @@
     <div style:height={`${offsets[rows.length] - offsets[range[1]]}px`} aria-hidden="true"></div>
   {:else}
     {#each rows as item (item.key)}{@render row(item)}{/each}
+  {/if}
+  {#if rows.length && more && more !== 'available'}
+    <div class="list-more" class:error={more === 'error'} role="status">
+      {#if more === 'loading'}<span class="list-more-spinner" aria-hidden="true"></span>Loading older messages…
+      {:else if more === 'end'}No older messages
+      {:else}Older messages could not be loaded.<button class="text-button" onclick={() => { askedAt = -1; onend?.(); }}>Try again</button>{/if}
+    </div>
   {/if}
 </div>

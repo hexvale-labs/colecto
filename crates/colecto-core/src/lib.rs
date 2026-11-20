@@ -26,8 +26,10 @@ use std::{
 
 /// Body truncation threshold in message lists (before the truncation notice).
 pub const MAX_BODY_BYTES: usize = 100_000;
-/// Maximum messages returned by a provider folder query.
+/// Maximum messages returned by a provider folder query (one page).
 pub const MAX_LIST_MESSAGES: usize = 100;
+/// How far back paging may reach: `offset` in a folder query is at most this.
+pub const MAX_LIST_OFFSET: usize = 100_000;
 /// Prefetch skips messages larger than this, so background downloads stay modest.
 pub const MAX_PREFETCH_BYTES: usize = 10_000_000;
 
@@ -152,6 +154,8 @@ pub struct QueryJob {
     reader: MailReader,
     folder: String,
     search: String,
+    /// Messages to skip from the newest, for loading older pages.
+    offset: usize,
     known: std::collections::HashMap<String, Message>,
 }
 impl QueryJob {
@@ -165,11 +169,15 @@ impl QueryJob {
     /// the protocol allows counting (IMAP); unchanged messages are not downloaded again.
     pub fn run(&self, progress: &mut dyn FnMut(usize, usize)) -> Result<Listing, Error> {
         let listing = match &self.reader.account {
-            Account::Imap(account) => {
-                account.list(&self.folder, &self.search, &self.known, progress)?
-            }
+            Account::Imap(account) => account.list(
+                &self.folder,
+                &self.search,
+                self.offset,
+                &self.known,
+                progress,
+            )?,
             Account::Jmap(account) => Listing {
-                messages: account.query(&self.folder, &self.search)?,
+                messages: account.query_page(&self.folder, &self.search, self.offset)?,
                 identity: None,
                 raws: Vec::new(),
             },
@@ -626,9 +634,9 @@ impl MailStore {
         if let Some(provider) = &self.account_key
             && self.cache.observe_identity(provider, folder, identity)?
         {
-            self.content.keep_identity(provider, folder, identity)?;
+            self.content.keep_identity(provider, identity)?;
             self.reader_cache.retain(|message| {
-                !imap_folder_id(&message.id, folder) || message.id.starts_with(identity)
+                !imap_same_mailbox(&message.id, identity) || message.id.starts_with(identity)
             });
             if folder == "inbox" {
                 self.messages
@@ -639,18 +647,36 @@ impl MailStore {
         Ok(())
     }
     pub fn query(&mut self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
-        let Some(job) = self.begin_query(folder, search)? else {
+        self.query_page(folder, search, 0)
+    }
+    /// One page of a folder: up to `MAX_LIST_MESSAGES`, skipping the newest `offset`.
+    pub fn query_page(
+        &mut self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+    ) -> Result<Vec<Message>, Error> {
+        let Some(job) = self.begin_query(folder, search, offset)? else {
             let query = search::Query::parse(search.trim());
-            let messages = if folder == "sent" {
-                Vec::new()
-            } else {
-                self.messages
+            let messages = match folder {
+                "inbox" => self.messages.clone(),
+                "sent" => Vec::new(),
+                // The sample account keeps moved messages in Archive and Trash.
+                "archive" | "trash" => self
+                    .demo_mail
                     .iter()
-                    .filter(|m| query.matches(m))
+                    .filter(|m| self.demo_folders.get(&m.id).is_some_and(|f| f == folder))
                     .cloned()
-                    .collect()
+                    .collect(),
+                _ => return Err(Error::Missing),
             };
-            return self.apply_listing(folder, search.trim(), messages);
+            let messages = messages
+                .into_iter()
+                .filter(|m| query.matches(m))
+                .skip(offset)
+                .take(MAX_LIST_MESSAGES)
+                .collect();
+            return self.apply_listing(folder, search.trim(), offset, messages);
         };
         let listing = job.run(&mut |_, _| {})?;
         self.finish_query(job, listing)
@@ -665,8 +691,14 @@ impl MailStore {
     }
     /// Prepare a provider query to run without this store's lock; `None` for the demo
     /// account, which `query` answers directly.
-    pub fn begin_query(&self, folder: &str, search: &str) -> Result<Option<QueryJob>, Error> {
+    pub fn begin_query(
+        &self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+    ) -> Result<Option<QueryJob>, Error> {
         validate_query(folder, search)?;
+        validate_offset(offset)?;
         let Some(reader) = self.reader() else {
             return Ok(None);
         };
@@ -688,6 +720,7 @@ impl MailStore {
             reader,
             folder: folder.into(),
             search: search.trim().into(),
+            offset,
             known,
         }))
     }
@@ -701,19 +734,23 @@ impl MailStore {
         if let Some(identity) = &listing.identity {
             self.observe_mailbox_identity(&job.folder, identity)?;
         }
-        self.apply_listing(&job.folder, &job.search, listing.messages)
+        self.apply_listing(&job.folder, &job.search, job.offset, listing.messages)
     }
     fn apply_listing(
         &mut self,
         folder: &str,
         search: &str,
+        offset: usize,
         messages: Vec<Message>,
     ) -> Result<Vec<Message>, Error> {
-        if folder == "inbox" && search.is_empty() {
+        // Only the newest page of Inbox and Sent is saved as a snapshot; older pages and
+        // other folders are kept in the reader cache, so opening one still works.
+        let snapshot = search.is_empty() && offset == 0;
+        if folder == "inbox" && snapshot {
             self.cache_inbox(&messages)?;
         }
         if folder == "sent"
-            && search.is_empty()
+            && snapshot
             && let Some(account) = &self.account_key
         {
             self.cache.store(account, folder, &messages)?;
@@ -734,7 +771,7 @@ impl MailStore {
             remove += 1;
         }
         self.reader_cache.drain(..remove);
-        if folder == "inbox" && search.is_empty() {
+        if folder == "inbox" && snapshot {
             self.messages = messages.clone();
         }
         Ok(messages)
@@ -858,9 +895,18 @@ impl MailStore {
     }
 }
 
-fn imap_folder_id(id: &str, folder: &str) -> bool {
-    id.strip_prefix("imap-")
-        .is_some_and(|rest| rest.matches('-').count() == if folder == "inbox" { 1 } else { 2 })
+/// Whether an IMAP message id belongs to the mailbox that `identity` (`imap-<validity>-`
+/// for Inbox, `imap-<hex name>-<validity>-` for other folders) names, under any validity.
+fn imap_same_mailbox(id: &str, identity: &str) -> bool {
+    let mailbox = identity
+        .strip_suffix('-')
+        .and_then(|rest| rest.rsplit_once('-'))
+        .map(|(mailbox, _validity)| mailbox);
+    mailbox.is_some_and(|mailbox| {
+        id.strip_prefix(mailbox)
+            .and_then(|rest| rest.strip_prefix('-'))
+            .is_some_and(|rest| rest.matches('-').count() == 1)
+    })
 }
 
 /// The number in a draft ID `draft-<n>`.
@@ -917,15 +963,22 @@ fn bounded_body(mut body: String) -> String {
     body
 }
 
+/// `folder` is `inbox`, `sent`, or a provider folder id from `folders()` (an IMAP mailbox
+/// name or a JMAP mailbox id); `inbox` and `sent` always mean those roles.
 fn validate_query(folder: &str, search: &str) -> Result<(), Error> {
-    if !matches!(folder, "inbox" | "sent")
-        || search.len() > 1024
-        || search.chars().any(char::is_control)
-    {
+    let bounded = |text: &str| text.len() <= 1024 && !text.chars().any(char::is_control);
+    if folder.is_empty() || !bounded(folder) || !bounded(search) {
         return Err(Error::Invalid(
-            "Choose Inbox or Sent and a search of at most 1024 bytes without control characters"
-                .into(),
+            "Choose a folder and a search of at most 1024 bytes without control characters".into(),
         ));
+    }
+    Ok(())
+}
+fn validate_offset(offset: usize) -> Result<(), Error> {
+    if offset > MAX_LIST_OFFSET {
+        return Err(Error::Invalid(format!(
+            "Older mail can be loaded up to {MAX_LIST_OFFSET} messages back"
+        )));
     }
     Ok(())
 }
@@ -1172,7 +1225,7 @@ mod cache_tests {
         let dir = tempfile::tempdir().unwrap();
         let mut store = MailStore::open(dir.path()).unwrap();
         store.connect_account(account()).unwrap();
-        let job = store.begin_query("inbox", "").unwrap().unwrap();
+        let job = store.begin_query("inbox", "", 0).unwrap().unwrap();
         let mut another = account();
         another.username = "another".into();
         store.connect_account(another).unwrap();

@@ -1,6 +1,6 @@
 id = "inbox"
 name = "Mail"
-api_version = 1
+api_version = 2
 client = "client/main.js"
 navigation = ["inbox", "drafts", "sent"]
 capabilities = ["extensions.bus", "account.read", "messages.organize", "messages.list", "messages.label", "drafts.list", "ui.commands"]

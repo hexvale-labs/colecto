@@ -212,13 +212,16 @@ impl MailAccount {
         &self,
         folder: &str,
         search: &str,
+        offset: usize,
         known: &std::collections::HashMap<String, Message>,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<crate::Listing, Error> {
         self.validate()?;
         crate::validate_query(folder, search)?;
+        crate::validate_offset(offset)?;
         let mut session = self.login()?;
-        let result = query_session_with_identity(&mut session, folder, search, known, progress);
+        let result =
+            query_session_with_identity(&mut session, folder, search, offset, known, progress);
         let _ = session.logout();
         result
     }
@@ -227,7 +230,7 @@ impl MailAccount {
         folder: &str,
         search: &str,
     ) -> Result<(Vec<Message>, String), Error> {
-        let listing = self.list(folder, search, &Default::default(), &mut |_, _| {})?;
+        let listing = self.list(folder, search, 0, &Default::default(), &mut |_, _| {})?;
         Ok((listing.messages, listing.identity.unwrap_or_default()))
     }
     /// IMAP IDLE (RFC 2177) on a read-only Inbox: `Ok(true)` when the server reports a change,
@@ -463,8 +466,15 @@ fn query_session<T: std::io::Read + std::io::Write>(
     folder: &str,
     search: &str,
 ) -> Result<Vec<Message>, Error> {
-    query_session_with_identity(session, folder, search, &Default::default(), &mut |_, _| {})
-        .map(|listing| listing.messages)
+    query_session_with_identity(
+        session,
+        folder,
+        search,
+        0,
+        &Default::default(),
+        &mut |_, _| {},
+    )
+    .map(|listing| listing.messages)
 }
 
 /// Messages up to this size are listed from their full text; larger ones from headers only.
@@ -502,14 +512,18 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
     session: &mut imap::Session<T>,
     folder: &str,
     search: &str,
+    offset: usize,
     known: &std::collections::HashMap<String, Message>,
     progress: &mut dyn FnMut(usize, usize),
 ) -> Result<crate::Listing, Error> {
-    let name = if folder == "inbox" {
-        "INBOX".to_owned()
-    } else {
-        let names = session.list(Some(""), Some("*")).map_err(imap_error)?;
-        sent_mailbox(&names)?
+    // Other folders are named by their mailbox name, as `folders()` lists them.
+    let name = match folder {
+        "inbox" => "INBOX".to_owned(),
+        "sent" => {
+            let names = session.list(Some(""), Some("*")).map_err(imap_error)?;
+            sent_mailbox(&names)?
+        }
+        other => other.to_owned(),
     };
     let mailbox = session.examine(&name).map_err(imap_error)?;
     let validity = mailbox
@@ -526,12 +540,20 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
         identity: Some(identity),
         raws: Vec::new(),
     };
-    if mailbox.exists == 0 {
+    // Sequence numbers count from the oldest, so a page `offset` messages back ends at
+    // `exists - offset`. Mail arriving between pages shifts them; callers drop repeats.
+    let end = (mailbox.exists as usize).saturating_sub(offset);
+    if end == 0 {
         return Ok(empty(identity));
     }
     // One round trip for every UID, size and flag; message text only for what is new.
     let headers = if search.is_empty() {
-        let range = format!("{}:*", mailbox.exists.saturating_sub(99).max(1));
+        let start = end.saturating_sub(crate::MAX_LIST_MESSAGES - 1).max(1);
+        let range = if offset == 0 {
+            format!("{start}:*")
+        } else {
+            format!("{start}:{end}")
+        };
         session
             .fetch(&range, "(UID FLAGS RFC822.SIZE)")
             .map_err(imap_error)?
@@ -545,6 +567,7 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
         let selected: Vec<_> = ids
             .into_iter()
             .rev()
+            .skip(offset)
             .take(crate::MAX_LIST_MESSAGES)
             .collect();
         if selected.is_empty() {
@@ -816,6 +839,7 @@ mod tests {
                 &mut session,
                 "inbox",
                 search,
+                0,
                 &Default::default(),
                 &mut |_, _| {},
             )
@@ -1168,6 +1192,48 @@ mod tests {
         ));
     }
     #[test]
+    fn lists_an_older_page_of_a_named_mailbox() {
+        let raw = "From: a@example.test\r\nSubject: Old\r\n\r\nText";
+        let server = mock_imap(vec![
+            ("LOGIN", String::new()),
+            (
+                "EXAMINE \"Work\"",
+                "* 150 EXISTS\r\n* OK [UIDVALIDITY 7] ok\r\n".into(),
+            ),
+            (
+                "FETCH 1:50 (UID FLAGS RFC822.SIZE)",
+                "* 50 FETCH (UID 60 FLAGS () RFC822.SIZE 50)\r\n".into(),
+            ),
+            (
+                "UID FETCH 60 (UID BODY.PEEK[])",
+                format!("* 50 FETCH (UID 60 BODY[] {{{}}}\r\n{raw})\r\n", raw.len()),
+            ),
+            // Paging past the oldest message asks for nothing.
+            (
+                "EXAMINE \"Work\"",
+                "* 150 EXISTS\r\n* OK [UIDVALIDITY 7] ok\r\n".into(),
+            ),
+        ]);
+        let mut session = mock_session();
+        let page = |session: &mut imap::Session<TcpStream>, offset| {
+            query_session_with_identity(
+                session,
+                "Work",
+                "",
+                offset,
+                &Default::default(),
+                &mut |_, _| {},
+            )
+            .unwrap()
+        };
+        let older = page(&mut session, 100);
+        assert_eq!(older.messages.len(), 1);
+        assert_eq!(older.messages[0].subject, "Old");
+        assert_eq!(older.messages[0].id, "imap-576f726b-7-60");
+        assert!(page(&mut session, 150).messages.is_empty());
+        server.join().unwrap();
+    }
+    #[test]
     fn lists_large_messages_from_headers_and_fetches_them_on_demand() {
         let header = "From: big@example.test\r\nSubject: Big\r\n\r\n";
         let raw = format!("{header}Full body");
@@ -1251,11 +1317,15 @@ mod tests {
         old.id = "imap-7-1".into();
         let known = std::collections::HashMap::from([(old.id.clone(), old)]);
         let mut steps = Vec::new();
-        let listing =
-            query_session_with_identity(&mut session, "inbox", "", &known, &mut |done, total| {
-                steps.push((done, total))
-            })
-            .unwrap();
+        let listing = query_session_with_identity(
+            &mut session,
+            "inbox",
+            "",
+            0,
+            &known,
+            &mut |done, total| steps.push((done, total)),
+        )
+        .unwrap();
         assert_eq!(steps, [(0, 2), (2, 2)]);
         let ids: Vec<_> = listing.messages.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["imap-7-3", "imap-7-2", "imap-7-1"]);

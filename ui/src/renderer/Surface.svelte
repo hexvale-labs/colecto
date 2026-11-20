@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import type { MenuItem } from '../runtime/protocol';
   export interface SurfaceContext {
     prefix: string;
     /** The extension that owns this surface; slots in it are named after it. */
@@ -9,6 +10,8 @@
     may: (capability: string) => boolean;
     /** Ask for a row's context menu (a `list` with `context_menu`), anchored at (x, y). */
     menu?: (node: string, key: string, x: number, y: number) => void;
+    /** Show a menu of a component's built-in actions at (x, y); `choose` gets the item id. */
+    localMenu?: (x: number, y: number, label: string, items: MenuItem[], choose: (item: string) => void) => void;
     /** Narrow layout: a `nav` with `placement: "bottom"` is drawn by the shell instead. */
     lifted?: boolean;
   }
@@ -28,6 +31,7 @@
     files: (node, files, buffers) => runtime.files(surface, node, files, buffers),
     may: capability => runtime.capabilities.includes(capability),
     menu: (node, key, x, y) => runtime.openMenu(surface, node, key, x, y),
+    localMenu: (x, y, label, items, choose) => runtime.localMenu(x, y, label, items, choose),
   });
   const tree = $derived(runtime.trees[surface]);
 </script>

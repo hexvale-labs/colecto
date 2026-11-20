@@ -306,8 +306,18 @@ impl JmapAccount {
     }
 
     pub fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
+        self.query_page(folder, search, 0)
+    }
+    /// One page of a folder, skipping the newest `offset` messages.
+    pub fn query_page(
+        &self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+    ) -> Result<Vec<Message>, Error> {
         crate::validate_query(folder, search)?;
-        self.session()?.query(folder, search)
+        crate::validate_offset(offset)?;
+        self.session()?.query(folder, search, offset)
     }
     /// Download one complete message as RFC 5322 bytes.
     pub(crate) fn fetch_raw(&self, id: &str) -> Result<Vec<u8>, Error> {
@@ -483,8 +493,12 @@ impl Session<'_> {
             .collect()
     }
 
-    fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
-        let mailbox = self.mailbox(folder)?;
+    fn query(&self, folder: &str, search: &str, offset: usize) -> Result<Vec<Message>, Error> {
+        // `inbox` and `sent` are roles; anything else is a mailbox id from `folders()`.
+        let mailbox = match folder {
+            "inbox" | "sent" => self.mailbox(folder)?,
+            other => other.to_owned(),
+        };
         // Conditions in one object all apply; a repeated one (two `from:`) needs an explicit AND.
         let mut filter = json!({"inMailbox":mailbox});
         let conditions = crate::search::Query::parse(search).jmap();
@@ -510,13 +524,12 @@ impl Session<'_> {
                 }
             }
         }
-        // shortcut: latest 100 messages only; add changes/pagination before full sync.
-        // One request: Email/get takes the ids straight from the query's result.
+        // One page per request; Email/get takes the ids straight from the query's result.
         let results = self.calls(&[
             (
                 "Email/query",
                 json!({"filter":filter,
-                "sort":[{"property":"receivedAt","isAscending":false}],"limit":crate::MAX_LIST_MESSAGES}),
+                "sort":[{"property":"receivedAt","isAscending":false}],"position":offset,"limit":crate::MAX_LIST_MESSAGES}),
             ),
             (
                 "Email/get",
@@ -821,6 +834,7 @@ mod tests {
                         json!({"inMailbox":"sent-id","text":"needle"})
                     );
                     assert_eq!(calls[0][1]["limit"], 100);
+                    assert_eq!(calls[0][1]["position"], 0);
                     assert_eq!(calls[1][0], "Email/get");
                     assert_eq!(calls[1][1]["#ids"]["resultOf"], "0");
                     json!([
@@ -855,7 +869,7 @@ mod tests {
             submission: false,
             event_source: None,
         };
-        let messages = session.query("sent", "needle").unwrap();
+        let messages = session.query("sent", "needle", 0).unwrap();
         assert_eq!(
             messages
                 .iter()

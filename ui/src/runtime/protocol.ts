@@ -87,7 +87,7 @@ export const VOCABULARY: Record<string, Spec> = {
   file_picker: { props: { ...control, label, icon, multiple: bool } , required: ['label'] },
   secret_field: { props: { label, target: oneOf('ai.text', 'ai.decision'), saved: bool }, required: ['label', 'target'] },
   // Children are what a virtual list shows while it has no rows (loading, empty, searching).
-  list: { container: true, props: { label, rows: () => true, selected: label, selection: oneOf('none', 'single'), mode: oneOf('static', 'virtual'), arrived: list(label, 64), context_menu: bool }, required: ['rows'] },
+  list: { container: true, props: { label, rows: () => true, selected: label, selection: oneOf('none', 'single'), mode: oneOf('static', 'virtual'), arrived: list(label, 64), context_menu: bool, more: oneOf('available', 'loading', 'end', 'error') }, required: ['rows'] },
   message_row: { props: { sender: text, date: label, date_title: text, subject: text, preview: text, unread: bool, starred: bool, disabled: bool } },
   empty_state: { props: { title: label, text, hint: list(span, 16), image: oneOf('colecto'), preset: oneOf('list', 'welcome', 'error') }, nodes: ['actions'] },
   loading: { props: { text: label } },
