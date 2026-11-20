@@ -48,6 +48,11 @@ pub fn parse(source: &str) -> Result<ExtensionManifest, String> {
 /// packages that target one can still be listed and removed.
 pub fn parse_any_version(source: &str) -> Result<ExtensionManifest, String> {
     let manifest: ExtensionManifest = toml::from_str(source).map_err(|e| e.to_string())?;
+    check_fields(&manifest)?;
+    Ok(manifest)
+}
+
+fn check_fields(manifest: &ExtensionManifest) -> Result<(), String> {
     colecto_extension_api::validate_settings(&manifest.settings)?;
     let version = manifest.api_version;
     if let ApiSupport::Newer | ApiSupport::Unknown = api_support(version) {
@@ -148,18 +153,17 @@ pub fn parse_any_version(source: &str) -> Result<ExtensionManifest, String> {
             return Err("Invalid bus subscriptions (maximum 32)".into());
         }
     }
-    Ok(manifest)
+    Ok(())
 }
 
 /// The extra rules for third-party packages. Like [`parse_any_version`], it accepts
 /// discontinued API versions.
 pub fn validate(manifest: &ExtensionManifest) -> Result<(), String> {
-    let source = toml::to_string(manifest).map_err(|e| e.to_string())?;
-    parse_any_version(&source)?;
+    check_fields(manifest)?;
     if manifest.client.is_none() {
         return Err("Extensions need a client part: set client = \"client/main.js\"".into());
     }
-    if source.len() > MAX_MANIFEST {
+    if toml::to_string(manifest).map_err(|e| e.to_string())?.len() > MAX_MANIFEST {
         return Err("Manifest too large".into());
     }
     Ok(())

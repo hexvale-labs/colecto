@@ -87,6 +87,8 @@ pub fn read(bytes: &[u8]) -> Result<Package, String> {
     let mut names = std::collections::HashSet::new();
     let (mut client_names, mut asset_names, mut service_name) = (Vec::new(), Vec::new(), None);
     let mut declared_total = 0u64;
+    let archive_len = bytes.len() as u64;
+    let archive_ratio_limit = archive_len.saturating_mul(MAX_RATIO);
     for i in 0..archive.len() {
         let file = archive.by_index(i).map_err(|_| invalid())?;
         let name = file.name().map_err(|_| invalid())?.to_string();
@@ -116,13 +118,18 @@ pub fn read(bytes: &[u8]) -> Result<Package, String> {
         } else {
             return Err(invalid());
         };
+        if file.compressed_size() > archive_len {
+            return Err(invalid());
+        }
         declared_total = declared_total
             .checked_add(file.size())
             .ok_or_else(invalid)?;
         if file.size() > limit as u64 || declared_total > MAX_UNCOMPRESSED as u64 {
             return Err("Extension entry or total content exceeds size limits".into());
         }
-        if file.size() > file.compressed_size().saturating_mul(MAX_RATIO) {
+        if file.size() > file.compressed_size().saturating_mul(MAX_RATIO)
+            || declared_total > archive_ratio_limit
+        {
             return Err("Extension compression ratio exceeds 100:1".into());
         }
     }
@@ -135,7 +142,11 @@ pub fn read(bytes: &[u8]) -> Result<Package, String> {
         if !file.is_file() || file.size() > limit as u64 {
             return Err(format!("{name} must be at most {} KiB", limit / 1024));
         }
-        let ratio_limit = file.compressed_size().saturating_mul(MAX_RATIO);
+        let ratio_limit = file
+            .compressed_size()
+            .min(archive_len)
+            .saturating_mul(MAX_RATIO)
+            .min(archive_ratio_limit.saturating_sub(actual_total as u64));
         // Declared sizes can lie; bound actual inflation by all three budgets.
         let mut data = Vec::new();
         file.take((limit.min(MAX_UNCOMPRESSED - actual_total) as u64).min(ratio_limit) + 1)
@@ -462,6 +473,37 @@ mod tests {
             zip::CompressionMethod::Deflated,
         );
         assert!(read(&bomb).is_err());
+    }
+    #[test]
+    fn forged_compressed_size_exceeding_archive_length_is_rejected() {
+        let data = vec![0; 50_000];
+        let mut bytes = zip_with(
+            &[(MANIFEST, b""), (MODULE, &data)],
+            zip::CompressionMethod::Deflated,
+        );
+        let (local, central) = {
+            let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+            let central = archive.central_directory_start() as usize;
+            let file = archive.by_name(MODULE).unwrap();
+            (file.header_start() as usize, central)
+        };
+        // Forge a compressed_size larger than the actual zip file so per-entry ratio looks <= 100:1.
+        let forged = (bytes.len() as u32) + 1000;
+        bytes[local + 18..local + 22].copy_from_slice(&forged.to_le_bytes());
+        let mut offset = central;
+        while &bytes[offset..offset + 4] == b"PK\x01\x02" {
+            let name_len =
+                u16::from_le_bytes(bytes[offset + 28..offset + 30].try_into().unwrap()) as usize;
+            let extra =
+                u16::from_le_bytes(bytes[offset + 30..offset + 32].try_into().unwrap()) as usize;
+            let comment =
+                u16::from_le_bytes(bytes[offset + 32..offset + 34].try_into().unwrap()) as usize;
+            if &bytes[offset + 46..offset + 46 + name_len] == MODULE.as_bytes() {
+                bytes[offset + 20..offset + 24].copy_from_slice(&forged.to_le_bytes());
+            }
+            offset += 46 + name_len + extra + comment;
+        }
+        assert!(read(&bytes).is_err());
     }
 }
 

@@ -1,6 +1,8 @@
 // Theme tokens for extensions (docs/extensions/ui-model.md, "Theme tokens"): the colours,
 // font and density the renderer already uses, resolved to plain values so frame and canvas
 // content can match. Settings → Appearance changes them; the shell then sends `theme`.
+import { prefersReducedMotion } from '../lib/ui';
+
 export interface Theme {
   scheme: 'dark';
   colors: Record<string, string>;
@@ -44,6 +46,6 @@ export function currentTheme(): Theme {
     colors,
     font: { family: style.getPropertyValue('--font').split(',')[0].trim().replace(/^['"]|['"]$/g, ''), size: Math.round(14 * scale), scale },
     density: matchMedia('(pointer: coarse)').matches ? 'touch' : 'pointer',
-    reduced_motion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    reduced_motion: prefersReducedMotion(),
   };
 }

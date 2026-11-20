@@ -2,16 +2,17 @@
   // A button that opens a short menu, keyboard operable like the app's other menus.
   import { tick } from 'svelte';
   import Icon, { type IconName } from '../Icon.svelte';
+  import { prefersReducedMotion } from '../lib/ui';
   let { label, icon, items, disabled = false, onselect }: { label: string; icon?: IconName; items: { id: string; label: string; disabled?: boolean }[]; disabled?: boolean; onselect: (item: string) => void } = $props();
-  const id = `menu-${Math.random().toString(36).slice(2)}`;
+  const uid = $props.id();
+  const id = `menu-${uid}`;
   let open = $state(false);
   // Fixed to the window, so a scrolling or clipped parent (a row of chips) cannot hide it.
   let place = $state({ left: 0, top: 0 });
   let button = $state<HTMLButtonElement>();
   let menu = $state<HTMLElement>();
-  const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Leaves quicker than it arrives, back toward the button.
-  function leave(_node: HTMLElement) { return { duration: reduced ? 0 : 120, css: (t: number) => `opacity:${t};transform:scale(${0.97 + 0.03 * t}) translateY(${(1 - t) * -4}px)` }; }
+  function leave(_node: HTMLElement) { return { duration: prefersReducedMotion() ? 0 : 120, css: (t: number) => `opacity:${t};transform:scale(${0.97 + 0.03 * t}) translateY(${(1 - t) * -4}px)` }; }
   async function show(focus: 'first' | 'last' = 'first') {
     open = true; await tick();
     const anchor = button!.getBoundingClientRect();

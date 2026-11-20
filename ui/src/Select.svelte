@@ -5,11 +5,13 @@
   import { tick, type Snippet } from 'svelte';
   import Icon from './Icon.svelte';
   import { claimBack } from './lib/back';
+  import { prefersReducedMotion } from './lib/ui';
   let { label, value, options, onchange, disabled = false, placement = 'below', trigger, onopen }: {
     label: string; value: T; options: Option<T>[]; onchange: (value: T) => void;
     onopen?: () => void; disabled?: boolean; placement?: 'below' | 'above'; trigger?: Snippet<[Option<T> | undefined]>;
   } = $props();
-  const id = `listbox-${Math.random().toString(36).slice(2)}`;
+  const uid = $props.id();
+  const id = `listbox-${uid}`;
   let open = $state(false);
   let active = $state(0);
   let button: HTMLButtonElement;
@@ -20,11 +22,10 @@
   // that ancestor, which would shift the whole app.
   let side = $state<'below' | 'above'>('below');
   let room = $state<number | undefined>();
-  const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Closing is quicker than opening and shrinks back toward the trigger.
   function leave(node: HTMLElement) {
     const from = side === 'above' ? 4 : -4;
-    return { duration: reduced ? 0 : 120, easing: (t: number) => t * (2 - t), css: (t: number) => `opacity:${t};transform:scale(${0.97 + 0.03 * t}) translateY(${(1 - t) * from}px)` };
+    return { duration: prefersReducedMotion() ? 0 : 120, easing: (t: number) => t * (2 - t), css: (t: number) => `opacity:${t};transform:scale(${0.97 + 0.03 * t}) translateY(${(1 - t) * from}px)` };
   }
   async function show() {
     if (disabled || !options.length) return;

@@ -4,12 +4,12 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import { breakingApiNotes } from './lib/api';
+  import { modal } from './lib/ui';
   let { items, installing = false, onclose }: { items: Discontinued[]; installing?: boolean; onclose: () => void } = $props();
-  function show(node: HTMLDialogElement) { node.showModal(); return { destroy() { node.close(); } }; }
   const why = (release: string) => window.open(breakingApiNotes(release), '_blank', 'noopener');
 </script>
 
-<dialog class="install-warning" aria-labelledby="api-version-title" aria-describedby="api-version-text" use:show oncancel={(event) => { event.preventDefault(); onclose(); }}>
+<dialog class="install-warning" aria-labelledby="api-version-title" aria-describedby="api-version-text" use:modal oncancel={(event) => { event.preventDefault(); onclose(); }}>
   <span class="warning-mark" aria-hidden="true"><Icon name="alert" size={22} /></span>
   <h2 id="api-version-title">{items.length === 1 ? `${items[0].name} can’t be loaded` : `${items.length} extensions can’t be loaded`}</h2>
   <div id="api-version-text" class="warning-text">

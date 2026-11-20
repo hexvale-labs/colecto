@@ -90,6 +90,40 @@ struct Host {
     windows: Arc<std::sync::atomic::AtomicUsize>,
 }
 
+/// Read an HTTP response body up to `max` bytes, failing if the stream errors or exceeds `max`.
+pub(crate) async fn read_bounded(
+    mut response: reqwest::Response,
+    max: usize,
+) -> Result<Vec<u8>, ()> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| ())? {
+        if body.len() + chunk.len() > max {
+            return Err(());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+/// Validate and normalize an origin-only URL (`https://...`, plus loopback `http://` when allowed).
+pub(crate) fn parse_origin(input: &str, allow_loopback_http: bool) -> Option<String> {
+    let url = reqwest::Url::parse(input).ok()?;
+    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    let scheme_ok =
+        url.scheme() == "https" || (allow_loopback_http && url.scheme() == "http" && loopback);
+    if !scheme_ok
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
+    }
+    Some(url.origin().ascii_serialization())
+}
+
 /// Counts an open window for as long as its event stream lives.
 struct Window(Arc<std::sync::atomic::AtomicUsize>);
 impl Window {
@@ -1079,7 +1113,7 @@ fn extension_service(
     use Capability::*;
     let result = match request.operation {
         AccountRead => serde_json::to_value(store.connected()),
-        MessagesList => serde_json::to_value(store.messages()),
+        MessagesList => unreachable!("MessagesList returns from cache above"),
         MessagesRead => serde_json::to_value(
             store
                 .message(request.id.as_deref().ok_or("Message ID required")?)
@@ -2091,49 +2125,53 @@ async fn reset_extension_settings(
 }
 
 #[cfg(test)]
+pub(crate) fn test_host(dir: &std::path::Path) -> Host {
+    let accounts =
+        Accounts::open(MailStore::open(dir).unwrap(), Arc::new(UnavailableSecrets)).unwrap();
+    let database = accounts.database();
+    Host {
+        events: tokio::sync::broadcast::channel(16).0,
+        bus_replies: Default::default(),
+        keys: Arc::new(Mutex::new(ApiKeys::open(database.clone()).unwrap())),
+        ai: Arc::new(ai::Ai::open(database.clone()).unwrap()),
+        preferences: Arc::new(Mutex::new(
+            preferences::PreferenceStore::open(database.clone()).unwrap(),
+        )),
+        approvals: Arc::new(Mutex::new(
+            approvals::Approvals::open(database.clone(), api_keys::now()).unwrap(),
+        )),
+        status_polls: Arc::default(),
+        accounts: Arc::new(Mutex::new(accounts)),
+        extensions: Arc::new(Mutex::new(extensions::Extensions::open(database).unwrap())),
+        authority: "127.0.0.1:4173".into(),
+        origin: "http://127.0.0.1:4173".into(),
+        execution: Arc::new(tokio::sync::Semaphore::new(2)),
+        sync: Arc::default(),
+        credentials: Arc::default(),
+        windows: Arc::default(),
+    }
+}
+
+#[cfg(test)]
 mod extension_service_tests {
     use super::*;
     #[tokio::test]
     async fn guest_service_rejects_identity_injection_and_checks_current_grants() {
         let dir = tempfile::tempdir().unwrap();
-        let accounts = Accounts::open(
-            MailStore::open(dir.path()).unwrap(),
-            Arc::new(UnavailableSecrets),
-        )
-        .unwrap();
-        let database = accounts.database();
-        let mut extensions = extensions::Extensions::open(database.clone()).unwrap();
-        extensions
-            .install(&extensions::tests::package(
-                &extensions::tests::EXAMPLE.replace(
-                    "capabilities = [\"account.read\"]",
-                    "capabilities = [\"account.read\", \"messages.send\"]",
-                ),
-                Some(wat::parse_str("(module (func (export \"run\")))").unwrap()),
-            ))
-            .unwrap();
-        extensions.update("hello-pane", true).unwrap();
-        let host = Host {
-            events: tokio::sync::broadcast::channel(1).0,
-            bus_replies: Default::default(),
-            keys: Arc::new(Mutex::new(ApiKeys::open(database.clone()).unwrap())),
-            ai: Arc::new(ai::Ai::open(database.clone()).unwrap()),
-            preferences: Arc::new(Mutex::new(
-                preferences::PreferenceStore::open(database.clone()).unwrap(),
-            )),
-            approvals: Arc::new(Mutex::new(
-                approvals::Approvals::open(database, api_keys::now()).unwrap(),
-            )),
-            status_polls: Arc::default(),
-            accounts: Arc::new(Mutex::new(accounts)),
-            extensions: Arc::new(Mutex::new(extensions)),
-            authority: "127.0.0.1:4173".into(),
-            origin: "http://127.0.0.1:4173".into(),
-            execution: Arc::new(tokio::sync::Semaphore::new(2)),
-            sync: Arc::default(),
-            credentials: Arc::default(),
-            windows: Arc::default(),
-        };
+        let host = test_host(dir.path());
+        {
+            let mut extensions = host.extensions.lock().unwrap();
+            extensions
+                .install(&extensions::tests::package(
+                    &extensions::tests::EXAMPLE.replace(
+                        "capabilities = [\"account.read\"]",
+                        "capabilities = [\"account.read\", \"messages.send\"]",
+                    ),
+                    Some(wat::parse_str("(module (func (export \"run\")))").unwrap()),
+                ))
+                .unwrap();
+            extensions.update("hello-pane", true).unwrap();
+        }
         let epoch = host
             .extensions
             .lock()

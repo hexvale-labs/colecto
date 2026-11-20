@@ -1,6 +1,6 @@
 // Optional AI help: a menu and a saved summary inside the reader, drafted replies, and the
 // settings for the services the owner chose. Automatic labels run in the Host (`ai.rs`).
-import { app, bus, call, type Node } from '../../../extension-sdk';
+import { app, bus, call, clip, type Node } from '../../../extension-sdk';
 import type { AiSettings, Effort, Field, LabelRule, Preview, SettingsView, Tone } from '../api';
 
 let view: SettingsView | null = null;
@@ -252,6 +252,7 @@ function renderSettings() {
           { type: 'input', id: 'text-model', label: 'Model', placeholder: 'Model name', autocomplete: 'off', spellcheck: false, value: settings.text.model },
           { type: 'input', id: 'text-tokens', kind: 'number', label: 'Max tokens', min: 16, max: 32000, step: 1, value: String(settings.text.max_tokens) },
         ] },
+        { type: 'text', tone: 'muted', size: 'sm', text: 'Changing the base URL removes the saved key.' },
         { type: 'secret_field', id: 'text-key', label: 'API key', target: 'ai.text', saved: view!.keys.text },
         { type: 'segmented', id: 'effort', label: 'Thinking effort', value: settings.text.effort ?? 'default', options: efforts },
         { type: 'text', tone: 'muted', size: 'sm', text: 'Only sent when not Default. Not every model supports it.' },
@@ -263,6 +264,7 @@ function renderSettings() {
           { type: 'input', id: 'decision-url', kind: 'url', label: 'Base URL', value: settings.decision.base_url },
           { type: 'input', id: 'decision-model', label: 'Model', autocomplete: 'off', spellcheck: false, value: settings.decision.model },
         ] },
+        { type: 'text', tone: 'muted', size: 'sm', text: 'Changing the base URL removes the saved key.' },
         { type: 'secret_field', id: 'decision-key', label: 'API key', target: 'ai.decision', saved: view!.keys.decision },
         { type: 'range', id: 'threshold', label: 'Confidence needed', min: 0.5, max: 0.99, step: 0.01, value: settings.decision.threshold, format: 'percent', low: 'More labels', high: 'Fewer, surer labels' },
         testRow('decision'),
@@ -278,8 +280,8 @@ function renderSettings() {
             { type: 'text', tone: 'muted', size: 'sm', text: describe(rules()[name]) },
           ] },
           { type: 'stack', direction: 'row', gap: 2, children: [
-            { type: 'button', id: `edit.${index}`, variant: 'icon', icon: 'pencil', label: `Edit rules for ${name}`, title: 'Edit', disabled: !settings.autolabel },
-            { type: 'button', id: `remove.${index}`, variant: 'icon', icon: 'trash', label: `Remove rules for ${name}`, title: 'Remove', disabled: !settings.autolabel || !rules()[name] },
+            { type: 'button', id: `edit.${index}`, variant: 'icon', icon: 'pencil', label: clip(`Edit rules for ${name}`, 128), title: 'Edit', disabled: !settings.autolabel },
+            { type: 'button', id: `remove.${index}`, variant: 'icon', icon: 'trash', label: clip(`Remove rules for ${name}`, 128), title: 'Remove', disabled: !settings.autolabel || !rules()[name] },
           ] },
         ] } })) },
       ] },
@@ -347,7 +349,7 @@ function schedulePreview() {
 function renderEditor() {
   if (editing === null) return;
   const invalid = !!preview?.errors.some(Boolean);
-  app.send({ t: 'dialog', tree: { type: 'form', id: `rule-form-${editorEpoch}`, label: `“${editing}”`, children: [
+  app.send({ t: 'dialog', tree: { type: 'form', id: `rule-form-${editorEpoch}`, label: clip(`“${editing}”`, 128), children: [
     { type: 'heading', level: 2, text: `“${editing}”` },
     { type: 'text', tone: 'muted', text: 'Choose which new mail gets this label.' },
     { type: 'toggle', id: 'rule-enabled', label: 'Label new mail automatically', checked: rule.enabled },

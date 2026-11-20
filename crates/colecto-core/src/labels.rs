@@ -60,9 +60,8 @@ impl MailStore {
         let labels = self.labels()?;
         let account = self.id.as_str();
         let statements: Vec<(&str, Vec<Value>)> = match (message_id, remove) {
-            (Some(id), _) if !valid_message(id) || self.message(id).is_none() => {
-                return Err(Error::Missing);
-            }
+            (Some(id), _) if !valid_message(id) => return Err(Error::Missing),
+            (Some(id), false) if self.message(id).is_none() => return Err(Error::Missing),
             (Some(id), remove) => {
                 let ids = labels.get(name).ok_or(Error::Missing)?;
                 let present = ids.iter().any(|entry| entry == id);
@@ -148,5 +147,19 @@ mod tests {
         assert!(store.labels().unwrap()["Work"].is_empty());
         store.update_label("Work", None, true).unwrap();
         assert!(store.labels().unwrap().is_empty());
+    }
+    #[test]
+    fn removing_a_label_works_for_off_page_or_deleted_messages() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = MailStore::open(directory.path()).unwrap();
+        let id = store.messages()[0].id.clone();
+        store.update_label("Work", None, false).unwrap();
+        store.update_label("Work", Some(&id), false).unwrap();
+        // Simulate the message aging off the current cached page or being archived/deleted.
+        store.disconnect();
+        assert!(store.message(&id).is_none());
+        assert!(store.update_label("Work", Some(&id), false).is_err());
+        store.update_label("Work", Some(&id), true).unwrap();
+        assert!(store.labels().unwrap()["Work"].is_empty());
     }
 }

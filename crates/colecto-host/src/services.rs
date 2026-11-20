@@ -53,22 +53,9 @@ const REMOTE_TOKEN_FILE: &str = "upstream-token";
 /// Normalize a remote daemon address to its origin. HTTPS is required, except for a daemon
 /// on this computer (loopback), which may use plain HTTP.
 fn remote_origin(address: &str) -> Result<String, String> {
-    let invalid = || {
+    crate::parse_origin(address, true).ok_or_else(|| {
         "Use an https:// server address without a path, credentials or query (http:// only for localhost), or unix:/absolute/socket/path".to_string()
-    };
-    let url = reqwest::Url::parse(address).map_err(|_| invalid())?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-    if !(url.scheme() == "https" || (url.scheme() == "http" && loopback))
-        || url.host_str().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.path() != "/"
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(invalid());
-    }
-    Ok(url.origin().ascii_serialization())
+    })
 }
 type Runner =
     fn(
@@ -213,7 +200,7 @@ pub(crate) async fn handle(
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_owned();
-    if !path.starts_with("/api/v1/") {
+    if !path.starts_with("/api/v1/") || path == "/api/v1/version" {
         return next.run(request).await;
     }
     let principal = request.extensions().get::<crate::api_keys::Principal>();
@@ -985,6 +972,36 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(String::from_utf8_lossy(&chunk).contains("ready"));
+        let response = local
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/version")
+                    .method("GET")
+                    .header("host", "localhost")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let version_body = axum::body::to_bytes(response.into_body(), 10_000)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&version_body).contains(crate::VERSION));
+        let response = local
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/accounts")
+                    .method("GET")
+                    .header("host", "localhost")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         let response = local
             .router()
             .oneshot(request(

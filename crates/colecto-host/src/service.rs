@@ -45,20 +45,8 @@ impl AccessPolicy {
         }
     }
     pub fn remote(origin: &str, token: String) -> Result<Self, String> {
-        let url = reqwest::Url::parse(origin).map_err(|_| "Invalid public origin")?;
-        if url.scheme() != "https"
-            || url.host_str().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.path() != "/"
-            || url.query().is_some()
-            || url.fragment().is_some()
-        {
-            return Err(
-                "Public origin must be an HTTPS origin without path, credentials, or query".into(),
-            );
-        }
-        let origin = url.origin().ascii_serialization();
+        let origin = crate::parse_origin(origin, false)
+            .ok_or("Public origin must be an HTTPS origin without path, credentials, or query")?;
         if !valid_token(&token) {
             return Err(
                 "Access token must contain 64–512 ASCII letters, digits, hyphens or underscores"

@@ -103,16 +103,108 @@ fn allow_ipc(headers: &mut axum::http::HeaderMap) {
     }
 }
 
+#[derive(Default)]
+struct StreamsInner {
+    generation: u64,
+    next_token: u64,
+    open: HashMap<u32, (u64, tokio::task::AbortHandle)>,
+}
+
 /// Open event streams by id, so the page can close one and a reload closes them all.
 #[derive(Default)]
-pub struct Streams(Mutex<HashMap<u32, tokio::task::AbortHandle>>);
+pub struct Streams(Mutex<StreamsInner>);
 impl Streams {
+    fn generation(&self) -> u64 {
+        self.0.lock().map(|inner| inner.generation).unwrap_or(0)
+    }
+
+    fn register(&self, id: u32, generation: u64, handle: tokio::task::AbortHandle) -> Option<u64> {
+        let Ok(mut inner) = self.0.lock() else {
+            handle.abort();
+            return None;
+        };
+        if inner.generation != generation {
+            handle.abort();
+            return None;
+        }
+        inner.next_token = inner.next_token.wrapping_add(1);
+        let token = inner.next_token;
+        if let Some((_, old)) = inner.open.insert(id, (token, handle)) {
+            old.abort();
+        }
+        Some(token)
+    }
+
+    fn remove_if_token(&self, id: u32, token: u64) {
+        if let Ok(mut inner) = self.0.lock()
+            && inner
+                .open
+                .get(&id)
+                .is_some_and(|(current, _)| *current == token)
+        {
+            inner.open.remove(&id);
+        }
+    }
+
+    pub fn close(&self, id: u32) {
+        if let Some((_, stream)) = self.0.lock().ok().and_then(|mut s| s.open.remove(&id)) {
+            stream.abort();
+        }
+    }
+
     pub fn close_all(&self) {
-        if let Ok(mut streams) = self.0.lock() {
-            for (_, stream) in streams.drain() {
+        if let Ok(mut inner) = self.0.lock() {
+            inner.generation = inner.generation.wrapping_add(1);
+            for (_, (_, stream)) in inner.open.drain() {
                 stream.abort();
             }
         }
+    }
+}
+
+/// Decode complete UTF-8 from `pending` + `chunk`, keeping any trailing incomplete multibyte
+/// sequence in `pending` until the next chunk arrives.
+fn decode_utf8_chunk(pending: &mut Vec<u8>, chunk: &[u8]) -> String {
+    pending.extend_from_slice(chunk);
+    let mut out = String::new();
+    loop {
+        match std::str::from_utf8(pending) {
+            Ok(valid) => {
+                out.push_str(valid);
+                pending.clear();
+                break;
+            }
+            Err(error) => {
+                let valid_up_to = error.valid_up_to();
+                if valid_up_to > 0 {
+                    out.push_str(
+                        std::str::from_utf8(&pending[..valid_up_to]).expect("valid UTF-8 prefix"),
+                    );
+                }
+                match error.error_len() {
+                    Some(invalid_len) => {
+                        out.push('\u{FFFD}');
+                        pending.drain(..valid_up_to + invalid_len);
+                    }
+                    None => {
+                        pending.drain(..valid_up_to);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Flush any trailing incomplete UTF-8 bytes at EOF as U+FFFD replacement characters.
+fn flush_utf8(pending: &mut Vec<u8>) -> String {
+    if pending.is_empty() {
+        String::new()
+    } else {
+        let text = String::from_utf8_lossy(pending).into_owned();
+        pending.clear();
+        text
     }
 }
 
@@ -136,6 +228,7 @@ pub async fn stream(
     if !STREAMS.contains(&request.path.as_str()) {
         return Err("Not an event stream".into());
     }
+    let generation = streams.generation();
     let router = router.get().cloned().ok_or("Mail service is starting")?;
     let mut builder = axum::http::Request::builder()
         .method(if request.body.is_some() {
@@ -160,32 +253,29 @@ pub async fn stream(
     }
     let mut body = response.into_body().into_data_stream();
     let task = tokio::spawn(async move {
+        let mut pending = Vec::new();
         while let Some(Ok(chunk)) = body.next().await {
-            if channel
-                .send(String::from_utf8_lossy(&chunk).into_owned())
-                .is_err()
-            {
-                break;
+            let text = decode_utf8_chunk(&mut pending, &chunk);
+            if !text.is_empty() && channel.send(text).is_err() {
+                return;
             }
         }
+        let tail = flush_utf8(&mut pending);
+        if !tail.is_empty() {
+            let _ = channel.send(tail);
+        }
     });
-    if let Ok(mut open) = streams.0.lock()
-        && let Some(old) = open.insert(id, task.abort_handle())
-    {
-        old.abort();
-    }
+    let Some(token) = streams.register(id, generation, task.abort_handle()) else {
+        return Ok(());
+    };
     let _ = task.await;
-    if let Ok(mut open) = streams.0.lock() {
-        open.remove(&id);
-    }
+    streams.remove_if_token(id, token);
     Ok(())
 }
 
 #[tauri::command]
 pub fn close_stream(id: u32, streams: tauri::State<'_, Arc<Streams>>) {
-    if let Some(stream) = streams.0.lock().ok().and_then(|mut s| s.remove(&id)) {
-        stream.abort();
-    }
+    streams.close(id);
 }
 
 /// The loopback port for API keys and MCP clients: open while MCP is on, closed otherwise.
@@ -429,5 +519,58 @@ mod tests {
         api.set(false).await;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         assert!(connect().await.is_err());
+    }
+
+    #[test]
+    fn decode_utf8_chunk_reassembles_split_multibyte_sequences() {
+        let input = "hello 世界 👋 end";
+        let mut pending = Vec::new();
+        let mut out = String::new();
+        // Feed 1 byte at a time so every multibyte sequence crosses chunk boundaries.
+        for byte in input.as_bytes() {
+            out.push_str(&decode_utf8_chunk(&mut pending, std::slice::from_ref(byte)));
+        }
+        out.push_str(&flush_utf8(&mut pending));
+        assert_eq!(out, input);
+        assert!(pending.is_empty());
+
+        // Invalid byte in the middle becomes U+FFFD while trailing valid UTF-8 survives.
+        let mut mixed = decode_utf8_chunk(&mut pending, b"a\xff\xe4");
+        mixed.push_str(&decode_utf8_chunk(&mut pending, b"\xb8\x96"));
+        mixed.push_str(&decode_utf8_chunk(&mut pending, b"\xf0\x9f"));
+        mixed.push_str(&flush_utf8(&mut pending));
+        assert_eq!(mixed, "a\u{FFFD}世\u{FFFD}");
+    }
+
+    #[tokio::test]
+    async fn streams_guards_against_close_all_and_same_id_replacement_races() {
+        let streams = Streams::default();
+        let before_close = streams.generation();
+        streams.close_all();
+
+        // A stream that connected before `close_all` must be aborted immediately on register.
+        let stale = tokio::spawn(std::future::pending::<()>());
+        let stale_handle = stale.abort_handle();
+        assert!(streams.register(1, before_close, stale_handle).is_none());
+        assert!(stale.await.unwrap_err().is_cancelled());
+
+        // Replacing an open stream with the same id aborts the old one, and the old task's
+        // cleanup must not remove the replacement.
+        let generation = streams.generation();
+        let first = tokio::spawn(std::future::pending::<()>());
+        let first_token = streams
+            .register(7, generation, first.abort_handle())
+            .expect("registered first");
+        let second = tokio::spawn(std::future::pending::<()>());
+        let second_token = streams
+            .register(7, generation, second.abort_handle())
+            .expect("registered second");
+        assert!(first.await.unwrap_err().is_cancelled());
+        streams.remove_if_token(7, first_token);
+        assert!(!second.is_finished());
+        // Closing id 7 must still find and abort `second`.
+        streams.close(7);
+        assert!(second.await.unwrap_err().is_cancelled());
+        streams.remove_if_token(7, second_token);
     }
 }

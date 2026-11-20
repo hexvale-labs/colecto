@@ -483,11 +483,11 @@ impl Extensions {
     pub fn has_client(&self, id: &str) -> bool {
         self.manifest(id).is_some_and(|m| m.client.is_some())
     }
-    pub fn allows(&self, id: &str, account: &str, capability: Capability) -> bool {
-        self.list(account).iter().any(|state| {
-            state.manifest.id == id
-                && state.enabled
-                && state.manifest.capabilities.contains(&capability)
+    pub fn allows(&self, id: &str, _account: &str, capability: Capability) -> bool {
+        self.manifest(id).is_some_and(|manifest| {
+            self.discontinued(manifest).is_none()
+                && !self.policy.disabled.contains(&manifest.id)
+                && manifest.capabilities.contains(&capability)
         })
     }
     /// [`Self::allows`] for a caller bound to a generation: a service invocation or a

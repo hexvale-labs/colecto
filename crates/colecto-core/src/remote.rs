@@ -107,6 +107,17 @@ impl MailAccount {
         Ok(())
     }
 
+    fn with_session<R>(
+        &self,
+        run: impl FnOnce(&mut imap::Session<native_tls::TlsStream<TcpStream>>) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        self.validate()?;
+        let mut session = self.login()?;
+        let result = run(&mut session);
+        let _ = session.logout();
+        result
+    }
+
     pub(crate) fn organize(
         &self,
         ids: &[String],
@@ -116,19 +127,13 @@ impl MailAccount {
         trash: Option<&str>,
         delete: bool,
     ) -> Result<(), Error> {
-        self.validate()?;
-        let mut session = self.login()?;
-        let result = organize_session(&mut session, ids, seen, flagged, destination, trash, delete);
-        let _ = session.logout();
-        result
+        self.with_session(|session| {
+            organize_session(session, ids, seen, flagged, destination, trash, delete)
+        })
     }
 
     pub fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
-        self.validate()?;
-        let mut session = self.login()?;
-        let result = folders_session(&mut session);
-        let _ = session.logout();
-        result
+        self.with_session(folders_session)
     }
 
     pub fn query(&self, folder: &str, search: &str) -> Result<Vec<Message>, Error> {
@@ -219,11 +224,9 @@ impl MailAccount {
         self.validate()?;
         crate::validate_query(folder, search)?;
         crate::validate_offset(offset)?;
-        let mut session = self.login()?;
-        let result =
-            query_session_with_identity(&mut session, folder, search, offset, known, progress);
-        let _ = session.logout();
-        result
+        self.with_session(|session| {
+            query_session_with_identity(session, folder, search, offset, known, progress)
+        })
     }
     pub(crate) fn query_with_identity(
         &self,
@@ -236,20 +239,13 @@ impl MailAccount {
     /// IMAP IDLE (RFC 2177) on a read-only Inbox: `Ok(true)` when the server reports a change,
     /// `Ok(false)` when `timeout` passes quietly.
     pub(crate) fn wait_for_inbox(&self, timeout: Duration) -> Result<bool, Error> {
-        self.validate()?;
-        let mut session = self.login()?;
-        let result = idle_session(&mut session, timeout);
-        let _ = session.logout();
-        result
+        self.with_session(|session| idle_session(session, timeout))
     }
     /// Fetch one complete message by its Colecto ID without marking it seen.
     pub(crate) fn fetch_raw(&self, id: &str) -> Result<Vec<u8>, Error> {
         self.validate()?;
         let (name, validity, uid) = parse_id(id)?;
-        let mut session = self.login()?;
-        let result = fetch_session(&mut session, &name, validity, uid);
-        let _ = session.logout();
-        result
+        self.with_session(|session| fetch_session(session, &name, validity, uid))
     }
     /// Download several messages over one session in batched `UID FETCH` commands, without
     /// marking them seen. Messages over `max_size` bytes are skipped.
@@ -259,11 +255,7 @@ impl MailAccount {
         max_size: usize,
         found: &mut dyn FnMut(String, Vec<u8>),
     ) -> Result<(), Error> {
-        self.validate()?;
-        let mut session = self.login()?;
-        let result = fetch_many_session(&mut session, ids, max_size, found);
-        let _ = session.logout();
-        result
+        self.with_session(|session| fetch_many_session(session, ids, max_size, found))
     }
 
     fn build(
@@ -529,12 +521,7 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
     let validity = mailbox
         .uid_validity
         .ok_or_else(|| remote("Missing UIDVALIDITY"))?;
-    let identity = if folder == "inbox" {
-        format!("imap-{validity}-")
-    } else {
-        let namespace: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
-        format!("imap-{namespace}-{validity}-")
-    };
+    let identity = mailbox_identity(&name, validity);
     let empty = |identity| crate::Listing {
         messages: Vec::new(),
         identity: Some(identity),
@@ -627,8 +614,7 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
             if !batch.contains(&uid) {
                 continue;
             }
-            let mut message = parse_message(raw, validity, uid)?;
-            message.id = id_of(uid);
+            let message = parse_message_or_fallback(raw, id_of(uid), validity, uid);
             raws.push((message.id.clone(), raw.to_vec()));
             fetched.insert(uid, message);
         }
@@ -644,8 +630,7 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
             let (Some(uid), Some(raw)) = (item.uid, item.header()) else {
                 continue;
             };
-            let mut message = parse_message(raw, validity, uid)?;
-            message.id = id_of(uid);
+            let mut message = parse_message_or_fallback(raw, id_of(uid), validity, uid);
             message.body = "This message is larger than 2 MB. Open it to load everything.".into();
             fetched.insert(uid, message);
         }
@@ -667,6 +652,16 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
         identity: Some(identity),
         raws,
     })
+}
+
+/// Stable per-mailbox prefix for IMAP message IDs. RFC 3501 §5.1 treats `INBOX` case-insensitively.
+fn mailbox_identity(name: &str, validity: u32) -> String {
+    if name.eq_ignore_ascii_case("INBOX") {
+        format!("imap-{validity}-")
+    } else {
+        let namespace: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
+        format!("imap-{namespace}-{validity}-")
+    }
 }
 
 fn fetch_many_session<T: std::io::Read + std::io::Write>(
@@ -693,12 +688,7 @@ fn fetch_many_session<T: std::io::Read + std::io::Write>(
         if mailbox.uid_validity != Some(validity) {
             continue;
         }
-        let prefix = if name == "INBOX" {
-            format!("imap-{validity}-")
-        } else {
-            let namespace: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
-            format!("imap-{namespace}-{validity}-")
-        };
+        let prefix = mailbox_identity(&name, validity);
         let sizes = session
             .uid_fetch(uid_set(&uids), "(UID RFC822.SIZE)")
             .map_err(imap_error)?;
@@ -747,6 +737,40 @@ fn sent_mailbox(names: &[imap::types::Name]) -> Result<String, Error> {
         .or_else(|| names.iter().filter(selectable).find(|name| ["Sent", "Sent Items", "Sent Messages", "Sent Mail"].iter().any(|candidate| leaf(name).eq_ignore_ascii_case(candidate))))
         .map(|name| name.name().to_owned())
         .ok_or_else(|| Error::Invalid("The provider did not advertise a Sent mailbox and no standard Sent folder was found".into()))
+}
+
+fn parse_message_or_fallback(raw: &[u8], id: String, validity: u32, uid: u32) -> Message {
+    match parse_message(raw, validity, uid) {
+        Ok(mut message) => {
+            message.id = id;
+            message
+        }
+        Err(error) => {
+            tracing::warn!(%error, uid, "Skipping unreadable IMAP message body");
+            let headers = mailparse::parse_headers(raw).ok().map(|(h, _)| h);
+            let from = headers
+                .as_deref()
+                .and_then(|h| h.get_first_value("From"))
+                .unwrap_or_default();
+            Message {
+                seen: false,
+                flagged: false,
+                id,
+                sender: from.clone(),
+                address: from,
+                subject: headers
+                    .as_deref()
+                    .and_then(|h| h.get_first_value("Subject"))
+                    .unwrap_or_default(),
+                date: headers
+                    .as_deref()
+                    .and_then(|h| h.get_first_value("Date"))
+                    .unwrap_or_default(),
+                thread: headers.as_deref().map(thread_of).unwrap_or_default(),
+                body: "This message could not be displayed.".into(),
+            }
+        }
+    }
 }
 
 fn parse_message(raw: &[u8], validity: u32, uid: u32) -> Result<Message, Error> {
@@ -1026,6 +1050,26 @@ mod tests {
         assert_eq!(message.id, "imap-8-12");
         assert_eq!(message.subject, "Hello 世界");
         assert_eq!(message.body, "Hello");
+    }
+    #[test]
+    fn mailbox_identity_normalizes_inbox_case_insensitively() {
+        assert_eq!(mailbox_identity("INBOX", 7), "imap-7-");
+        assert_eq!(mailbox_identity("inbox", 7), "imap-7-");
+        assert_eq!(mailbox_identity("Inbox", 7), "imap-7-");
+        assert_eq!(mailbox_identity("Archive", 7), "imap-41726368697665-7-");
+    }
+    #[test]
+    fn unreadable_message_falls_back_instead_of_aborting_listing() {
+        let raw = format!(
+            "From: alice@example.test\r\nSubject: Corrupt\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n{}--b--\r\n",
+            "--b\r\n\r\nx\r\n".repeat(1_001)
+        );
+        assert!(parse_message(raw.as_bytes(), 9, 42).is_err());
+        let fallback = parse_message_or_fallback(raw.as_bytes(), "imap-9-42".into(), 9, 42);
+        assert_eq!(fallback.id, "imap-9-42");
+        assert_eq!(fallback.subject, "Corrupt");
+        assert_eq!(fallback.sender, "alice@example.test");
+        assert_eq!(fallback.body, "This message could not be displayed.");
     }
     #[test]
     fn folder_listing_skips_containers_and_reads_status_counts() {

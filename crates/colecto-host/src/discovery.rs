@@ -470,14 +470,8 @@ fn client() -> Option<reqwest::Client> {
         .ok()
 }
 
-async fn capped(mut response: reqwest::Response) -> Option<String> {
-    let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.ok()? {
-        if body.len() + chunk.len() > MAX_BODY {
-            return None;
-        }
-        body.extend_from_slice(&chunk);
-    }
+async fn capped(response: reqwest::Response) -> Option<String> {
+    let body = crate::read_bounded(response, MAX_BODY).await.ok()?;
     String::from_utf8(body).ok()
 }
 
@@ -741,16 +735,22 @@ pub async fn discover(address: &str) -> Option<Discovery> {
         jmap,
         mx
     );
-    let mut result = [own, central, srv_mail, mx]
-        .into_iter()
-        .flatten()
-        .find(Discovery::mail)
-        .unwrap_or_default();
+    let mut result = select_mail([own, central, srv_mail, mx]);
     if let Some((url, source)) = jmap {
         result.jmap = Some(url);
         result.sources.push(source);
     }
     result.found().then_some(result)
+}
+
+fn select_mail(candidates: impl IntoIterator<Item = Option<Discovery>>) -> Discovery {
+    let candidates: Vec<Discovery> = candidates.into_iter().flatten().collect();
+    candidates
+        .iter()
+        .find(|d| d.mail())
+        .or_else(|| candidates.iter().find(|d| d.limitation.is_some()))
+        .cloned()
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -876,6 +876,37 @@ mod tests {
             (0, 9, "a".into(), 993),
         ];
         assert_eq!(best(records), Some(("a".into(), 993)));
+    }
+
+    #[test]
+    fn select_mail_keeps_limitation_and_prefers_usable_mail() {
+        let oauth_only = Discovery {
+            provider: Some("Example OAuth".into()),
+            limitation: Some(Limitation::OauthOnly),
+            sources: vec![Source::Ispdb],
+            ..Default::default()
+        };
+        let selected = select_mail([None, Some(oauth_only.clone()), None, None]);
+        assert_eq!(selected.limitation, Some(Limitation::OauthOnly));
+        assert!(selected.found());
+
+        let usable = Discovery {
+            imap: Some(Server {
+                host: "imap.example.org".into(),
+                port: 993,
+                security: Security::Tls,
+            }),
+            smtp: Some(Server {
+                host: "smtp.example.org".into(),
+                port: 587,
+                security: Security::Starttls,
+            }),
+            sources: vec![Source::Srv],
+            ..Default::default()
+        };
+        let selected = select_mail([Some(oauth_only), Some(usable.clone())]);
+        assert_eq!(selected.imap, usable.imap);
+        assert_eq!(selected.limitation, None);
     }
 
     /// Real lookups against the internet: `cargo test -p colecto-host discovery::tests::live -- --ignored --nocapture`.

@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, ownerToken } from './fixtures';
 import type { Page } from '@playwright/test';
-import { pane } from './package';
+import { pane, zip } from './package';
 
 const origin = `http://127.0.0.1:${process.env.COLECTO_TEST_PORT ?? '4179'}`;
 const host = { authorization: `Bearer ${ownerToken}`, origin, 'x-colecto-extension': 'host', 'x-colecto-account': 'demo' };
@@ -203,3 +203,90 @@ test('Oneko draws on a click-through canvas overlay and runs toward the pointer'
     await expect(overlay).toHaveCount(0);
   } finally { await remove(page, 'oneko'); }
 });
+
+test('slot stays open across parent re-renders and restart reconnects events and open slots', async ({ page, request }) => {
+  const script = `
+    let tag = 'v1', opens = 0, closes = 0, active = null;
+    function draw() {
+      colecto.send({ t: 'render', surface: 'pane', tree: { type: 'stack', children: [
+        { type: 'text', id: 'state', text: 'tag=' + tag + ' slot=' + (active ? 'open' : 'closed') + ' counts=' + opens + '/' + closes },
+        { type: 'button', id: 'crash', label: 'Crash' },
+      ] } });
+      colecto.send({ t: 'contribute', slot: 'reader/v1/actions', tree: active
+        ? { type: 'button', id: 'probe-btn', variant: 'tool', label: 'Probe ' + opens + '/' + closes + ' ' + tag }
+        : null });
+    }
+    colecto.onmessage = (message) => {
+      if (message.t === 'ping') return colecto.send({ t: 'pong', n: message.n });
+      if (message.t === 'start') { tag = message.settings?.tag ?? 'v1'; draw(); }
+      if (message.t === 'settings') { tag = message.settings?.tag ?? tag; draw(); }
+      if (message.t === 'slot' && message.owner === 'reader' && message.slot === 'v1/actions') {
+        active = message.context;
+        if (active !== null) opens++; else closes++;
+        draw();
+      }
+      if (message.t === 'event' && message.node === 'crash') throw new Error('boom');
+    };`;
+  const pkg = zip({
+    'manifest.toml': `id = "slot-probe"\nname = "Slot probe"\ndescription = "Tests slot stability and restart."\nauthor = "Tests"\napi_version = 1\nclient = "client/main.js"\ncapabilities = ["ui.contribute"]\n\n[pane]\nicon = "extension"\n\n[[settings]]\nkey = "tag"\nlabel = "Tag"\ntype = "text"\ndefault = "v1"\n`,
+    'client/main.js': script,
+  });
+  await install(page, pkg);
+  try {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Maya Chen/ }).click();
+    await expect(page.getByRole('button', { name: 'Probe 1/0 v1', exact: true })).toBeVisible();
+    // Starring/unstarring re-renders the reader with the same slot context; Slot must not close/reopen it.
+    const star = page.getByRole('button', { name: /^(Star|Starred)$/ });
+    const before = await star.getAttribute('aria-pressed');
+    await star.click();
+    await expect(star).toHaveAttribute('aria-pressed', before === 'true' ? 'false' : 'true');
+    await expect(page.getByRole('button', { name: 'Probe 1/0 v1', exact: true })).toBeVisible();
+    // Restore original star state so shared demo data stays unchanged.
+    await star.click();
+    await expect(star).toHaveAttribute('aria-pressed', before ?? 'false');
+    await expect(page.getByRole('button', { name: 'Probe 1/0 v1', exact: true })).toBeVisible();
+    // Crash and restart while the reader's slot stays mounted in its background tab.
+    await page.getByRole('tab', { name: 'Slot probe' }).click();
+    const probe = paneOf(page, 'Slot probe');
+    await probe.getByRole('button', { name: 'Crash' }).click();
+    await expect(probe.getByRole('alert')).toHaveText('Slot probe stopped');
+    await probe.getByRole('button', { name: 'Restart' }).click();
+    await expect(probe.getByText('tag=v1 slot=open counts=1/0')).toBeVisible();
+    // Settings updates still reach the restarted Worker over the reconnected SSE stream.
+    await page.request.put(`${origin}/api/v1/extensions/slot-probe/settings`, { headers: host, data: { tag: 'v2' } });
+    await expect(probe.getByText('tag=v2 slot=open counts=1/0')).toBeVisible();
+    await page.getByRole('tab', { name: 'Reader', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Probe 1/0 v2', exact: true })).toBeVisible();
+  } finally {
+    await request.delete(`${origin}/api/v1/extensions/slot-probe`, { headers: host, data: {} });
+  }
+});
+
+test('inbox context menu caps entries at 24 and clips long label names without crashing', async ({ page }) => {
+  const longLabel = 'L'.repeat(140);
+  const labels: Record<string, string[]> = { [longLabel]: [] };
+  for (let i = 1; i <= 7; i++) labels[`Label ${i}`] = [];
+  await page.route('**/api/v1/labels**', route => route.fulfill({ json: labels }));
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
+  // Add 16 row actions (4 each from 4 bundled extensions) + 8 labels + read/star/delete = 27 > 24.
+  for (const ext of ['composer', 'reader', 'ai', 'inbox']) {
+    for (let i = 0; i < 4; i++) {
+      const res = await page.request.post(`${origin}/api/v1/bus/inbox/request`, {
+        headers: { ...host, 'x-colecto-extension': ext },
+        data: { name: 'v1/add_row_action', payload: { id: `act-${i}`, label: `${ext} action ${i}` } },
+      });
+      expect(res.ok()).toBe(true);
+    }
+  }
+  await page.getByRole('button', { name: /Maya Chen/ }).click({ button: 'right' });
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  const count = await menu.getByRole('menuitem').count() + await menu.getByRole('menuitemcheckbox').count();
+  expect(count).toBeLessThanOrEqual(24);
+  await expect(menu.getByRole('menuitem', { name: 'Archive' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Move to Trash' })).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: /stopped/ })).toHaveCount(0);
+});
+

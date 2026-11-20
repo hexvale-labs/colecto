@@ -9,10 +9,24 @@
   let { name, context }: { name: string; context: unknown } = $props();
   const surface = getContext<SurfaceContext>('surface');
   const full = $derived(`${surface.owner}/${name}`);
+  // Close the slot only when its name changes or it unmounts, not when a parent replaces its
+  // tree with the same context value.
   $effect(() => {
-    const slot = full; const value = $state.snapshot(context);
-    untrack(() => runtimes.openSlot(slot, value));
+    const slot = full;
     return () => untrack(() => runtimes.openSlot(slot, null));
+  });
+  let sent = false;
+  let lastSlot = '';
+  let lastKey: string | undefined;
+  $effect(() => {
+    const slot = full;
+    const value = $state.snapshot(context);
+    const key = JSON.stringify(value);
+    if (sent && slot === lastSlot && key === lastKey) return;
+    sent = true;
+    lastSlot = slot;
+    lastKey = key;
+    untrack(() => runtimes.openSlot(slot, value));
   });
   // Bundled contributors first, then the rest in install order.
   const contributors = $derived(runtimes.list.filter(runtime => runtime.status === 'running' && runtime.contributions[full]));

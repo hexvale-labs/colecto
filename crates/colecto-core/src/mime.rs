@@ -160,7 +160,7 @@ pub(crate) fn text(mail: &ParsedMail<'_>) -> Result<String, Error> {
     })
 }
 
-fn truncate(mut text: String, limit: usize) -> String {
+pub(crate) fn truncate(mut text: String, limit: usize) -> String {
     if text.len() > limit {
         let mut end = limit;
         while !text.is_char_boundary(end) {
