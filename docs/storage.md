@@ -12,8 +12,6 @@ only what the owner changed.
 | `colecto.db.before-v<N>` | Copy taken before migrating from schema version `N`; only the newest is kept |
 | `store.lock` | Exclusive lock: only one Host may open a data directory |
 | `accounts/<id>/store.lock` | Per-account lock; account data itself is in `colecto.db` |
-| `owner-token` | Local owner credential, mode `0600` (desktop app, local daemon) |
-| `upstream.json`, `upstream-token` | Desktop app only: the daemon it connects to (see [self-hosting](self-hosting.md)) |
 
 Where the directory is:
 
