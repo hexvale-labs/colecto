@@ -97,9 +97,12 @@ On Android and iOS the app also loads `tauri-plugin-colecto-native`
 (`crates/colecto-native/`), which carries its own Kotlin and Swift because CI generates
 the mobile projects fresh on every build. It claims the Android back gesture while the
 page has history to go back through and streams predictive-back progress to it as
-`colecto:back` window events, and its one command, `press`, plays the system click
-sound and haptics. The capability `native-feedback`
-(`crates/colecto-app/capabilities/native.json`) grants only that command, and only to
+`colecto:back` window events, and its one page-callable command, `press`, plays the system click
+sound and haptics. On Android it also bridges Android Keystore (`secretGet`, `secretSet`,
+`secretDelete` in `NativePlugin.kt`) exclusively to the in-process Rust service through
+the plugin handle; those commands are omitted from the plugin's ACL permissions so the
+WebView cannot call them. The capability `native-feedback`
+(`crates/colecto-app/capabilities/native.json`) grants only `press`, and only to
 the phone app's own loopback page (`http://127.0.0.1:*`); nothing else on that page can
 reach Tauri. On desktop the plugin does nothing; the desktop page's capability
 `desktop-page` (`capabilities/desktop.json`) adds only its own zoom.

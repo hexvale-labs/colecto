@@ -207,7 +207,7 @@ fn system_backend_failure_has_no_plaintext_fallback() {
             Err(Error::Invalid("keychain locked".into()))
         }
         fn delete(&self, _: &str) -> Result<(), Error> {
-            Ok(())
+            Err(Error::Invalid("keychain locked".into()))
         }
     }
     let dir = tempfile::tempdir().unwrap();
@@ -215,16 +215,23 @@ fn system_backend_failure_has_no_plaintext_fallback() {
         Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(Unavailable)).unwrap();
     assert!(accounts.upsert(input(None, "a@example.test")).is_err());
     assert_eq!(accounts.list().len(), 1);
+    assert!(!accounts.security().cleanup_pending);
     assert!(
         !String::from_utf8(vault(dir.path()))
             .unwrap()
             .contains("test-secret")
     );
-    // Password protection works independently of a missing desktop keychain.
+    // Restarting after a failed system write still succeeds because no orphan was left behind.
+    drop(accounts);
+    let mut accounts =
+        Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(Unavailable)).unwrap();
+    assert!(!accounts.security().cleanup_pending);
+    // Password protection works independently of a missing or unsupported system store.
     accounts.protect("a strong master password").unwrap();
     assert!(accounts.upsert(input(None, "a@example.test")).is_ok());
     assert!(accounts.unprotect().is_err());
     assert!(accounts.security().protected);
+    assert!(!accounts.security().cleanup_pending);
 }
 
 #[test]

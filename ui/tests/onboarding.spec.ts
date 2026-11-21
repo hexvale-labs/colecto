@@ -58,6 +58,60 @@ test('adding the first account finishes onboarding and opens it', async ({ page 
   expect(saved.at(-1)).toMatchObject({ onboarded: true, account: work.id });
 });
 
+test('onboarding lets the owner set a master password when system credential storage is unavailable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let protectedVault = false;
+  let accounts: unknown[] = demoOnly;
+  await page.route('**/api/v1/security', async route => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON();
+      if (body.action === 'protect' && typeof body.password === 'string' && body.password.length >= 12) {
+        protectedVault = true;
+        return route.fulfill({ json: { cleanup_pending: false, protected: true, locked: false } });
+      }
+    }
+    return route.fulfill({ json: { cleanup_pending: false, protected: protectedVault, locked: false } });
+  });
+  await page.route('**/api/v1/accounts', route => {
+    if (route.request().method() !== 'POST') return route.fulfill({ json: accounts });
+    if (!protectedVault) {
+      return route.fulfill({
+        status: 400,
+        json: {
+          error: 'System credential storage is not supported on this platform; use master password protection',
+          category: 'invalid_request',
+        },
+      });
+    }
+    accounts = [...demoOnly, work];
+    return route.fulfill({ json: work });
+  });
+  await page.route('**/api/v1/messages/**', route => route.request().headers()['x-colecto-account'] === 'demo' ? route.continue() : route.fulfill({ json: [] }));
+  await page.route('**/api/v1/labels', route => route.fulfill({ json: {} }));
+  await preferences(page, { onboarded: false, accounts_enabled: {} });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Add your first account' }).click();
+  await page.getByLabel('Email address', { exact: true }).fill('work@example.test');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByLabel('Incoming (IMAP) server').fill('imap.example.test');
+  await page.getByLabel('Outgoing (SMTP) server').fill('smtp.example.test');
+  await page.getByLabel('Password', { exact: true }).fill('provider-secret');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect account' }).click();
+  await expect(page.getByRole('alert')).toContainText('master password protection');
+  await expect(page.getByRole('heading', { name: 'Protect credentials with a master password' })).toBeVisible();
+  // Verify the fallback card and footer buttons fit narrow phone viewports without horizontal overflow.
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    expect(overflow).toBe(false);
+  }
+  await page.getByLabel('Master password', { exact: true }).fill('a strong master password');
+  await page.getByLabel('Confirm master password', { exact: true }).fill('a strong master password');
+  await page.getByRole('button', { name: 'Protect & save' }).click();
+  await expect(page.getByRole('heading', { name: 'You’re all set' })).toBeVisible();
+});
+
 test('an account switched off leaves the switcher and the demo account starts off', async ({ page }) => {
   await page.route('**/api/v1/accounts', route => route.fulfill({ json: [...demoOnly, work] }));
   await page.route('**/api/v1/messages/**', route => route.request().headers()['x-colecto-account'] === 'demo' ? route.continue() : route.fulfill({ json: [] }));
