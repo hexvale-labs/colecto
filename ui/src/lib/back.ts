@@ -70,7 +70,8 @@ function onPopState(event: PopStateEvent) {
 export function claimBack(entry: BackEntry): () => void {
   stack.push(entry);
   schedule();
-  if (entry.push) requestAnimationFrame(() => enter(entry));
+  // Start the entrance before the next paint so the new screen never flashes in place for a frame (#97).
+  if (entry.push) enter(entry);
   return () => {
     const index = stack.indexOf(entry);
     if (index < 0) return;
@@ -112,10 +113,12 @@ function enter(entry: BackEntry) {
   const el = entry.surface?.();
   if (!el || reduced() || !stack.includes(entry)) return;
   const under = entry.under?.();
-  peek(under, true);
   const ios = platform === 'ios';
+  // Measure before unhiding `under`, so the write does not force a synchronous layout.
+  const distance = offset(el);
+  peek(under, true);
   const run = el.animate(
-    [{ transform: `translateX(${offset(el)}px)`, opacity: ios ? 1 : 0 }, { transform: 'none', opacity: 1 }],
+    [{ transform: `translateX(${distance}px)`, opacity: ios ? 1 : 0 }, { transform: 'none', opacity: 1 }],
     { duration: ios ? 300 : 240, easing: ios ? EASE_DRAWER : EASE_OUT },
   );
   run.finished.catch(() => {}).finally(() => peek(under, false));
@@ -128,12 +131,14 @@ function leave(entry: BackEntry, animate: boolean) {
   gesture = null;
   if (!animate || !el || reduced() || (!entry.push && !active)) { finish(entry, el, active?.under); return; }
   const under = active?.under ?? entry.under?.();
-  peek(under, true);
   const ios = platform === 'ios';
+  // Read geometry before mutating `under` to avoid a forced synchronous layout on frame 0.
+  const distance = ios ? el.clientWidth : offset(el);
+  peek(under, true);
   const from = { transform: el.style.transform || 'none', opacity: el.style.opacity || '1' };
   const to = active && !ios
     ? { transform: `translateX(${active.edge === 'right' ? -48 : 48}px) scale(0.9)`, opacity: '0' }
-    : { transform: `translateX(${ios ? el.clientWidth : offset(el)}px)`, opacity: ios ? '1' : '0' };
+    : { transform: `translateX(${distance}px)`, opacity: ios ? '1' : '0' };
   const run = el.animate([from, to], { duration: ios ? 240 : 180, easing: ios ? EASE_DRAWER : EASE_OUT, fill: 'forwards' });
   if (under && ios) under.animate([{ transform: under.style.transform || 'translateX(-25%)' }, { transform: 'none' }], { duration: 240, easing: EASE_DRAWER });
   // The screen underneath is visible but not yet current: a tap there would be undone when
@@ -168,6 +173,11 @@ function begin(edge: 'left' | 'right') {
   if (!entry || !el || reduced()) { gesture = null; return false; }
   gesture = { entry, el, under: entry.under?.(), edge };
   el.style.transition = 'none'; el.style.willChange = 'transform';
+  if (platform !== 'ios') {
+    // Set the card edge once at gesture start so per-frame updates only touch `transform`.
+    el.style.borderRadius = '24px';
+    el.style.boxShadow = '0 0 0 1px var(--line), 0 24px 60px -16px oklch(0 0 0 / 0.6)';
+  }
   peek(gesture.under, true);
   return true;
 }
@@ -182,9 +192,6 @@ function move(progress: number, dx = 0) {
   } else {
     // Material predictive back: the screen shrinks to 90 % and drifts away from the edge.
     el.style.transform = `translateX(${(edge === 'right' ? -1 : 1) * p * 24}px) scale(${1 - 0.1 * p})`;
-    el.style.borderRadius = `${Math.round(p * 28)}px`;
-    // An edge so the shrinking screen reads as a card over what it reveals.
-    el.style.boxShadow = `0 0 0 1px var(--line), 0 24px 60px -16px oklch(0 0 0 / ${(0.7 * p).toFixed(2)})`;
   }
 }
 
@@ -192,10 +199,11 @@ function cancel() {
   if (!gesture) return;
   const { el, under } = gesture;
   gesture = null;
-  const run = el.animate([{ transform: el.style.transform || 'none', borderRadius: el.style.borderRadius || '0px', boxShadow: el.style.boxShadow || 'none' }, { transform: 'none', borderRadius: '0px', boxShadow: 'none' }], { duration: 200, easing: EASE_OUT });
+  const from = el.style.transform || 'none';
+  const run = el.animate([{ transform: from }, { transform: 'none' }], { duration: 200, easing: EASE_OUT });
   if (under && platform === 'ios') under.animate([{ transform: under.style.transform || 'none' }, { transform: 'translateX(-25%)' }], { duration: 200, easing: EASE_OUT });
-  reset(el, null);
-  run.finished.catch(() => {}).finally(() => reset(null, under));
+  el.style.transform = '';
+  run.finished.catch(() => {}).finally(() => reset(el, under));
 }
 
 function onNativeBack(event: Event) {

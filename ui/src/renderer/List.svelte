@@ -41,25 +41,46 @@
     while (end < rows.length && offsets[end] < scrollTop + height) end++;
     return [Math.max(0, start - OVERSCAN), Math.min(rows.length, end + OVERSCAN)];
   });
+  let measuredRow = false;
+  let measuredHeading = false;
   function measure(node: HTMLElement, kind: string) {
+    if (!virtual || (kind === 'heading' ? measuredHeading : measuredRow)) return;
     const size = node.getBoundingClientRect().height;
-    if (size > 0) { if (kind === 'heading') headingHeight = size; else rowHeight = size; }
+    if (size > 0) {
+      if (kind === 'heading') { headingHeight = size; measuredHeading = true; }
+      else { rowHeight = size; measuredRow = true; }
+    }
   }
   $effect(() => {
     if (!viewport) return;
-    const observer = new ResizeObserver(() => height = viewport!.clientHeight);
+    const observer = new ResizeObserver(() => { height = viewport!.clientHeight; measuredRow = false; measuredHeading = false; });
     observer.observe(viewport);
     return () => observer.disconnect();
   });
   // Older rows load when the end comes within a screen of view (#136): once for each length
   // of the list, so a page that adds nothing never asks again by itself.
   let askedAt = -1;
-  $effect(() => {
+  function checkEnd() {
     if (more !== 'available' || !viewport || rows.length === askedAt) return;
-    if (scrollTop + height < viewport.scrollHeight - height) return;
+    if (viewport.scrollTop + height < viewport.scrollHeight - height) return;
     askedAt = rows.length;
     onend?.();
+  }
+  $effect(() => {
+    void more; void rows.length; void height;
+    checkEnd();
   });
+  let scrollFrame = 0;
+  function onscroll() {
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      if (!viewport) return;
+      if (virtual) scrollTop = viewport.scrollTop;
+      checkEnd();
+    });
+  }
+  $effect(() => () => { if (scrollFrame) cancelAnimationFrame(scrollFrame); });
 </script>
 
 {#snippet row(item: Row)}
@@ -77,7 +98,7 @@
   {/if}
 {/snippet}
 
-<div class="message-list" bind:this={viewport} onscroll={() => scrollTop = viewport!.scrollTop}>
+<div class="message-list" bind:this={viewport} {onscroll}>
   {#if !rows.length}
     {@render empty()}
   {:else if virtual}

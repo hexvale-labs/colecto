@@ -118,11 +118,9 @@
   $effect(() => { runtimes.ready = initialized; });
   let unsaved: Layout | null = null;
   let saving = false;
-  function commitLayout(next: Layout) {
-    if (next === layout) return;
-    savedLayout = next; unsaved = next;
-    // Resizing commits many times a second: keep one save in flight and always finish on the latest layout.
-    if (saving) return;
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  function flushLayout() {
+    if (saving || !unsaved) return;
     saving = true;
     void (async () => {
       while (unsaved) {
@@ -131,6 +129,17 @@
       }
       saving = false;
     })();
+  }
+  function commitLayout(next: Layout, live = false) {
+    const changed = next !== layout;
+    if (changed) { savedLayout = next; unsaved = next; }
+    clearTimeout(saveTimer);
+    if (live) {
+      // Defer persistence while dragging a splitter so we do not write to disk on every frame (#97).
+      saveTimer = setTimeout(flushLayout, 250);
+    } else if (changed || unsaved) {
+      flushLayout();
+    }
   }
   function activate(pane: string) { focus = pane; commitLayout(showPane(layout, pane)); }
   const shownPane = (pane: string) => !!groupOf(layout, pane);
