@@ -164,9 +164,17 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: subosito/flutter-action@v2
+        if: matrix.runner != 'ubuntu-24.04-arm'
         with:
           channel: stable
           cache: true
+
+      # Flutter publishes no Linux arm64 SDK archive, so check out the stable branch instead.
+      - name: Install Flutter (Linux arm64)
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
 
       - name: Build Rust FFI, daemon and MCP binaries
         shell: bash
@@ -285,9 +293,9 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: Build libcolecto_ffi.so for Android
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        # The runner's own variables are not in the `env` expression context, so read them here.
         run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}"
           cargo ndk -t ${{ matrix.abi }} -o app/android/app/src/main/jniLibs build --release --locked -p colecto-ffi
 
       - name: Build Android APK
