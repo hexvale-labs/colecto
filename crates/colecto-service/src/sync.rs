@@ -224,8 +224,10 @@ pub(crate) fn refresh(
     folder: &str,
     search: &str,
     offset: usize,
+    limit: Option<usize>,
     origin: Origin,
 ) -> Result<Option<Vec<Message>>, Error> {
+    let limit = limit.unwrap_or(colecto_core::MAX_LIST_MESSAGES);
     let store = inner
         .accounts
         .lock()
@@ -233,9 +235,13 @@ pub(crate) fn refresh(
         .store(account)?;
     let job = {
         let mut guard = store.lock().map_err(|_| Error::Missing)?;
-        match guard.begin_query(folder, search, offset)? {
+        match guard.begin_query_with_limit(folder, search, offset, limit)? {
             Some(job) => job,
-            None => return guard.query_page(folder, search, offset).map(Some),
+            None => {
+                return guard
+                    .query_page_with_limit(folder, search, offset, limit)
+                    .map(Some);
+            }
         }
     };
     // Only plain folder refreshes count as syncing; a search or an older page is a lookup.
@@ -438,7 +444,7 @@ mod tests {
     async fn demo_refresh_needs_no_provider_and_prefetch_skips_it() {
         let dir = tempfile::tempdir().unwrap();
         let inner = inner(dir.path());
-        let messages = refresh(&inner, "demo", "inbox", "", 0, Origin::Owner)
+        let messages = refresh(&inner, "demo", "inbox", "", 0, None, Origin::Owner)
             .unwrap()
             .unwrap();
         assert_eq!(messages.len(), 4);

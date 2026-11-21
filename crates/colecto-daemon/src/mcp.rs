@@ -58,6 +58,7 @@ struct Input {
     q: String,
     #[serde(default)]
     offset: usize,
+    limit: Option<usize>,
     target: Option<String>,
     settings: Option<SettingsInput>,
 }
@@ -127,6 +128,7 @@ fn tool(name: &str) -> Tool {
             "folder":{"type":"string"},
             "q":{"type":"string","maxLength":1024},
             "offset":{"type":"integer","minimum":0,"maximum":MAX_LIST_OFFSET},
+            "limit":{"type":"integer","minimum":1,"maximum":100},
             "ids":{"type":"array","minItems":1,"maxItems":500,"items":{"type":"string"}},
             "seen":{"type":"boolean"},
             "flagged":{"type":"boolean"},
@@ -175,6 +177,7 @@ fn tool(name: &str) -> Tool {
                         "type":"object", "additionalProperties":false,
                         "properties":{
                             "remote_images":{"type":"boolean"},
+                            "auto_load_more":{"type":"boolean"},
                             "prefetch":{
                                 "type":"object", "additionalProperties":false,
                                 "properties":{
@@ -245,6 +248,7 @@ impl MailMcp {
                             folder: input.folder.unwrap_or_else(|| "inbox".into()),
                             q: input.q,
                             offset: input.offset,
+                            limit: input.limit,
                         },
                     )
                     .await?,
@@ -258,6 +262,7 @@ impl MailMcp {
                             folder: input.folder.unwrap_or_else(|| "inbox".into()),
                             q: input.q,
                             offset: input.offset,
+                            limit: input.limit,
                         },
                     )
                     .await?,

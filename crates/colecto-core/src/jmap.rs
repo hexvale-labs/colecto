@@ -318,9 +318,20 @@ impl JmapAccount {
         search: &str,
         offset: usize,
     ) -> Result<Vec<Message>, Error> {
+        self.query_page_with_limit(folder, search, offset, crate::MAX_LIST_MESSAGES)
+    }
+    /// One page of a folder of up to `limit` messages, skipping the newest `offset`.
+    pub fn query_page_with_limit(
+        &self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Message>, Error> {
         crate::validate_query(folder, search)?;
         crate::validate_offset(offset)?;
-        self.session()?.query(folder, search, offset)
+        crate::validate_limit(limit)?;
+        self.session()?.query(folder, search, offset, limit)
     }
     /// Download one complete message as RFC 5322 bytes.
     pub(crate) fn fetch_raw(&self, id: &str) -> Result<Vec<u8>, Error> {
@@ -506,7 +517,13 @@ impl Session<'_> {
             .collect()
     }
 
-    fn query(&self, folder: &str, search: &str, offset: usize) -> Result<Vec<Message>, Error> {
+    fn query(
+        &self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Message>, Error> {
         // `inbox` and `sent` are roles; anything else is a mailbox id from `folders()`.
         let mailbox = match folder {
             "inbox" | "sent" => self.mailbox(folder)?,
@@ -542,7 +559,7 @@ impl Session<'_> {
             (
                 "Email/query",
                 json!({"filter":filter,
-                "sort":[{"property":"receivedAt","isAscending":false}],"position":offset,"limit":crate::MAX_LIST_MESSAGES}),
+                "sort":[{"property":"receivedAt","isAscending":false}],"position":offset,"limit":limit}),
             ),
             (
                 "Email/get",
@@ -896,7 +913,9 @@ mod tests {
             submission: false,
             event_source: None,
         };
-        let messages = session.query("sent", "needle", 0).unwrap();
+        let messages = session
+            .query("sent", "needle", 0, crate::MAX_LIST_MESSAGES)
+            .unwrap();
         assert_eq!(
             messages
                 .iter()

@@ -14,7 +14,11 @@ const MAX_BACKUPS: usize = 5;
 pub const APPLICATION_ID: i64 = 0x434F_4C45;
 /// Schema steps in order. `PRAGMA user_version` counts the steps already applied. A step
 /// that has shipped never changes; a schema change adds the next file.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_initial.sql"),
+    include_str!("../migrations/0002_tables.sql"),
+    include_str!("../migrations/0003_ai_tables.sql"),
+];
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 pub use turso::Value;
@@ -481,7 +485,7 @@ mod tests {
     #[test]
     fn forward_migration_backs_up_database_and_rolls_back_on_error() {
         let dir = tempfile::tempdir().unwrap();
-        let db = Database::open(dir.path()).unwrap();
+        let db = Database::open_with_migrations(dir.path(), &MIGRATIONS[..1]).unwrap();
         db.set_record("x", "y", b"kept").unwrap();
         drop(db);
 
@@ -538,6 +542,29 @@ mod tests {
             .flatten()
             .collect();
         assert_eq!(retained.len(), MAX_BACKUPS);
+    }
+
+    #[test]
+    fn v2_tauri_database_migrates_forward_to_current_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_v2 = Database::open_with_migrations(dir.path(), &MIGRATIONS[..2]).unwrap();
+        assert_eq!(user_version(&db_v2), 2);
+        db_v2.set_record("core", "marker", b"from-v0.9.0").unwrap();
+        drop(db_v2);
+
+        let db_v3 = Database::open(dir.path()).unwrap();
+        assert_eq!(user_version(&db_v3), SCHEMA_VERSION);
+        assert_eq!(
+            db_v3.get_record("core", "marker").unwrap().unwrap(),
+            b"from-v0.9.0"
+        );
+        let tables = db_v3
+            .query(
+                "SELECT name FROM sqlite_schema WHERE name IN ('ai_summaries', 'ai_autolabel_seen')",
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(tables.len(), 2);
     }
 
     #[test]

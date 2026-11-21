@@ -53,12 +53,14 @@ abstract class MailBackend {
     String folder = 'inbox',
     String query = '',
     int offset = 0,
+    int? limit,
   });
   Future<List<MailMessage>> refreshMessages(
     String account, {
     String folder = 'inbox',
     String query = '',
     int offset = 0,
+    int? limit,
   });
   Future<MailMessage> message(String account, String id);
   Future<MessageContent> messageContent(

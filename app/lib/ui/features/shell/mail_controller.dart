@@ -168,6 +168,13 @@ class MailController extends ChangeNotifier {
   List<ConversationThread> _threads = const [];
   List<Draft> _drafts = const [];
   final Set<String> _bulkSelectedIds = {};
+  bool _loadingMore = false;
+  bool _hasMore = false;
+  String? _loadMoreError;
+  int _nextOffset = 0;
+
+  /// Matches `colecto_core::MAX_LIST_OFFSET`.
+  static const int maxListOffset = 100000;
 
   // Reader state
   String? _selectedMessageId;
@@ -250,7 +257,30 @@ class MailController extends ChangeNotifier {
 
   bool get loading => _loading;
   bool get refreshing => _refreshing;
+  bool get loadingMore => _loadingMore;
+  bool get hasMore => _hasMore;
+  String? get loadMoreError => _loadMoreError;
   bool get authRequired => _authRequired;
+
+  /// Batch size for initial load and on-demand pagination, matching the
+  /// configured warm/prefetch count (clamped to the backend's 1..=100 limit).
+  int get pageSize => _preferences.prefetch.count > 0
+      ? _preferences.prefetch.count.clamp(1, 100)
+      : 50;
+
+  bool get canPaginate =>
+      _activeAccount.isNotEmpty &&
+      _activeLabel == null &&
+      _activeFolder != 'drafts' &&
+      _messages.isNotEmpty;
+
+  bool get canLoadMore =>
+      canPaginate &&
+      _hasMore &&
+      !_loadingMore &&
+      !_refreshing &&
+      _loadMoreError == null &&
+      _nextOffset < maxListOffset;
   String? get error => _error;
   SettingsSection? get activeSettings => _activeSettings;
   List<ColectoToast> get toasts => List.unmodifiable(_toasts);
@@ -565,6 +595,7 @@ class MailController extends ChangeNotifier {
           onboarded: _preferences.onboarded,
           listDensity: _preferences.listDensity,
           dateGroups: _preferences.dateGroups,
+          autoLoadMore: _preferences.autoLoadMore,
           notifiedRelease: _preferences.notifiedRelease,
           prefetch: _preferences.prefetch,
           changed: _preferences.changed,
@@ -685,10 +716,17 @@ class MailController extends ChangeNotifier {
       _threads = const [];
       _drafts = const [];
       _refreshing = false;
+      _loadingMore = false;
+      _hasMore = false;
+      _loadMoreError = null;
+      _nextOffset = 0;
       notifyListeners();
       return;
     }
+    final limit = pageSize;
     _refreshing = true;
+    _loadingMore = false;
+    _loadMoreError = null;
     _error = null;
     notifyListeners();
     try {
@@ -705,6 +743,8 @@ class MailController extends ChangeNotifier {
         _drafts = drafts;
         _messages = const [];
         _threads = const [];
+        _nextOffset = 0;
+        _hasMore = false;
       } else {
         final List<MailMessage> messages;
         if (refresh) {
@@ -712,12 +752,14 @@ class MailController extends ChangeNotifier {
             account,
             folder: folder,
             query: query,
+            limit: limit,
           );
         } else {
           final snap = await _backend.cachedMessages(
             account,
             folder: folder,
             query: query,
+            limit: limit,
           );
           messages = snap.messages;
         }
@@ -725,6 +767,11 @@ class MailController extends ChangeNotifier {
         _folders = folders;
         _labels = labels;
         _messages = messages;
+        _nextOffset = messages.length;
+        _hasMore =
+            label == null &&
+            messages.length >= limit &&
+            _nextOffset < maxListOffset;
         var visible = messages;
         if (label != null) {
           final allowed = (labels[label] ?? const <String>[]).toSet();
@@ -744,6 +791,57 @@ class MailController extends ChangeNotifier {
     } finally {
       if (epoch == _mailboxEpoch) {
         _refreshing = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Fetches the next page of older messages and appends them without
+  /// replacing or duplicating already-loaded messages.
+  Future<void> loadMoreMessages() async {
+    if (!canPaginate ||
+        _loadingMore ||
+        _refreshing ||
+        !_hasMore ||
+        _nextOffset >= maxListOffset) {
+      return;
+    }
+    final epoch = _mailboxEpoch;
+    final account = _activeAccount;
+    final folder = _activeFolder;
+    final query = _searchQuery;
+    final offset = _nextOffset;
+    final limit = pageSize;
+
+    _loadingMore = true;
+    _loadMoreError = null;
+    notifyListeners();
+    try {
+      final page = await _backend.refreshMessages(
+        account,
+        folder: folder,
+        query: query,
+        offset: offset,
+        limit: limit,
+      );
+      if (epoch != _mailboxEpoch) return;
+      final existingIds = _messages.map((m) => m.id).toSet();
+      final fresh = page
+          .where((m) => existingIds.add(m.id))
+          .toList(growable: false);
+      _nextOffset = offset + page.length;
+      if (fresh.isNotEmpty) {
+        _messages = [..._messages, ...fresh];
+        _threads = groupConversations(_messages);
+      }
+      _hasMore = page.length >= limit && _nextOffset < maxListOffset;
+    } on MailBackendException catch (e) {
+      if (epoch != _mailboxEpoch) return;
+      if (e.isAuthRequired) _authRequired = true;
+      _loadMoreError = e.message;
+    } finally {
+      if (epoch == _mailboxEpoch) {
+        _loadingMore = false;
         notifyListeners();
       }
     }

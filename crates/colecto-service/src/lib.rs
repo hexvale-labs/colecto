@@ -51,6 +51,7 @@ pub struct MessageQuery {
     pub q: String,
     #[serde(default)]
     pub offset: usize,
+    pub limit: Option<usize>,
 }
 
 fn inbox_folder() -> String {
@@ -290,6 +291,15 @@ impl MailService {
             .map_err(|_| ServiceError::forbidden())?
             .cached(account, &query.folder)
             .map_err(ServiceError::from)?;
+        if let Some(limit) = query.limit {
+            if limit == 0 || limit > colecto_core::MAX_LIST_MESSAGES {
+                return Err(ServiceError::bad_request(format!(
+                    "Page size must be between 1 and {}",
+                    colecto_core::MAX_LIST_MESSAGES
+                )));
+            }
+            snapshot.messages.truncate(limit);
+        }
         redact_list_bodies(&self.inner, principal, account, &mut snapshot.messages)?;
         Ok(snapshot)
     }
@@ -315,6 +325,7 @@ impl MailService {
                 &query.folder,
                 &query.q,
                 query.offset,
+                query.limit,
                 sync::Origin::Owner,
             )?
             .unwrap_or_default();
@@ -1108,6 +1119,7 @@ impl MailService {
                         "inbox",
                         "",
                         0,
+                        None,
                         sync::Origin::Background,
                     ) {
                         Ok(None) => return None,

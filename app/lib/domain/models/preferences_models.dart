@@ -155,6 +155,7 @@ class Preferences {
     this.onboarded = false,
     this.listDensity = ListDensity.full,
     this.dateGroups = true,
+    this.autoLoadMore = true,
     this.notifiedRelease,
     this.prefetch = const PrefetchPreferences(),
     this.changed = const {},
@@ -182,6 +183,7 @@ class Preferences {
   final bool onboarded;
   final ListDensity listDensity;
   final bool dateGroups;
+  final bool autoLoadMore;
   final String? notifiedRelease;
   final PrefetchPreferences prefetch;
   final Set<String> changed;
@@ -212,6 +214,7 @@ class Preferences {
       onboarded: json['onboarded'] as bool? ?? false,
       listDensity: ListDensity.fromJson(json['list_density'] as String?),
       dateGroups: json['date_groups'] as bool? ?? true,
+      autoLoadMore: json['auto_load_more'] as bool? ?? true,
       notifiedRelease: json['notified_release'] as String?,
       prefetch: PrefetchPreferences.fromJson(
         json['prefetch'] as Map<String, dynamic>?,
@@ -241,6 +244,7 @@ class PreferencesPatch {
     this.onboarded,
     this.listDensity,
     this.dateGroups,
+    this.autoLoadMore,
     this.notifiedRelease,
     this.prefetch,
     this.reset = const [],
@@ -268,6 +272,7 @@ class PreferencesPatch {
   final bool? onboarded;
   final ListDensity? listDensity;
   final bool? dateGroups;
+  final bool? autoLoadMore;
   final String? notifiedRelease;
   final PrefetchPreferences? prefetch;
   final List<String> reset;
@@ -288,6 +293,7 @@ class PreferencesPatch {
     if (onboarded != null) 'onboarded': onboarded,
     if (listDensity != null) 'list_density': listDensity!.toJson(),
     if (dateGroups != null) 'date_groups': dateGroups,
+    if (autoLoadMore != null) 'auto_load_more': autoLoadMore,
     if (notifiedRelease != null) 'notified_release': notifiedRelease,
     if (prefetch != null) 'prefetch': prefetch!.toJson(),
     if (reset.isNotEmpty) 'reset': reset,

@@ -39,6 +39,7 @@ pub struct AppearanceInput {
 #[serde(deny_unknown_fields)]
 pub struct MailInput {
     pub remote_images: Option<bool>,
+    pub auto_load_more: Option<bool>,
     /// Merged into the stored prefetch settings, field by field (`enabled`, `count`).
     pub prefetch: Option<Map<String, Value>>,
 }
@@ -127,6 +128,7 @@ pub(crate) fn read(
             "mail".into(),
             json!({
                 "remote_images": saved.remote_images,
+                "auto_load_more": saved.auto_load_more,
                 "prefetch": saved.prefetch,
             }),
         );
@@ -204,6 +206,7 @@ pub(crate) fn update(
     }
     if let Some(mail) = input.mail {
         changes.remote_images = mail.remote_images;
+        changes.auto_load_more = mail.auto_load_more;
         if let Some(fields) = mail.prefetch {
             let mut merged = serde_json::to_value(&stored.prefetch)
                 .map_err(|_| ServiceError::bad_request("Invalid prefetch settings"))?;
@@ -226,6 +229,7 @@ pub(crate) fn update(
         || changes.text_spacing.is_some()
         || changes.list_density.is_some()
         || changes.date_groups.is_some()
+        || changes.auto_load_more.is_some()
         || changes.notifications.is_some()
         || changes.remote_images.is_some()
         || changes.prefetch.is_some();

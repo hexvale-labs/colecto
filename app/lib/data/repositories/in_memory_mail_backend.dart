@@ -301,6 +301,7 @@ class InMemoryMailBackend implements MailBackend {
       onboarded: patch.onboarded ?? _preferences.onboarded,
       listDensity: patch.listDensity ?? _preferences.listDensity,
       dateGroups: patch.dateGroups ?? _preferences.dateGroups,
+      autoLoadMore: patch.autoLoadMore ?? _preferences.autoLoadMore,
       notifiedRelease: patch.notifiedRelease ?? _preferences.notifiedRelease,
       prefetch: patch.prefetch ?? _preferences.prefetch,
       changed: changed,
@@ -570,6 +571,7 @@ class InMemoryMailBackend implements MailBackend {
     String folder,
     String query,
     int offset,
+    int? limit,
   ) {
     final list = _mailboxes[account]?[folder] ?? const <MailMessage>[];
     final q = query.trim().toLowerCase();
@@ -584,7 +586,11 @@ class InMemoryMailBackend implements MailBackend {
               })
               .toList(growable: false);
     if (offset >= filtered.length) return const [];
-    return filtered.sublist(offset);
+    final sliced = filtered.sublist(offset);
+    if (limit != null && sliced.length > limit) {
+      return sliced.sublist(0, limit);
+    }
+    return sliced;
   }
 
   @override
@@ -593,10 +599,11 @@ class InMemoryMailBackend implements MailBackend {
     String folder = 'inbox',
     String query = '',
     int offset = 0,
+    int? limit,
   }) async {
     return MailSnapshot(
       folder: folder,
-      messages: _filter(account, folder, query, offset),
+      messages: _filter(account, folder, query, offset, limit),
       fetchedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
     );
   }
@@ -607,8 +614,9 @@ class InMemoryMailBackend implements MailBackend {
     String folder = 'inbox',
     String query = '',
     int offset = 0,
+    int? limit,
   }) async {
-    return _filter(account, folder, query, offset);
+    return _filter(account, folder, query, offset, limit);
   }
 
   @override

@@ -56,6 +56,16 @@ class _MessageListPaneState extends State<MessageListPane> {
     super.initState();
     _searchCtrl.text = c.searchQuery;
     c.addListener(_syncSearchQuery);
+    _scroll.addListener(_maybeLoadMore);
+  }
+
+  void _maybeLoadMore() {
+    if (!c.preferences.autoLoadMore || !c.canLoadMore || !_scroll.hasClients) {
+      return;
+    }
+    if (_scroll.position.extentAfter <= 400) {
+      unawaited(c.loadMoreMessages());
+    }
   }
 
   void _syncSearchQuery() {
@@ -68,6 +78,7 @@ class _MessageListPaneState extends State<MessageListPane> {
   @override
   void dispose() {
     c.removeListener(_syncSearchQuery);
+    _scroll.removeListener(_maybeLoadMore);
     _debounce?.cancel();
     _searchCtrl.dispose();
     _scroll.dispose();
@@ -406,7 +417,82 @@ class _MessageListPaneState extends State<MessageListPane> {
             ),
           ],
         ),
+      if (c.canPaginate) SliverToBoxAdapter(child: _paginationFooter(p)),
     ];
+  }
+
+  Widget _paginationFooter(ColectoPalette p) {
+    Widget content;
+    if (c.loadingMore) {
+      content = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator.adaptive(
+              strokeWidth: 1.8,
+              valueColor: AlwaysStoppedAnimation(p.ink3),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text('Loading older messages…', style: kStyle(12.5, color: p.ink3)),
+        ],
+      );
+    } else if (c.loadMoreError != null) {
+      content = Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            c.loadMoreError!,
+            textAlign: TextAlign.center,
+            style: kStyle(12.5, color: p.danger),
+          ),
+          const SizedBox(height: 4),
+          _inlineLink(p, 'Try again', () => unawaited(c.loadMoreMessages())),
+        ],
+      );
+    } else if (c.hasMore) {
+      if (!c.preferences.autoLoadMore) {
+        content = _inlineLink(
+          p,
+          'Load more',
+          () => unawaited(c.loadMoreMessages()),
+        );
+      } else {
+        return const SizedBox.shrink();
+      }
+    } else {
+      content = Text('No older messages', style: kStyle(12, color: p.ink3));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Center(child: content),
+    );
+  }
+
+  Widget _inlineLink(ColectoPalette p, String label, VoidCallback onTap) {
+    return ColectoPressable(
+      onTap: onTap,
+      semanticLabel: label,
+      focusRadius: 4,
+      builder: (context, s) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Text(
+          label,
+          style:
+              kStyle(
+                12.5,
+                weight: 550,
+                color: s.hovered ? p.accentHi : p.accent,
+              ).copyWith(
+                decoration: TextDecoration.underline,
+                decorationColor: s.hovered ? p.accentHi : p.accent,
+              ),
+        ),
+      ),
+    );
   }
 
   Widget _threadRow(

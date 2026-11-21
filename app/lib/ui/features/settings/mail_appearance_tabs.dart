@@ -16,7 +16,7 @@ class MailSettingsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = controller;
     final prefs = c.preferences;
-    const prefetchSteps = [25, 50, 100, 200];
+    const prefetchSteps = [25, 50, 100];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -51,6 +51,19 @@ class MailSettingsTab extends StatelessWidget {
                 value: prefs.dateGroups,
                 onChanged: (v) =>
                     c.updatePreferences(PreferencesPatch(dateGroups: v)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ColectoSettingRow(
+              title: 'Load older messages on scroll',
+              description:
+                  'Fetch the next batch automatically when you reach the '
+                  'bottom of the list. When off, a "Load more" link appears '
+                  'instead.',
+              trailing: ColectoSwitch(
+                value: prefs.autoLoadMore,
+                onChanged: (v) =>
+                    c.updatePreferences(PreferencesPatch(autoLoadMore: v)),
               ),
             ),
           ],

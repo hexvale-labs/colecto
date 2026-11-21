@@ -221,14 +221,16 @@ impl MailAccount {
         folder: &str,
         search: &str,
         offset: usize,
+        limit: usize,
         known: &std::collections::HashMap<String, Message>,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<crate::Listing, Error> {
         self.validate()?;
         crate::validate_query(folder, search)?;
         crate::validate_offset(offset)?;
+        crate::validate_limit(limit)?;
         self.with_session(|session| {
-            query_session_with_identity(session, folder, search, offset, known, progress)
+            query_session_with_limit(session, folder, search, offset, limit, known, progress)
         })
     }
     pub(crate) fn query_with_identity(
@@ -236,7 +238,14 @@ impl MailAccount {
         folder: &str,
         search: &str,
     ) -> Result<(Vec<Message>, String), Error> {
-        let listing = self.list(folder, search, 0, &Default::default(), &mut |_, _| {})?;
+        let listing = self.list(
+            folder,
+            search,
+            0,
+            crate::MAX_LIST_MESSAGES,
+            &Default::default(),
+            &mut |_, _| {},
+        )?;
         Ok((listing.messages, listing.identity.unwrap_or_default()))
     }
     /// IMAP IDLE (RFC 2177) on a read-only Inbox: `Ok(true)` when the server reports a change,
@@ -503,11 +512,32 @@ fn uid_set(uids: &[u32]) -> String {
         .join(",")
 }
 
+#[cfg(test)]
 fn query_session_with_identity<T: std::io::Read + std::io::Write>(
     session: &mut imap::Session<T>,
     folder: &str,
     search: &str,
     offset: usize,
+    known: &std::collections::HashMap<String, Message>,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<crate::Listing, Error> {
+    query_session_with_limit(
+        session,
+        folder,
+        search,
+        offset,
+        crate::MAX_LIST_MESSAGES,
+        known,
+        progress,
+    )
+}
+
+fn query_session_with_limit<T: std::io::Read + std::io::Write>(
+    session: &mut imap::Session<T>,
+    folder: &str,
+    search: &str,
+    offset: usize,
+    limit: usize,
     known: &std::collections::HashMap<String, Message>,
     progress: &mut dyn FnMut(usize, usize),
 ) -> Result<crate::Listing, Error> {
@@ -538,7 +568,7 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
     }
     // One round trip for every UID, size and flag; message text only for what is new.
     let headers = if search.is_empty() {
-        let start = end.saturating_sub(crate::MAX_LIST_MESSAGES - 1).max(1);
+        let start = end.saturating_sub(limit - 1).max(1);
         let range = if offset == 0 {
             format!("{start}:*")
         } else {
@@ -554,12 +584,7 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
             .into_iter()
             .collect();
         ids.sort_unstable();
-        let selected: Vec<_> = ids
-            .into_iter()
-            .rev()
-            .skip(offset)
-            .take(crate::MAX_LIST_MESSAGES)
-            .collect();
+        let selected: Vec<_> = ids.into_iter().rev().skip(offset).take(limit).collect();
         if selected.is_empty() {
             return Ok(empty(identity));
         }
