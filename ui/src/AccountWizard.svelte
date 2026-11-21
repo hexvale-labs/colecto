@@ -360,8 +360,10 @@
   .review-warn { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; color: oklch(0.85 0.1 75); font-size: calc(12.5px * var(--text-scale)); line-height: calc(1.45 * var(--line-scale)); }
   .review-warn :global(.icon) { margin-top: 2px; }
   .review-list .text-button, .review-identity .text-button { flex-shrink: 0; }
-  @media (max-width: 520px) {
-    .wizard-steps { padding: 10px 16px 0; }
+  @media (max-width: 599.98px) {
+    .wizard-steps { padding: 12px 16px 4px; gap: 6px 14px; }
     .port-row { grid-template-columns: minmax(0, 1fr); }
+    .review-list li { gap: 10px; padding: 12px 10px 12px 14px; }
+    .review-list .text-button, .review-identity .text-button { min-height: 36px; padding: 0 6px; }
   }
 </style>

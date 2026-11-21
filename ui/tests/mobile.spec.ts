@@ -118,9 +118,11 @@ test.describe('on a touch screen', () => {
   const { defaultBrowserType: _, ...pixel } = devices['Pixel 7'];
   test.use(pixel);
 
-  test('text reads one size up and keyboard hints are hidden', async ({ page }) => {
+  test('text keeps the default scale, inputs stay at least 16px and keyboard hints are hidden', async ({ page }) => {
     await page.goto('/');
-    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--text-scale'))).toBe(String(18 / 14));
+    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--text-scale'))).toBe('1');
+    const searchSize = await page.locator('.mail-search textarea').evaluate(element => parseFloat(getComputedStyle(element).fontSize));
+    expect(searchSize).toBeGreaterThanOrEqual(16);
     await page.getByRole('button', { name: 'Commands' }).tap();
     const runner = page.getByRole('dialog', { name: 'Commands' });
     await expect(runner).toBeVisible();
@@ -134,6 +136,43 @@ test.describe('on a touch screen', () => {
     const refresh = page.getByRole('button', { name: 'Refresh', exact: true });
     await refresh.tap();
     expect(await refresh.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+  });
+
+  test('onboarding account setup fills the screen cleanly with aligned padding and touch buttons', async ({ page }) => {
+    const demoOnly = [{ id: 'demo', settings: null, connected: true, configured: false }];
+    await page.route('**/api/v1/accounts', route => route.fulfill({ json: demoOnly }));
+    await page.route('**/api/v1/preferences', async route => {
+      const response = await route.fetch();
+      return route.fulfill({ response, json: { ...(await response.json()), onboarded: false, accounts_enabled: {} } });
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Add your first account' }).tap();
+    const card = page.locator('.onboarding-card.wide');
+    await expect(card).toBeVisible();
+    const viewport = page.viewportSize()!;
+    const cardBox = (await card.boundingBox())!;
+    expect(Math.round(cardBox.width)).toBe(viewport.width);
+    expect(Math.round(cardBox.height)).toBe(viewport.height);
+    expect(await card.evaluate(element => getComputedStyle(element).borderRadius)).toBe('0px');
+    // Heading, stepper and form body share the same 16px left edge on a phone.
+    const headingX = Math.round((await page.getByRole('heading', { name: 'Add your account' }).boundingBox())!.x);
+    const stepsX = Math.round((await page.locator('.wizard-steps li').first().boundingBox())!.x);
+    const inputX = Math.round((await page.getByLabel('Email address', { exact: true }).boundingBox())!.x);
+    expect(headingX).toBe(16);
+    expect(stepsX).toBe(16);
+    expect(inputX).toBe(16);
+    const nextButton = page.getByRole('button', { name: 'Continue', exact: true });
+    expect((await nextButton.boundingBox())!.height).toBeGreaterThanOrEqual(42);
+    // Worst-case long address stays inside the viewport on the review step without horizontal scroll.
+    await page.getByLabel('Email address', { exact: true }).fill('bartholomew.fitzgerald@northwind-industries-holdings.example.com');
+    await page.getByRole('button', { name: 'Enter settings myself' }).tap();
+    await page.getByLabel('Incoming (IMAP) server').fill('imap.northwind-industries-holdings.example.com');
+    await page.getByLabel('Outgoing (SMTP) server').fill('smtp.northwind-industries-holdings.example.com');
+    await page.getByLabel('Password', { exact: true }).fill('app-password-example');
+    await nextButton.tap();
+    await expect(page.getByRole('button', { name: 'Connect account' })).toBeVisible();
+    const overflow = await page.locator('.sheet-body').evaluate(element => element.scrollWidth - element.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
   });
 });
 

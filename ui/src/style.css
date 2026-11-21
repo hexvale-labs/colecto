@@ -648,8 +648,10 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
   .folder-nav button.active::before { opacity: 1; transform: none; }
   .folder-nav button:active:not(:disabled)::before { opacity: 1; }
   .folder-nav button > span { position: relative; overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
-  .folder-title { position: static; width: auto; height: auto; clip: auto; padding: 6px 16px 8px; font-size: calc(28px * var(--text-scale)); font-stretch: 108%; letter-spacing: calc(-0.025em + var(--letter-spacing)); }
+  .folder-title { position: static; width: auto; height: auto; clip: auto; padding: 4px 16px 6px; font-size: calc(24px * var(--text-scale)); font-stretch: 108%; letter-spacing: calc(-0.025em + var(--letter-spacing)); }
   .icon-button { width: 44px; height: 44px; }
+  .primary, .secondary, .danger { min-height: 42px; height: auto; padding: 9px 16px; border-radius: 10px; }
+  .toast-actions .primary, .toast-actions .secondary { min-height: 36px; height: auto; padding: 0 12px; border-radius: 8px; }
   /* Inputs stay at least 16 px so iOS does not zoom into them; otherwise they follow the text size. */
   .mail-search textarea { min-height: 44px; padding-block: 11px; font-size: max(16px, calc(13.5px * var(--text-scale))); }
   .mail-search > .icon { top: 15px; }
@@ -662,11 +664,18 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
   .detail-toolbar .back { display: inline-grid; }
   .detail-toolbar { padding-left: 16px; }
   .tool { height: 40px; }
-  .input-row input, .field input { font-size: max(16px, calc(14px * var(--text-scale))); }
+  .input-row input, .field input, .text-setting { font-size: max(16px, calc(14px * var(--text-scale))); }
+  .field input, .text-setting { height: 44px; border-radius: 10px; }
+  .segmented { border-radius: 10px; }
+  .segmented label { height: 36px; border-radius: 7px; }
+  .secret-input .reveal { width: 38px; height: 38px; }
+  .select-trigger { height: 44px; border-radius: 10px; }
+  .select-menu li { min-height: 44px; padding: 9px 12px; }
   .compose-fields textarea { font-size: max(16px, calc(15.5px * var(--text-scale))); }
   .compose-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .nav-item { height: 40px; }
-  .command-runner { margin-top: 8vh; }
+  .command-runner { margin-top: max(16px, env(safe-area-inset-top)); }
+  #command-results button { min-height: 44px; padding: 6px 12px; }
   .extension-panel .settings-body { padding: 8px 18px 48px; }
 }
 
@@ -675,6 +684,16 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
   .dock-area.compact .pane { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
   .folder-nav { left: 0; right: 0; bottom: 0; justify-content: space-around; padding: 0 8px env(safe-area-inset-bottom); border-top: 1px solid var(--line-soft); }
   .folder-nav button { flex: 1; }
+  .toasts[data-position^='top'] { top: calc(60px + env(safe-area-inset-top)); }
+  .toasts[data-position^='bottom'] { bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .connect-page, .install-warning { padding: 20px; }
+  .section-head { margin-bottom: 24px; }
+  :is(.settings-group, .settings-card) + :is(.settings-group, .settings-card) { margin-top: 28px; }
+}
+
+@media (pointer: coarse) {
+  .field input, .input-row input, .text-setting, .mail-search textarea, .label-new input, .compose-fields textarea { font-size: max(16px, calc(14px * var(--text-scale))); }
+  .toast-close { width: 36px; height: 36px; margin: -6px -6px 0 0; }
 }
 
 /* Medium: folders in a navigation rail on the leading edge. */
@@ -732,8 +751,8 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
    Toasts enter and leave with Svelte transitions (translate, scale, opacity) and the rest slide
    into place with FLIP; see Toasts.svelte. */
 .toasts { position: fixed; inset: auto; z-index: var(--layer-notifications); display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 24px)); height: auto; margin: 0; padding: 0; border: 0; background: none; color: inherit; overflow: visible; pointer-events: none; }
-.toasts[data-position^='top'] { top: 64px; flex-direction: column-reverse; }
-.toasts[data-position^='bottom'] { bottom: 16px; }
+.toasts[data-position^='top'] { top: calc(64px + env(safe-area-inset-top)); flex-direction: column-reverse; }
+.toasts[data-position^='bottom'] { bottom: calc(16px + env(safe-area-inset-bottom)); }
 .toasts[data-position$='left'], .toasts[data-position='left'] { left: 16px; }
 .toasts[data-position$='right'], .toasts[data-position='right'] { right: 16px; }
 .toasts[data-position='top'], .toasts[data-position='bottom'] { left: 50%; translate: -50% 0; }
@@ -827,7 +846,7 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 @container settings (max-width: 460px) {
   .account-line .sep, .account-detail, .protocol-tag { display: none; }
   .account-row { gap: 10px; }
-  .row-actions .icon-button { width: 30px; }
+  .row-actions .icon-button { width: 36px; height: 36px; }
 }
 .account-line.meta > span:not(.account-detail) { white-space: nowrap; }
 
@@ -860,8 +879,13 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 .secret-input input { padding-right: 40px; }
 .secret-input .reveal { position: absolute; top: 50%; right: 4px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--ink-3); transform: translateY(-50%); }
 @media (hover: hover) and (pointer: fine) { .secret-input .reveal:hover { background: var(--raise); color: var(--ink); } }
-@media (max-width: 520px) {
-  .sheet { width: 100vw; max-width: none; max-height: 100dvh; height: 100dvh; border: 0; border-radius: 0; }
+@media (max-width: 599.98px) {
+  .sheet { width: 100vw; max-width: none; max-height: 100dvh; height: 100dvh; border: 0; border-radius: 0; background: var(--bg); box-shadow: none; }
+  .sheet-head { padding: calc(14px + env(safe-area-inset-top)) 12px 6px 16px; }
+  .sheet-body { padding: 14px 16px 20px; }
+  .sheet-foot { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); gap: 10px; }
+  .sheet-foot > .secondary { flex: 0 0 auto; min-width: 88px; }
+  .sheet-foot > .primary { flex: 1; }
   .sheet .form-grid { grid-template-columns: minmax(0, 1fr); }
   .server-row { grid-template-columns: minmax(0, 1fr) auto; }
   .server-row > .field:first-child { grid-column: 1 / -1; }

@@ -50,7 +50,7 @@
           <button class="icon-button" aria-label="Back" disabled={saving} onclick={() => go('welcome')}><Icon name="back" size={18} /></button>
           <div><h1 id="onboarding-title" tabindex="-1" bind:this={heading}>Add your account</h1><p>Start with your email address; Colecto looks up the server settings.</p></div>
         </header>
-        <div class="enter" style:--i="1"><AccountWizard bind:working={saving} submitLabel="Connect account" onsaved={saved} /></div>
+        <div class="wizard-wrap enter" style:--i="1"><AccountWizard bind:working={saving} submitLabel="Connect account" onsaved={saved} /></div>
       {:else}
         <svg class="done-mark" viewBox="0 0 64 64" aria-hidden="true"><circle class="ring" cx="32" cy="32" r="28" /><path class="tick" d="M20 33.5l8 8 16-17" /></svg>
         <h1 id="onboarding-title" class="enter" style:--i="1" tabindex="-1" bind:this={heading}>You’re all set</h1>
@@ -63,11 +63,12 @@
 </main>
 
 <style>
-  .onboarding { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px 16px; overflow-y: auto; background: var(--ground); }
+  .onboarding { position: fixed; inset: 0; display: grid; place-items: center; padding: calc(24px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); overflow-y: auto; background: var(--ground); }
   /* A faint accent wash behind the card; it drifts very slowly so the screen feels alive without moving anything you read. */
   .onboarding-glow { position: fixed; left: 50%; top: 38%; width: min(720px, 120vw); aspect-ratio: 1; translate: -50% -50%; background: radial-gradient(closest-side, color-mix(in oklch, var(--mint) 9%, transparent), transparent); pointer-events: none; animation: drift 14s ease-in-out infinite alternate; }
   .onboarding-card { position: relative; display: grid; justify-items: center; gap: 14px; width: min(440px, 100%); text-align: center; }
   .onboarding-card.wide { width: min(560px, 100%); justify-items: stretch; text-align: left; padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--float); box-shadow: 0 30px 80px -20px oklch(0 0 0 / 0.75); overflow: hidden; }
+  .wizard-wrap { display: flex; min-height: 0; }
   .onboarding-card.wide :global(.sheet-body) { max-height: min(560px, calc(100dvh - 220px)); }
   h1 { font-size: calc(26px * var(--text-scale)); font-stretch: 106%; outline: none; }
   .wide h1 { font-size: calc(19px * var(--text-scale)); }
@@ -104,6 +105,18 @@
   @keyframes breathe { 50% { opacity: 0.55; transform: scale(1.06); } }
   @keyframes drift { to { translate: -46% -54%; } }
   @keyframes draw { to { stroke-dashoffset: 0; } }
+  @media (max-width: 599.98px) {
+    .onboarding:has(.onboarding-card.wide) { padding: 0; place-items: stretch; overflow: hidden; }
+    .onboarding:has(.onboarding-card.wide) .onboarding-glow { display: none; }
+    .onboarding-card.wide { display: flex; flex-direction: column; gap: 0; width: 100%; height: 100dvh; border: 0; border-radius: 0; background: var(--bg); box-shadow: none; }
+    .onboarding-card.wide .wizard-wrap { flex: 1; }
+    .onboarding-card.wide :global(.sheet-body) { flex: 1; max-height: none; }
+    .account-head { flex-direction: column; gap: 4px; padding: calc(8px + env(safe-area-inset-top)) 16px 4px 16px; }
+    .account-head .icon-button { margin-left: -10px; }
+    .wide h1 { font-size: calc(22px * var(--text-scale)); }
+    .actions { width: 100%; max-width: 320px; }
+    .go { width: 100%; height: 44px; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .onboarding-glow, .mark, .mark-wrap::after { animation: none; }
     .enter { animation-duration: 1ms; animation-delay: 0ms; }

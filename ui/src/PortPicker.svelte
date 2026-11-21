@@ -60,4 +60,9 @@
   .port-other:focus-within { box-shadow: inset 0 0 0 1px var(--mint); }
   .port-other input:user-invalid { color: var(--danger); }
   @media (hover: hover) and (pointer: fine) { .port-option:hover:not(:has(input:checked)) { color: var(--ink); } }
+  @media (max-width: 839.98px), (pointer: coarse) {
+    .port-options { height: 44px; border-radius: 10px; }
+    .port-option, .port-other { border-radius: 7px; }
+    .port-other input { font-size: max(16px, calc(13px * var(--text-scale))); }
+  }
 </style>

@@ -11,8 +11,7 @@ export const bundledFonts: BundledFont[] = [
 ];
 export const DEFAULT_FONT = 'mona';
 
-/** Text sizes offered in Settings. 14px is the size the interface is designed at.
- *  On touch screens every step reads one size up (see `TOUCH_SCALE`). */
+/** Text sizes offered in Settings. 14px is the size the interface is designed at. */
 export const textSizes = [
   { size: 13, name: 'Small' }, { size: 14, name: 'Default' }, { size: 16, name: 'Large' }, { size: 18, name: 'Larger' },
 ] as const;
@@ -40,17 +39,11 @@ export async function applyTypography(font: string | null, size: number | null) 
   applyScale();
 }
 
-// Phones and tablets are held further away than a desktop screen is, and native mobile text is
-// larger, so on a touch screen the default step reads at the desktop's largest size (18 px)
-// and the other steps scale with it. The saved preference stays the same on every device.
-const TOUCH_SCALE = 18 / DEFAULT_TEXT_SIZE;
-const touch = typeof matchMedia === 'function' ? matchMedia('(pointer: coarse)') : null;
 let textSize = DEFAULT_TEXT_SIZE;
 function applyScale() {
-  const scale = textSize / DEFAULT_TEXT_SIZE * (touch?.matches ? TOUCH_SCALE : 1);
+  const scale = textSize / DEFAULT_TEXT_SIZE;
   document.documentElement.style.setProperty('--text-scale', String(scale));
 }
-touch?.addEventListener('change', applyScale);
 if (typeof document === 'object') applyScale();
 
 // Common families on Linux, Windows and macOS. Browsers cannot list installed fonts without

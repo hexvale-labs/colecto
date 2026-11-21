@@ -361,11 +361,11 @@ its line heights. The owner preference is `text_spacing: {letter, word, line, pa
 each step 0 to 2.
 
 Text size is four steps (13, 14, 16 and 18 px; 14 is the design size), shown as "Aa"
-samples. On a touch screen (`pointer: coarse`) every step reads larger by 18/14, so the
-default there is the desktop's largest size and the steps above it go further; the saved
-preference is the same on every device. Every `font-size` in the stylesheets is written as
-`calc(<px> * var(--text-scale))`, and the setting sets `--text-scale`. Write new font
-sizes the same way. Spacing and pane geometry stay in px on purpose, so docking and
+samples. Every `font-size` in the stylesheets is written as
+`calc(<px> * var(--text-scale))`, and the setting sets `--text-scale` consistently across
+desktop and touch devices (mobile WebViews already apply the system text scale, and inputs
+stay at least 16 px on compact and touch screens so iOS never zooms into them). Write new
+font sizes the same way. Spacing and pane geometry stay in px on purpose, so docking and
 layout maths do not change with text size.
 
 Owner preferences store `font` (a bundled id or a system family, at most 64
