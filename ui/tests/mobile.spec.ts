@@ -154,13 +154,10 @@ test.describe('on a touch screen', () => {
     expect(Math.round(cardBox.width)).toBe(viewport.width);
     expect(Math.round(cardBox.height)).toBe(viewport.height);
     expect(await card.evaluate(element => getComputedStyle(element).borderRadius)).toBe('0px');
-    // Heading, stepper and form body share the same 16px left edge on a phone.
-    const headingX = Math.round((await page.getByRole('heading', { name: 'Add your account' }).boundingBox())!.x);
-    const stepsX = Math.round((await page.locator('.wizard-steps li').first().boundingBox())!.x);
-    const inputX = Math.round((await page.getByLabel('Email address', { exact: true }).boundingBox())!.x);
-    expect(headingX).toBe(16);
-    expect(stepsX).toBe(16);
-    expect(inputX).toBe(16);
+    // Heading, stepper and form body share the same 16px left edge on a phone (wait for step-in slide to settle).
+    await expect.poll(() => page.getByRole('heading', { name: 'Add your account' }).boundingBox().then(box => Math.round(box!.x))).toBe(16);
+    await expect.poll(() => page.locator('.wizard-steps li').first().boundingBox().then(box => Math.round(box!.x))).toBe(16);
+    await expect.poll(() => page.getByLabel('Email address', { exact: true }).boundingBox().then(box => Math.round(box!.x))).toBe(16);
     const nextButton = page.getByRole('button', { name: 'Continue', exact: true });
     expect((await nextButton.boundingBox())!.height).toBeGreaterThanOrEqual(42);
     // Worst-case long address stays inside the viewport on the review step without horizontal scroll.
