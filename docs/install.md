@@ -10,9 +10,9 @@ Colecto's own key, not through Google Play.
 
 | System | File | Notes |
 | --- | --- | --- |
-| Linux (`x64`, `arm64`) | `.tar.gz` | Extract and run `./colecto` (includes `lib/libcolecto_ffi.so`, `colecto-daemon`, `colecto-mcp`, and `Colecto.desktop`). Arch users can also install `colecto` or `colecto-bin` from the AUR. |
-| Windows (`x64`) | `.zip` | Extract and run `colecto.exe` (includes `colecto_ffi.dll`, `colecto-daemon.exe`, and `colecto-mcp.exe`). SmartScreen: choose **More info → Run anyway**. |
-| macOS (`arm64`) | `.tar.gz` | Extract and move `Colecto.app` to Applications. Gatekeeper may block the unsigned app; open it via **System Settings → Privacy & Security → Open Anyway**. |
+| Linux (`x64`, `arm64`) | `.deb`, `.rpm`, `.AppImage`, `.tar.gz` | Install with `apt`/`dnf`, run the `.AppImage` directly, or extract the `.tar.gz` and run `./colecto`. All packages include `colecto-daemon` and `colecto-mcp`. Arch users can also install `colecto` or `colecto-bin` from the AUR. |
+| Windows (`x64`) | `.exe`, `.zip` | Run the `.exe` installer (installs per-user by default, no admin required) or extract the portable `.zip` and run `colecto.exe` (both include `colecto-daemon.exe` and `colecto-mcp.exe`). SmartScreen: choose **More info → Run anyway**. |
+| macOS (`arm64`) | `.dmg` | Open the `.dmg` and drag `Colecto.app` to Applications (`colecto-daemon` and `colecto-mcp` are bundled inside `Colecto.app/Contents/MacOS/`). Gatekeeper may block the unsigned app; open it via **System Settings → Privacy & Security → Open Anyway**. |
 | Android (`arm64`, `x64`) | `.apk` | Allow installing from your browser or file manager (`arm64` for most phones). Releases share one signing key so new APKs update in place. |
 | Web | `-web.tar.gz` | Static Flutter Web bundle, also built into the `ghcr.io/kogical/colectod` Docker image. |
 

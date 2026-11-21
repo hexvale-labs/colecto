@@ -12,6 +12,9 @@ on:
       - "**/Cargo.toml"
       - app/pubspec.lock
       - app/pubspec.yaml
+      - Dockerfile
+      - .dockerignore
+      - packaging/**
       - .github/workflows/release.yml
       - .github/actions/**
   schedule:
@@ -139,6 +142,8 @@ jobs:
           - { platform: macos, arch: arm64, runner: macos-15, target: aarch64-apple-darwin }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    env:
+      RUSTFLAGS: ${{ matrix.platform == 'linux' && '-C link-arg=-fuse-ld=mold' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -151,7 +156,7 @@ jobs:
         with:
           packages: >-
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
-            libssl-dev libdbus-1-dev mold
+            libssl-dev libdbus-1-dev mold file
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -169,12 +174,43 @@ jobs:
           channel: stable
           cache: true
 
-      # Flutter publishes no Linux arm64 SDK archive, so check out the stable branch instead.
+      # Flutter publishes no Linux arm64 SDK archive, so check out and cache the stable branch.
+      - name: Resolve Flutter stable revision (Linux arm64)
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        id: flutter-arm64-rev
+        run: |
+          sha=$(git ls-remote https://github.com/flutter/flutter.git refs/heads/stable | awk '{print $1}')
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Flutter SDK (Linux arm64)
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        id: flutter-arm64-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/flutter-sdk
+          key: flutter-linux-arm64-stable-${{ steps.flutter-arm64-rev.outputs.sha }}
+          restore-keys: flutter-linux-arm64-stable-
+
       - name: Install Flutter (Linux arm64)
         if: matrix.runner == 'ubuntu-24.04-arm'
         run: |
-          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
-          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          if [ "${{ steps.flutter-arm64-cache.outputs.cache-hit }}" = "true" ]; then
+            echo "Using cached Flutter SDK (${{ steps.flutter-arm64-rev.outputs.sha }})"
+          elif [ -d "$HOME/flutter-sdk/.git" ]; then
+            git -C "$HOME/flutter-sdk" fetch --depth 1 origin stable
+            git -C "$HOME/flutter-sdk" reset --hard FETCH_HEAD
+          else
+            git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$HOME/flutter-sdk"
+          fi
+          echo "$HOME/flutter-sdk/bin" >> "$GITHUB_PATH"
+
+      - name: Restore Pub packages
+        id: pub-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.os == 'Windows' && '~/AppData/Local/Pub/Cache' || '~/.pub-cache' }}
+          key: pub-${{ runner.os }}-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
 
       - name: Build Rust FFI, daemon and MCP binaries
         shell: bash
@@ -203,14 +239,30 @@ jobs:
               ;;
           esac
 
+      - name: Save Pub packages
+        if: github.ref == 'refs/heads/main' && steps.pub-cache.outputs.cache-hit != 'true' && matrix.runner != 'ubuntu-24.04-arm'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.os == 'Windows' && '~/AppData/Local/Pub/Cache' || '~/.pub-cache' }}
+          key: ${{ steps.pub-cache.outputs.cache-primary-key }}
+
+      - name: Save Flutter SDK (Linux arm64)
+        if: github.ref == 'refs/heads/main' && matrix.runner == 'ubuntu-24.04-arm' && steps.flutter-arm64-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/flutter-sdk
+          key: ${{ steps.flutter-arm64-cache.outputs.cache-primary-key }}
+
       - name: Package desktop bundle
         shell: bash
         env:
           TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.number }}
+          ARCH: ${{ matrix.arch }}
           TARGET_DIR: target/${{ matrix.target }}/release
         run: |
           set -euo pipefail
-          name="colecto-$TAG-${{ matrix.platform }}-${{ matrix.arch }}"
+          name="colecto-$TAG-${{ matrix.platform }}-$ARCH"
           mkdir -p dist "stage/$name"
           case "${{ matrix.platform }}" in
             linux)
@@ -219,17 +271,74 @@ jobs:
               cp "$TARGET_DIR/colecto-daemon" "$TARGET_DIR/colecto-mcp" "stage/$name/"
               cp packaging/linux/Colecto.desktop "stage/$name/"
               tar -czf "dist/$name.tar.gz" -C stage "$name"
+
+              # Build .deb and .rpm packages with nfpm.
+              nfpm_version="2.46.1"
+              if [ "$ARCH" = "x64" ]; then
+                nfpm_tar_arch="x86_64"
+                nfpm_pkg_arch="amd64"
+                appimage_arch="x86_64"
+              else
+                nfpm_tar_arch="arm64"
+                nfpm_pkg_arch="arm64"
+                appimage_arch="aarch64"
+              fi
+              curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${nfpm_version}/nfpm_${nfpm_version}_Linux_${nfpm_tar_arch}.tar.gz" \
+                | tar -xz -C "$RUNNER_TEMP" nfpm
+              ln -sfn "$name" stage/linux
+              NFPM_ARCH="$nfpm_pkg_arch" \
+                "$RUNNER_TEMP/nfpm" package -f packaging/linux/nfpm.yaml -p deb -t "dist/$name.deb"
+              NFPM_ARCH="$nfpm_pkg_arch" \
+                "$RUNNER_TEMP/nfpm" package -f packaging/linux/nfpm.yaml -p rpm -t "dist/$name.rpm"
+
+              # Build .AppImage using appimagetool (without requiring FUSE on runners).
+              appdir="stage/AppDir"
+              mkdir -p "$appdir/usr/lib/colecto" "$appdir/usr/bin" \
+                "$appdir/usr/share/applications" \
+                "$appdir/usr/share/icons/hicolor/256x256/apps" \
+                "$appdir/usr/share/icons/hicolor/scalable/apps"
+              cp -a "stage/$name/colecto" "stage/$name/data" "stage/$name/lib" "$appdir/usr/lib/colecto/"
+              cp "$TARGET_DIR/colecto-daemon" "$TARGET_DIR/colecto-mcp" "$appdir/usr/bin/"
+              cp packaging/linux/Colecto.desktop "$appdir/Colecto.desktop"
+              cp packaging/linux/Colecto.desktop "$appdir/usr/share/applications/Colecto.desktop"
+              cp app/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png "$appdir/colecto.png"
+              cp app/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png "$appdir/usr/share/icons/hicolor/256x256/apps/colecto.png"
+              cp app/assets/branding/logo-square.svg "$appdir/usr/share/icons/hicolor/scalable/apps/colecto.svg"
+              ln -sf colecto.png "$appdir/.DirIcon"
+              cat > "$appdir/AppRun" <<'EOF'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          export PATH="$HERE/usr/bin:$PATH"
+          exec "$HERE/usr/lib/colecto/colecto" "$@"
+          EOF
+              chmod +x "$appdir/AppRun"
+              curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
+                "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${appimage_arch}.AppImage"
+              chmod +x "$RUNNER_TEMP/appimagetool"
+              APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$appimage_arch" \
+                "$RUNNER_TEMP/appimagetool" "$appdir" "dist/$name.AppImage"
               ;;
             windows)
               bundle_dir=$(find app/build/windows -type d -path '*/runner/Release' | head -n1)
               cp -a "$bundle_dir"/. "stage/$name/"
               cp "$TARGET_DIR/colecto-daemon.exe" "$TARGET_DIR/colecto-mcp.exe" "stage/$name/"
               7z a -tzip "dist/$name.zip" "./stage/$name"
+
+              iscc=$(command -v iscc || echo "/c/Program Files (x86)/Inno Setup 6/ISCC.exe")
+              "$iscc" \
+                "/DAppVersion=$VERSION" \
+                "/DStageDir=$(cygpath -w "$PWD/stage/$name")" \
+                "/DOutputDir=$(cygpath -w "$PWD/dist")" \
+                "/DOutputBaseName=$name" \
+                "$(cygpath -w "$PWD/packaging/windows/colecto.iss")"
               ;;
             macos)
-              cp -a app/build/macos/Build/Products/Release/colecto.app "stage/$name/Colecto.app"
-              cp "$TARGET_DIR/colecto-daemon" "$TARGET_DIR/colecto-mcp" "stage/$name/"
-              tar -czf "dist/$name.tar.gz" -C stage "$name"
+              dmg_stage="stage/dmg"
+              mkdir -p "$dmg_stage"
+              cp -a app/build/macos/Build/Products/Release/colecto.app "$dmg_stage/Colecto.app"
+              cp "$TARGET_DIR/colecto-daemon" "$TARGET_DIR/colecto-mcp" "$dmg_stage/Colecto.app/Contents/MacOS/"
+              ln -s /Applications "$dmg_stage/Applications"
+              hdiutil create -volname "Colecto" -srcfolder "$dmg_stage" -ov -format UDZO "dist/$name.dmg"
               ;;
           esac
           ls -lh dist
@@ -280,6 +389,13 @@ jobs:
         with:
           channel: stable
           cache: true
+
+      - name: Restore Pub packages
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
 
       - name: Restore Gradle downloads
         id: gradle
@@ -359,7 +475,6 @@ jobs:
     uses: ./.github/workflows/prune-caches.yml
 
   daemon-image:
-    if: github.event_name != 'schedule'
     needs: [version, web]
     name: daemon image (${{ matrix.arch }})
     strategy:
@@ -400,6 +515,9 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           build-args: COLECTO_COMMIT=${{ github.sha }}
           build-contexts: web-assets=dist/web
+          # Tags read caches saved on main; a cache saved from a tag is visible to that tag only.
+          cache-from: type=gha,scope=daemon-docker-${{ matrix.arch }}
+          cache-to: ${{ github.ref == 'refs/heads/main' && format('type=gha,mode=max,scope=daemon-docker-{0},ignore-error=true', matrix.arch) || '' }}
           outputs: ${{ startsWith(github.ref, 'refs/tags/') && format('type=image,name=ghcr.io/{0}/colectod,push-by-digest=true,name-canonical=true,push=true', github.repository_owner) || 'type=cacheonly' }}
 
       - name: Record the digest
