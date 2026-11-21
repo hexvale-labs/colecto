@@ -425,59 +425,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn design_and_zoom_are_bounded_and_reset() {
+    fn validation_bounds_reject_invalid_values_and_accept_valid_presets() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open(dir.path()).unwrap();
         let mut store = PreferenceStore::open(db).unwrap();
-        for design in DESIGNS {
-            let input: PreferencesInput =
-                serde_json::from_value(serde_json::json!({ "design": design })).unwrap();
-            assert_eq!(store.update(input).unwrap().design.as_deref(), Some(design));
-        }
-        let bad: PreferencesInput =
-            serde_json::from_value(serde_json::json!({"design":"aqua"})).unwrap();
-        assert!(store.update(bad).is_err());
-        let zoomed: PreferencesInput =
-            serde_json::from_value(serde_json::json!({"zoom":125})).unwrap();
-        assert_eq!(store.update(zoomed).unwrap().zoom, Some(125));
-        for zoom in [49, 201] {
-            let bad: PreferencesInput =
-                serde_json::from_value(serde_json::json!({ "zoom": zoom })).unwrap();
-            assert!(store.update(bad).is_err());
-        }
-        let reset: PreferencesInput =
-            serde_json::from_value(serde_json::json!({"design":"","font":"","zoom":100})).unwrap();
-        let value = store.update(reset).unwrap();
-        assert_eq!(value.design, None);
-        assert_eq!(value.font, None);
-        assert_eq!(value.zoom, None);
-    }
 
-    #[test]
-    fn typography_is_bounded_and_persists() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = Database::open(dir.path()).unwrap();
-        let mut store = PreferenceStore::open(db.clone()).unwrap();
-        for value in [
+        for invalid in [
+            serde_json::json!({"design":"aqua"}),
+            serde_json::json!({"zoom":49}),
+            serde_json::json!({"zoom":201}),
             serde_json::json!({"font":"   "}),
             serde_json::json!({"font":"x".repeat(65)}),
             serde_json::json!({"font":"Arial; color:red"}),
             serde_json::json!({"font_size":12}),
             serde_json::json!({"font_size":19}),
             serde_json::json!({"text_spacing":{"letter":3}}),
+            serde_json::json!({"text_spacing":{"lines":1}}),
+            serde_json::json!({"list_density":"tiny"}),
+            serde_json::json!({"date_groups":"yes"}),
+            serde_json::json!({"notified_release":""}),
+            serde_json::json!({"notified_release":"1.2.3<script>"}),
+            serde_json::json!({"notifications":{"updates":false}}),
+            serde_json::json!({"notifications":{"position":"middle"}}),
+            serde_json::json!({"reset":["nonexistent"]}),
+            serde_json::json!({"workspace":[1]}),
+            serde_json::json!({"workspace":{"x":"a".repeat(MAX_WORKSPACE_BYTES)}}),
+            serde_json::json!({"prefetch":{"enabled":true,"count":MAX_PREFETCH_COUNT + 1}}),
+            serde_json::json!({"prefetch":{"count":70000}}),
+            serde_json::json!({"accent":"red"}),
+            serde_json::json!({"accent":"#12345"}),
+            serde_json::json!({"accent":"#1234567"}),
+            serde_json::json!({"accent":"#12345g"}),
+            serde_json::json!({"accent":"url(#a)"}),
+            serde_json::json!({"accounts_enabled":{"":false}}),
         ] {
             assert!(
-                store
-                    .update(serde_json::from_value(value).unwrap())
-                    .is_err()
+                serde_json::from_value::<PreferencesInput>(invalid.clone())
+                    .map_err(|e| e.to_string())
+                    .and_then(|input| store.update(input))
+                    .is_err(),
+                "expected invalid: {invalid}"
             );
         }
-        assert!(
-            serde_json::from_value::<PreferencesInput>(
-                serde_json::json!({"text_spacing":{"lines":1}})
-            )
-            .is_err()
-        );
+
+        for design in DESIGNS {
+            let input: PreferencesInput =
+                serde_json::from_value(serde_json::json!({ "design": design })).unwrap();
+            assert_eq!(store.update(input).unwrap().design.as_deref(), Some(design));
+        }
         for font in ["mona", "inter", "geist", "plex", "atkinson", "Segoe UI"] {
             store
                 .update(
@@ -486,78 +481,23 @@ mod tests {
                 )
                 .unwrap();
         }
-        store
-            .update(
-                serde_json::from_value(
-                    serde_json::json!({"text_spacing":{"letter":2,"word":1,"line":2}}),
-                )
-                .unwrap(),
-            )
-            .unwrap();
-        let restored = PreferenceStore::open(db).unwrap();
-        assert_eq!(restored.get().font.as_deref(), Some("Segoe UI"));
-        assert_eq!(restored.get().font_size, Some(18));
-        assert_eq!(
-            restored.get().text_spacing,
-            TextSpacing {
-                letter: 2,
-                word: 1,
-                line: 2,
-                paragraph: 0
-            }
-        );
     }
 
     #[test]
-    fn list_and_update_preferences_default_validate_and_persist() {
-        let dir = tempfile::tempdir().unwrap();
-        let database = Database::open(dir.path()).unwrap();
-        let mut store = PreferenceStore::open(database.clone()).unwrap();
-        assert_eq!(store.get().list_density, ListDensity::Full);
-        assert!(store.get().date_groups);
-        assert_eq!(store.get().notified_release, None);
-        for value in [
-            serde_json::json!({"list_density":"tiny"}),
-            serde_json::json!({"date_groups":"yes"}),
-            serde_json::json!({"notified_release":""}),
-            serde_json::json!({"notified_release":"1.2.3<script>"}),
-            serde_json::json!({"notifications":{"updates":false}}),
-            serde_json::json!({"reset":["nonexistent"]}),
-        ] {
-            assert!(
-                serde_json::from_value::<PreferencesInput>(value)
-                    .map_err(|e| e.to_string())
-                    .and_then(|input| store.update(input))
-                    .is_err()
-            );
-        }
-        store
-            .update(
-                serde_json::from_value(serde_json::json!({
-                    "list_density":"compact","date_groups":false,"notified_release":"0.4.0"
-                }))
-                .unwrap(),
-            )
-            .unwrap();
-        let restored = PreferenceStore::open(database).unwrap();
-        assert_eq!(restored.get().list_density, ListDensity::Compact);
-        assert!(!restored.get().date_groups);
-        assert_eq!(restored.get().notified_release.as_deref(), Some("0.4.0"));
-        assert!(restored.get().notifications.enabled);
-    }
-
-    #[test]
-    fn only_changed_preferences_are_stored_and_can_be_reset() {
+    fn only_changed_preferences_are_stored_and_reset_clears_them() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
         let mut store = PreferenceStore::open(database.clone()).unwrap();
         assert!(database.settings(SCOPE).unwrap().is_empty());
+
         // The UI sends the whole notifications object; only the field that changed is kept.
         store
             .update(
                 serde_json::from_value(serde_json::json!({
                     "notifications":{"enabled":true,"system":false,"position":"bottom-right"},
-                    "accent":"#AABBCC"
+                    "accent":"#AABBCC",
+                    "design":"fluent",
+                    "zoom":125
                 }))
                 .unwrap(),
             )
@@ -568,141 +508,101 @@ mod tests {
             .into_iter()
             .map(|(key, _)| key)
             .collect();
-        assert_eq!(keys, ["accent", "notifications.position"]);
+        assert_eq!(keys, ["accent", "design", "notifications.position", "zoom"]);
         assert_eq!(store.view().changed, keys.iter().cloned().collect());
         assert_eq!(store.get().accent.as_deref(), Some("#aabbcc"));
-        // An empty accent and `reset` both return to the default.
+
+        // Empty values, default zoom (100), and `reset` all return to defaults and prune storage.
         let value = store
             .update(
-                serde_json::from_value(
-                    serde_json::json!({"accent":"","reset":["notifications.position"]}),
-                )
+                serde_json::from_value(serde_json::json!({
+                    "accent":"",
+                    "design":"",
+                    "font":"",
+                    "zoom":100,
+                    "reset":["notifications.position"]
+                }))
                 .unwrap(),
             )
             .unwrap();
         assert_eq!(value.accent, None);
+        assert_eq!(value.design, None);
+        assert_eq!(value.zoom, None);
         assert_eq!(value.notifications.position, Corner::Top);
         assert!(database.settings(SCOPE).unwrap().is_empty());
         assert!(store.view().changed.is_empty());
     }
 
     #[test]
-    fn mcp_starts_off_and_preferences_survive_restart_within_bounds() {
+    fn preferences_and_account_choices_survive_restart() {
         let dir = tempfile::tempdir().unwrap();
         let database = Database::open(dir.path()).unwrap();
         let mut store = PreferenceStore::open(database.clone()).unwrap();
         assert!(!store.get().mcp);
-        let input = |workspace: serde_json::Value| PreferencesInput {
-            mcp: Some(true),
-            account: Some("work".into()),
-            workspace: Some(workspace),
-            remote_images: Some(true),
-            ..Default::default()
-        };
         assert!(!store.get().remote_images);
-        store
-            .update(input(serde_json::json!({"root": {}})))
-            .unwrap();
-        assert!(store.update(input(serde_json::json!([1]))).is_err());
-        let big = serde_json::json!({"x": "a".repeat(MAX_WORKSPACE_BYTES)});
-        assert!(store.update(input(big)).is_err());
-        let store = PreferenceStore::open(database).unwrap();
-        assert!(store.get().mcp);
-        assert_eq!(store.get().account.as_deref(), Some("work"));
-        assert_eq!(store.get().workspace, Some(serde_json::json!({"root": {}})));
-        assert!(store.get().remote_images);
-    }
-
-    #[test]
-    fn prefetch_defaults_on_and_is_bounded() {
-        let dir = tempfile::tempdir().unwrap();
-        let database = Database::open(dir.path()).unwrap();
-        let mut store = PreferenceStore::open(database.clone()).unwrap();
-        assert_eq!(store.get().prefetch, Prefetch::default());
+        assert!(!store.get().onboarded);
+        assert!(!store.get().account_enabled("demo"));
+        assert!(store.get().account_enabled("a1"));
+        assert_eq!(store.get().list_density, ListDensity::Full);
+        assert!(store.get().date_groups);
         assert!(store.get().prefetch.enabled);
-        let input = |value| serde_json::from_value::<PreferencesInput>(value).unwrap();
-        assert!(
-            store
-                .update(input(
-                    serde_json::json!({"prefetch": {"enabled": true, "count": MAX_PREFETCH_COUNT + 1}})
-                ))
-                .is_err()
-        );
-        assert!(
-            serde_json::from_value::<PreferencesInput>(
-                serde_json::json!({"prefetch": {"count": 70000}})
-            )
-            .is_err()
-        );
+
         store
-            .update(input(
-                serde_json::json!({"prefetch": {"enabled": false, "count": 10}}),
-            ))
+            .update(
+                serde_json::from_value(serde_json::json!({
+                    "mcp": true,
+                    "account": "work",
+                    "workspace": {"root": {}},
+                    "remote_images": true,
+                    "list_density": "compact",
+                    "date_groups": false,
+                    "notified_release": "0.4.0",
+                    "font": "Segoe UI",
+                    "font_size": 18,
+                    "text_spacing": {"letter": 2, "word": 1, "line": 2},
+                    "prefetch": {"enabled": false, "count": 10},
+                    "accent": "#7AA2F7",
+                    "notifications": {"enabled": true, "system": true, "position": "top-left"},
+                    "accounts_enabled": {"demo": true, "a1": false}
+                }))
+                .unwrap(),
+            )
             .unwrap();
-        let store = PreferenceStore::open(database).unwrap();
+
+        let mut restored = PreferenceStore::open(database).unwrap();
+        let p = restored.get();
+        assert!(p.mcp);
+        assert_eq!(p.account.as_deref(), Some("work"));
+        assert_eq!(p.workspace, Some(serde_json::json!({"root": {}})));
+        assert!(p.remote_images);
+        assert_eq!(p.list_density, ListDensity::Compact);
+        assert!(!p.date_groups);
+        assert_eq!(p.notified_release.as_deref(), Some("0.4.0"));
+        assert_eq!(p.font.as_deref(), Some("Segoe UI"));
+        assert_eq!(p.font_size, Some(18));
         assert_eq!(
-            store.get().prefetch,
+            p.text_spacing,
+            TextSpacing {
+                letter: 2,
+                word: 1,
+                line: 2,
+                paragraph: 0
+            }
+        );
+        assert_eq!(
+            p.prefetch,
             Prefetch {
                 enabled: false,
                 count: 10
             }
         );
-    }
+        assert_eq!(p.accent.as_deref(), Some("#7aa2f7"));
+        assert!(p.notifications.system);
+        assert_eq!(p.notifications.position, Corner::TopLeft);
+        assert!(p.account_enabled("demo"));
+        assert!(!p.account_enabled("a1"));
 
-    #[test]
-    fn accent_and_notifications_are_validated_and_kept() {
-        let dir = tempfile::tempdir().unwrap();
-        let database = Database::open(dir.path()).unwrap();
-        let mut store = PreferenceStore::open(database.clone()).unwrap();
-        assert_eq!(store.get().notifications, Notifications::default());
-        let accent = |value: &str| PreferencesInput {
-            accent: Some(value.into()),
-            ..Default::default()
-        };
-        for invalid in ["red", "#12345", "#1234567", "#12345g", "url(#a)"] {
-            assert!(store.update(accent(invalid)).is_err(), "{invalid}");
-        }
-        store.update(accent("#7AA2F7")).unwrap();
-        let notifications: Notifications = serde_json::from_value(serde_json::json!({
-            "enabled": true, "system": true, "position": "top-left"
-        }))
-        .unwrap();
-        store
-            .update(PreferencesInput {
-                notifications: Some(notifications.clone()),
-                ..accent("#7aa2f7")
-            })
-            .unwrap();
-        assert!(
-            serde_json::from_value::<Notifications>(serde_json::json!({"position": "middle"}))
-                .is_err()
-        );
-        let mut store = PreferenceStore::open(database).unwrap();
-        assert_eq!(store.get().accent.as_deref(), Some("#7aa2f7"));
-        assert_eq!(store.get().notifications, notifications);
-        store.update(accent("")).unwrap();
-        assert_eq!(store.get().accent, None);
-    }
-
-    #[test]
-    fn demo_starts_off_other_accounts_on_and_choices_merge() {
-        let dir = tempfile::tempdir().unwrap();
-        let database = Database::open(dir.path()).unwrap();
-        let mut store = PreferenceStore::open(database.clone()).unwrap();
-        assert!(!store.get().onboarded);
-        assert!(!store.get().account_enabled("demo"));
-        assert!(store.get().account_enabled("a1"));
-        let choose = |id: &str, on: bool| PreferencesInput {
-            accounts_enabled: Some([(id.to_owned(), on)].into()),
-            ..Default::default()
-        };
-        store.update(choose("demo", true)).unwrap();
-        store.update(choose("a1", false)).unwrap();
-        assert!(store.update(choose("", false)).is_err());
-        let mut store = PreferenceStore::open(database).unwrap();
-        assert!(store.get().account_enabled("demo"));
-        assert!(!store.get().account_enabled("a1"));
-        store.clear_account("a1").unwrap();
-        assert!(store.get().account_enabled("a1"));
+        restored.clear_account("a1").unwrap();
+        assert!(restored.get().account_enabled("a1"));
     }
 }

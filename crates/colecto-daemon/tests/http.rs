@@ -706,3 +706,93 @@ async fn localhost_alias_and_bearer_without_origin_work_for_local_and_native_cli
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn sse_events_stream_live_updates_and_reject_unauthorized_clients() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let dir = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let authority = addr.to_string();
+    let router = app(
+        MailStore::open(dir.path()).unwrap(),
+        authority.clone(),
+        dir.path().into(),
+    );
+    let bearer = format!("Bearer {}", owner_token());
+
+    let server_router = router.clone();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, server_router).await;
+    });
+
+    // Unauthenticated SSE stream must be rejected with 401.
+    let mut unauth = tokio::net::TcpStream::connect(addr).await.unwrap();
+    unauth
+        .write_all(
+            format!(
+                "GET /api/v1/events HTTP/1.1\r\nHost: {authority}\r\nAccept: text/event-stream\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut unauth_buf = vec![0u8; 256];
+    let n = unauth.read(&mut unauth_buf).await.unwrap();
+    assert!(
+        String::from_utf8_lossy(&unauth_buf[..n]).starts_with("HTTP/1.1 401"),
+        "expected 401 for unauthenticated SSE"
+    );
+
+    // Authenticated SSE stream emits `ready`, then live `preferences` and `labels` events.
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    stream
+        .write_all(
+            format!(
+                "GET /api/v1/events HTTP/1.1\r\nHost: {authority}\r\nAuthorization: {bearer}\r\nAccept: text/event-stream\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let mut received = String::new();
+    let mut chunk = [0u8; 2048];
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !received.contains("event: ready") {
+        let n = tokio::time::timeout_at(deadline, stream.read(&mut chunk))
+            .await
+            .expect("timed out waiting for SSE ready event")
+            .unwrap();
+        assert!(n > 0, "SSE stream closed before ready event");
+        received.push_str(&String::from_utf8_lossy(&chunk[..n]));
+    }
+
+    // Trigger preferences + MCP mutations through the same daemon router.
+    let pref_req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/preferences")
+        .header("host", &authority)
+        .header("origin", format!("http://{authority}"))
+        .header("authorization", &bearer)
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"list_density":"compact","mcp":true}"#))
+        .unwrap();
+    assert_eq!(
+        router.oneshot(pref_req).await.unwrap().status(),
+        StatusCode::OK
+    );
+
+    while !received.contains("event: mcp") {
+        let n = tokio::time::timeout_at(deadline, stream.read(&mut chunk))
+            .await
+            .expect("timed out waiting for live SSE mcp event")
+            .unwrap();
+        assert!(n > 0, "SSE stream closed before live events arrived");
+        received.push_str(&String::from_utf8_lossy(&chunk[..n]));
+    }
+    assert!(received.contains(r#""on":true"#), "{received}");
+
+    server.abort();
+}

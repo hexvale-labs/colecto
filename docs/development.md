@@ -57,11 +57,17 @@ from `target/` (or `$COLECTO_FFI_LIB`) when present.
 
 ## Check changes
 
+See [Testing](testing.md) for the test strategy (quality over quantity, integration-first,
+critical-path E2E, and multi-worker execution).
+
 ```sh
 just verify         # Rust fmt/check/clippy/test + Dart format/analyze/test
 just fmt            # Format Rust and Dart source files
 just check          # Static checks only (fmt, cargo check, clippy, flutter analyze)
-just test           # Unit and widget tests (cargo test + flutter test)
+just test           # Fast Rust + Flutter tests (parallelized across workers)
+just test e2e       # Live Flutter RemoteHttpBackend <-> colecto-daemon E2E test
+just test jmap      # Real JMAP server E2E (Cyrus in Docker)
+just test mail      # Real IMAP/SMTP E2E (GreenMail in Docker)
 ```
 
 ## Logging

@@ -253,33 +253,7 @@ class RemoteHttpBackend implements MailBackend {
     } catch (_) {
       return null;
     }
-    return switch (name) {
-      'ready' => const ReadyServiceEvent(),
-      'resync' => const ResyncServiceEvent(),
-      'mail' => MailServiceEvent(
-        account: payload['account'] as String? ?? '',
-        ids: (payload['ids'] as List<dynamic>? ?? const [])
-            .map((e) => e.toString())
-            .toList(growable: false),
-      ),
-      'sync' => SyncServiceEvent(AccountSync.fromJson(payload)),
-      'approval' => ApprovalServiceEvent(
-        id: payload['id'] as String? ?? '',
-        account: payload['account'] as String? ?? '',
-        from: payload['from'] as String? ?? '',
-        subject: payload['subject'] as String? ?? '',
-      ),
-      'navigate' => NavigateServiceEvent(
-        target: payload['target'] as String? ?? '',
-        account: payload['account'] as String? ?? '',
-      ),
-      'mcp' => McpServiceEvent(on: payload['on'] == true),
-      'preferences' => const PreferencesServiceEvent(),
-      'labels' => LabelsUpdatedServiceEvent(
-        account: payload['account'] as String? ?? '',
-      ),
-      _ => null,
-    };
+    return ServiceEvent.fromWire(name, payload);
   }
 
   @override

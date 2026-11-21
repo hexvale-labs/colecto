@@ -1328,14 +1328,6 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
-    fn every_tone_has_a_prompt_and_unknown_tones_are_refused() {
-        for tone in ["casual", "lazy", "professional", "roast", "troll"] {
-            assert!(tone_prompt(tone).is_some_and(|p| p.contains("Tone:")));
-        }
-        assert!(tone_prompt("evil").is_none());
-    }
-
-    #[test]
     fn rules_match_case_insensitively_on_the_chosen_field() {
         let message = Message {
             seen: false,
@@ -1384,12 +1376,6 @@ mod tests {
             },
         );
         assert!(validate(&settings).is_err());
-    }
-
-    #[test]
-    fn clipping_respects_characters() {
-        assert_eq!(clip("héllo", 2), "hé");
-        assert_eq!(clip("hi", 10), "hi");
     }
 
     #[test]

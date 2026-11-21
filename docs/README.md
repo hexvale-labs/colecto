@@ -15,6 +15,7 @@ Start with the page that matches what you want to do:
 | Set up optional AI summaries, replies and automatic labels | [AI features](ai.md) |
 | Run the daemon on a server or in Docker | [Self-hosting](self-hosting.md) |
 | Build, run and test from a checkout, branches and releases | [Development](development.md) |
+| Understand the testing strategy and write tests | [Testing](testing.md) |
 | Understand how the pieces fit together | [Architecture](architecture.md) |
 | Understand the UI, navigation and native design systems | [UI design](ui-design.md) |
 | Read the stack and architecture decisions | [Decisions](decisions.md) |

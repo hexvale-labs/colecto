@@ -43,9 +43,10 @@ Ship a release only when the maintainer asks for one in the current session. The
 
 ## Verification
 
+- Follow [docs/testing.md](docs/testing.md): **quality over quantity**, favor integration tests over granular unit-test sprawl, limit E2E tests to critical paths, and keep tests fast and parallelizable across workers.
 - Run `just verify` to execute the full Rust + Flutter verification suite (see `just --list --list-submodules` for all recipes in `justfile` and `just/*.just`).
-- **Rust changes:** `just check fmt-rust`, `just check lint`, `just test rust` (`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`).
-- **Flutter/Dart changes:** `just check fmt-app`, `just check app`, `just test app` (`dart format --output=none --set-exit-if-changed .`, `flutter analyze`, `flutter test`).
+- **Rust changes:** `just check fmt-rust`, `just check lint`, `just test rust` (`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo nextest` / `cargo test --workspace --locked`).
+- **Flutter/Dart changes:** `just check fmt-app`, `just check app`, `just test app` (`dart format --output=none --set-exit-if-changed .`, `flutter analyze`, `flutter test --concurrency=<workers>`).
 - Check system memory/CPU constraints before heavy builds; never run concurrent Cargo builds on the same target directory.
 
 ## Branching, commits, pull requests, and issues
