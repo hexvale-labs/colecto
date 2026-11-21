@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:path_provider/path_provider.dart';
 
 import '../../domain/models/service_event.dart';
 import 'local_ffi_bridge_stub.dart' show FfiResponse;
@@ -273,7 +274,7 @@ class NativeFfiBridge {
     try {
       final isolate = await Isolate.spawn(_requestWorkerEntry, <Object?>[
         initPort.sendPort,
-        dataDir,
+        dataDir ?? await _mobileDataDir(),
         libraryPath,
         kDebugMode,
       ], debugName: 'colecto-ffi-worker');
@@ -292,6 +293,18 @@ class NativeFfiBridge {
     } finally {
       initPort.close();
     }
+  }
+
+  /// Android and iOS keep app data in their sandbox, which only the platform can
+  /// name. On Android it is the app's data directory (the parent of `files/`),
+  /// where v0.9.0 kept `colecto.db`. Desktop returns null and Rust picks the
+  /// directory.
+  static Future<String?> _mobileDataDir() async {
+    if (Platform.isAndroid) {
+      return (await getApplicationSupportDirectory()).parent.path;
+    }
+    if (Platform.isIOS) return (await getApplicationSupportDirectory()).path;
+    return null;
   }
 
   Future<FfiResponse> request({

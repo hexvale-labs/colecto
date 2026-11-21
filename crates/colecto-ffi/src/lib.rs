@@ -296,28 +296,37 @@ fn error_response(status: u16, message: &str) -> String {
     serde_json::to_string(&resp).unwrap_or_default()
 }
 
+/// Bundle identifier the app data directory is named after, shared with v0.9.0 and
+/// earlier so their `colecto.db` is found and migrated forward.
+const APP_IDENTIFIER: &str = "com.kogical.colecto";
+
+/// The desktop app data directory: `COLECTO_DATA_DIR`, else the platform's data
+/// directory joined with [`APP_IDENTIFIER`] (the same place Tauri's `app_data_dir`
+/// used). Android and iOS pass their sandbox directory from Dart instead.
 fn default_data_dir() -> PathBuf {
-    if let Ok(explicit) = std::env::var("COLECTO_DATA_DIR")
-        && !explicit.trim().is_empty()
-    {
+    data_dir_from(|name| std::env::var_os(name))
+}
+
+fn data_dir_from(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+    if let Some(explicit) = env("COLECTO_DATA_DIR").filter(|value| !value.is_empty()) {
         return PathBuf::from(explicit);
     }
-    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA")
-        && !local_app_data.trim().is_empty()
-    {
-        return PathBuf::from(local_app_data).join("Colecto");
-    }
-    if let Ok(home) = std::env::var("HOME")
-        && !home.trim().is_empty()
-    {
-        return PathBuf::from(home).join(".colecto");
-    }
-    if let Ok(user_profile) = std::env::var("USERPROFILE")
-        && !user_profile.trim().is_empty()
-    {
-        return PathBuf::from(user_profile).join(".colecto");
-    }
-    PathBuf::from(".colecto")
+    let var = |name: &str| {
+        env(name)
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    };
+    let base = if cfg!(windows) {
+        var("APPDATA")
+    } else if cfg!(target_os = "macos") {
+        var("HOME").map(|home| home.join("Library/Application Support"))
+    } else {
+        var("XDG_DATA_HOME").or_else(|| var("HOME").map(|home| home.join(".local/share")))
+    };
+    base.map_or_else(
+        || PathBuf::from(".colecto"),
+        |base| base.join(APP_IDENTIFIER),
+    )
 }
 
 fn into_c_string(text: String) -> *mut c_char {
@@ -420,5 +429,34 @@ mod tests {
         assert_eq!(pref_body["list_density"], "compact");
 
         shutdown_in_process();
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn default_data_dir_matches_the_tauri_app() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| value.into())
+            }
+        };
+        assert_eq!(
+            data_dir_from(env(&[("HOME", "/home/u")])),
+            PathBuf::from("/home/u/.local/share/com.kogical.colecto")
+        );
+        assert_eq!(
+            data_dir_from(env(&[("HOME", "/home/u"), ("XDG_DATA_HOME", "/data")])),
+            PathBuf::from("/data/com.kogical.colecto")
+        );
+        assert_eq!(
+            data_dir_from(env(&[("HOME", "/home/u"), ("XDG_DATA_HOME", "relative")])),
+            PathBuf::from("/home/u/.local/share/com.kogical.colecto")
+        );
+        assert_eq!(
+            data_dir_from(env(&[("HOME", "/home/u"), ("COLECTO_DATA_DIR", "/x")])),
+            PathBuf::from("/x")
+        );
     }
 }
