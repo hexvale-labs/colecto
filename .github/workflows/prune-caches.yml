@@ -13,7 +13,8 @@ jobs:
     steps:
       # Keeps the newest cache of each family on each branch and deletes the rest. A family
       # is the key without its toolchain, profile and lockfile hashes (Rust), lockfile hash
-      # (Pub packages) or content hash (Flutter Web bundle). Each branch is pruned
+      # (per-OS Pub packages), content hash (Flutter Web bundle), wrapper/settings hash
+      # (Gradle) or upstream revision (Linux arm64 Flutter SDK). Each branch is pruned
       # separately, because tags and pull requests restore from different branches.
       - name: Delete superseded caches
         env:
@@ -23,12 +24,14 @@ jobs:
           set -euo pipefail
           seen=" "
           gh cache list --limit 500 --sort created_at --order desc --json id,key,ref \
-            --jq '.[] | select(.key | startswith("v0-rust-") or startswith("pub-") or startswith("web-bundle-")) | "\(.id) \(.ref) \(.key)"' |
+            --jq '.[] | select(.key | startswith("v0-rust-") or startswith("pub-") or startswith("web-bundle-") or startswith("gradle-") or startswith("flutter-linux-arm64-")) | "\(.id) \(.ref) \(.key)"' |
           while read -r id ref key; do
             case "$key" in
               v0-rust-*) family=$(sed -E 's/-[0-9a-f]{8,}//g' <<< "$key") ;;
-              pub-*) family=pub-packages ;;
+              pub-*) family=$(cut -d- -f1,2 <<< "$key") ;;
               web-bundle-*) family=web-bundle ;;
+              gradle-*) family=gradle ;;
+              flutter-linux-arm64-*) family=flutter-linux-arm64 ;;
             esac
             family="$ref:$family"
             if [[ "$seen" == *" $family "* ]]; then

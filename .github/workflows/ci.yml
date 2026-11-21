@@ -251,8 +251,9 @@ jobs:
           build-contexts: web-assets=dist/web
           load: true
           tags: colecto-daemon:ci
-          cache-from: type=gha,scope=daemon-docker
-          cache-to: ${{ (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main') && 'type=gha,mode=max,scope=daemon-docker' || '' }}
+          # Shares the amd64 scope with the release workflow's daemon image build.
+          cache-from: type=gha,scope=daemon-docker-amd64
+          cache-to: ${{ (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main') && 'type=gha,mode=max,scope=daemon-docker-amd64,ignore-error=true' || '' }}
 
       - name: Smoke-test daemon container
         run: |

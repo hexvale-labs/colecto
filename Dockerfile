@@ -10,11 +10,9 @@ RUN mkdir -p /empty
 FROM scratch AS web-assets
 COPY --from=empty-dir /empty /
 
-# Build optimized Rust daemon binaries (`colecto-daemon` and `colecto-mcp`).
-FROM rust:1-slim-bookworm AS rust-builder
-
-ARG COLECTO_COMMIT=
-ENV COLECTO_COMMIT=${COLECTO_COMMIT}
+# Rust toolchain, system packages and cargo-chef. Nothing here depends on the
+# source tree or build args, so this layer stays cached until the base image changes.
+FROM rust:1-slim-bookworm AS rust-base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
@@ -23,22 +21,42 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mold \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /src
-
-# Copy manifests and workspace crates.
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
-
 ENV CARGO_INCREMENTAL=0 \
     CARGO_TERM_COLOR=always \
     RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 
-RUN --mount=type=cache,id=colecto-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=colecto-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=colecto-target-release,target=/src/target,sharing=locked \
-    cargo build --package colecto-daemon --release --locked \
+RUN cargo install cargo-chef --locked --version 0.1.78 \
+    && rm -rf /usr/local/cargo/registry/cache /usr/local/cargo/registry/src
+
+WORKDIR /src
+
+# Reduce the workspace to a dependency recipe (manifests and lockfile only).
+FROM rust-base AS rust-planner
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Build optimized Rust daemon binaries (`colecto-daemon` and `colecto-mcp`).
+# Dependencies are compiled in their own layer, keyed only on the recipe, so CI
+# restores them from the BuildKit layer cache. BuildKit `--mount=type=cache`
+# directories are not exported to GHA or registry caches and start empty on
+# every fresh runner, so they are deliberately not used here.
+FROM rust-base AS rust-builder
+
+COPY --from=rust-planner /src/recipe.json recipe.json
+RUN cargo chef cook --release --locked --package colecto-daemon --recipe-path recipe.json
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# Declared last: a changed build arg invalidates every later RUN in the stage, and
+# the commit changes on every build. Clean `target/` afterwards so `mode=max` cache
+# exports don't upload un-reusable workspace build artifacts on every commit.
+ARG COLECTO_COMMIT=
+RUN cargo build --package colecto-daemon --release --locked \
     && install -Dm755 target/release/colecto-daemon /out/colecto-daemon \
-    && install -Dm755 target/release/colecto-mcp /out/colecto-mcp
+    && install -Dm755 target/release/colecto-mcp /out/colecto-mcp \
+    && rm -rf target
 
 # Minimal non-root runtime image.
 FROM debian:bookworm-slim AS runtime
