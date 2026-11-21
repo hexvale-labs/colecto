@@ -1,6 +1,9 @@
 //! Single-account TLS mail transports. Credentials stay in the trusted core.
-use crate::{Error, mime::Attachment};
-use colecto_extension_api::{DraftInput, Message};
+use crate::{
+    Error,
+    mime::Attachment,
+    types::{DraftInput, Folder, FolderRole, Message},
+};
 use lettre::{
     SmtpTransport, Transport,
     message::{MultiPart, SinglePart, header::ContentType},
@@ -132,7 +135,7 @@ impl MailAccount {
         })
     }
 
-    pub fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+    pub fn folders(&self) -> Result<Vec<Folder>, Error> {
         self.with_session(folders_session)
     }
 
@@ -330,7 +333,7 @@ impl MailAccount {
             .build()
             .send(&email)
             .map_err(smtp_error)?;
-        // SMTP only delivers; the copy in Sent is the client's job (#90). The message has
+        // SMTP only delivers; the copy in Sent is the client's job. The message has
         // already gone out, so a failed copy is logged rather than reported as a failed send.
         if !provider_saves_sent(&self.imap_host)
             && let Err(error) = self.save_sent(&email.formatted())
@@ -1073,7 +1076,6 @@ mod tests {
     }
     #[test]
     fn folder_listing_skips_containers_and_reads_status_counts() {
-        use colecto_extension_api::FolderRole;
         let server = mock_imap(vec![
             ("LOGIN", String::new()),
             ("LIST", "* LIST (\\Noselect) \"/\" \"[Gmail]\"\r\n* LIST (\\Sent) \"/\" \"Outbox\"\r\n* LIST () \"/\" \"INBOX\"\r\n".into()),
@@ -1703,7 +1705,6 @@ mod tests {
 #[cfg(test)]
 mod folder_tests {
     use super::*;
-    use colecto_extension_api::FolderRole;
     #[test]
     fn roles_prefer_special_use_and_recognize_provider_names() {
         for (name, attributes, expected) in [
@@ -1721,8 +1722,8 @@ mod folder_tests {
     }
 }
 
-fn folder_role(name: &str, attributes: &[&str]) -> colecto_extension_api::FolderRole {
-    use colecto_extension_api::FolderRole::*;
+fn folder_role(name: &str, attributes: &[&str]) -> FolderRole {
+    use FolderRole::*;
     for (attribute, role) in [
         ("\\Inbox", Inbox),
         ("\\Sent", Sent),
@@ -1756,7 +1757,7 @@ fn folder_role(name: &str, attributes: &[&str]) -> colecto_extension_api::Folder
 
 fn folders_session<T: std::io::Read + std::io::Write>(
     session: &mut imap::Session<T>,
-) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+) -> Result<Vec<Folder>, Error> {
     use imap::types::NameAttribute;
     let names = session.list(Some(""), Some("*")).map_err(imap_error)?;
     let mut folders = Vec::new();
@@ -1794,7 +1795,7 @@ fn folders_session<T: std::io::Read + std::io::Write>(
                 }
             }
         }
-        folders.push(colecto_extension_api::Folder {
+        folders.push(Folder {
             id: name.name().into(),
             name: name.name().into(),
             role: folder_role(name.name(), &attributes),

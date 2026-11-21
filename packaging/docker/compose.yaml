@@ -4,12 +4,13 @@
 #   docker compose exec colecto cat /data/access-token
 services:
   colecto:
-    image: ghcr.io/hexvale-labs/colectod:latest
+    image: ghcr.io/kogical/colectod:latest
     # Or build from a checkout instead of pulling:
     # build: { context: ../.., dockerfile: Dockerfile }
     restart: unless-stopped
     environment:
       COLECTO_PUBLIC_ORIGIN: https://${COLECTO_DOMAIN:?Set COLECTO_DOMAIN to the public host name}
+      COLECTO_TOKEN_FILE: /data/access-token
       # COLECTO_LOG: debug
     volumes:
       - colecto-data:/data

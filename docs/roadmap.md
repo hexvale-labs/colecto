@@ -2,19 +2,13 @@
 
 Colecto is in **beta**: one owner can use it as their daily mail client over IMAP/SMTP
 or JMAP, without data loss and without opening another client for routine mail.
-Desktop and browser come first; Android builds exist but are lightly tested.
 
 What beta promises:
 
-- Updates migrate stored data forward (see [storage](storage.md#migrations)). Going
-  back to an older version is not supported: an older build refuses a newer database.
-- Extension API 1 stays supported; changes add API 2, 3, … (see
-  [API versions](extensions/api-versions/README.md)).
+- Updates migrate stored data forward (see [storage](storage.md#migrations)). Going back
+  to an older version is not supported: an older build refuses a newer database.
 - Settings keep only what the owner changed, so improved defaults reach everyone who
   never changed them.
-
-Alpha data does not carry over: beta uses a new app identifier (`com.kogical.colecto`)
-and refuses an alpha `colecto.db`.
 
 Statuses: **Done**, **In progress**, **Next**, **Later**.
 
@@ -22,97 +16,54 @@ Statuses: **Done**, **In progress**, **Next**, **Later**.
 
 | Item | Status |
 | --- | --- |
-| Reply, reply all, forward; sandboxed HTML reading; attachments both ways | Done |
+| Reply, reply all, forward; Rust-sanitized HTML reading; attachments both ways | Done |
 | IMAP IDLE and JMAP push, with polling fallback | Done |
 | IMAP STARTTLS, any SMTP port, a pinned certificate per account (Proton Mail Bridge) | Done; untested against a real Bridge |
-| Discover every server folder with its role and counts (`GET /folders`) | Done |
-| Read/unread and star flags; move, archive and delete, also from each message's context menu | In progress |
+| Discover every server folder with its role and counts | Done |
+| Read/unread, star, move, archive, and delete | Done |
 | Search filters (`from:`, `to:`, `is:`, `after:`, `before:`) run on the server | Done |
-| Browse any folder in the UI, with paging through full history | Done |
+| Browse any folder with paging through history | Done |
+| Conversation threading and quoted-text folding | Done |
+| Inline `cid:` images in HTML mail | Done |
 | Incremental refresh of cached folders instead of refetching | Next |
 | Larger offline cache (thousands of messages per account) | Next |
-| Conversation threading | In progress; the reader shows earlier and later saved messages of the same thread, collapsed to one line each, with quoted text folded |
-| Inline `cid:` images in HTML mail | Later |
-| Encryption of stored mail | Later |
+| End-to-end encryption (OpenPGP and S/MIME) | Later |
 
-## Storage
+## Storage & Security
 
 | Item | Status |
 | --- | --- |
-| Versioned schema migrations, a copy before each migration, refuse alpha and newer databases | Done |
-| Settings store only what the owner changed; `reset` returns a setting to its default | Done |
-| Separate tables for drafts, labels, API keys and send approvals instead of one document each | Done |
-| "Reset to defaults" in Settings for changed text, notification and extension settings | Done |
+| Single-file `colecto.db` with versioned migrations and pre-migration backups | Done |
+| Sparse settings table and relational tables for drafts, labels, API keys, send approvals, and AI caches | Done |
+| XChaCha20-Poly1305 credential vault with OS keyring or Argon2id master password | Done |
+| Mobile OS `SecretStore` (Android Keystore / iOS Keychain) | Next |
 | `colecto-daemon export` of accounts (without secrets), settings, drafts and labels | Later |
 
-## App
+## App & Interface
 
 | Item | Status |
 | --- | --- |
-| Dockable workspace, command runner, notifications, accent colour | Done |
-| Interface zoom with `Ctrl +`, `Ctrl -` and `Ctrl 0` in the desktop app | Done |
-| Desktop app with no open port: UI and API in-process over `colecto://`, a port only while MCP is on | Done; checked on Linux (WebKitGTK), not yet on Windows |
-| MCP tools to read and change appearance, notification and extension settings, each behind its own key permission | Done |
-| Extensions: Wasm panels and overlays, install-time consent, z-index layers | Done |
-| Declarative extension settings, owner controls and per-guest reads | Done |
-| Named extension bus: guest requests/events and bundled integrations | Done |
-| Rust extension SDK (`colecto-extension`): typed calls, bus messages, mock Host; Oneko ported | Done |
-| `cargo colecto` tool: build, check `[bus] subscribe` against registered handlers, write `.colectoext` | Done |
-| Onboarding for the first account; demo account off by default; accounts can be switched off | Done |
-| Optional AI: summaries, drafted replies with tones, regex and decision-model auto-labels | Done; not yet tried against real providers |
-| Content cache, prefetch of recent mail, instant folder switches, sync status with progress | Done |
-| Desktop app connects to a remote daemon over HTTPS through its local Host | Done; not yet tried against a real remote server |
-| Calmer settings, notifications above Settings, drag-and-drop extension install | Done |
-| Message list density and date headings; new-release notification | Done |
-| Font choice and text size, account rows and add/edit account dialog, account removal | Done |
-| Account setup wizard with settings lookup (provider list, Thunderbird Autoconfig and ISPDB, DNS SRV and MX, JMAP well-known) | Done |
-| Loading screen and selection polish | Done |
-| Custom ports in every server field | Done |
-| Install the daemon (with desktop notifications, or as a relay of a remote server's) as a Linux systemd user service from Connection | Done; real systemd validation pending |
-| Show service unit versions and update outdated units from Connection | Done; real systemd validation pending |
-| Install the daemon as a Windows logon task | Next |
-| Stress testing with thousands of messages and very long HTML mail | Next |
-| Sequential extension API versions; refuse extensions on a discontinued version with a link to why | Done |
-| Rebuild extensions as client-side Workers with a declarative component UI, reset to API 1 ([design](extensions/ui-model.md)) | Done; desktop and Android webviews not yet checked by hand |
-| Move core UI (app frame, docking, account switcher, Settings, command runner, toasts) out of `ui/src/extensions/` | Done |
-| Worker runtime, per-extension credentials, renderer, theme tokens and `frame`; reset to API 1 | Done |
-| Shared TypeScript client library and bundled client parts | Done |
-| Rust SDK support for client parts (Wasm client ABI) and building them with `cargo colecto` | Later |
-| Notifications, AI (auto-labels in a service part), inbox, reader and composer on the new model | Done |
-| Composer body as a rich-text editor `frame` | Later |
-| Oneko rewritten on `canvas` | Done |
+| Multi-platform Flutter app with per-platform native design systems (`shadcn_ui`, `fluent_ui`, `macos_ui`, Material 3, Cupertino) | Done |
+| Adaptive 3-tier navigation, command palette, keyboard shortcuts, zoom, Demo mode, and worst-case stress fixtures | Done |
+| In-process `colecto-ffi` (`dart:ffi`) backend with zero loopback ports, bundled in desktop/Android builds | Done |
+| Remote HTTP + SSE backend (`RemoteHttpBackend`) for Web and remote daemon | Done |
+| Optional native AI: summaries, drafted replies with tones, regex and decision-model auto-labels | Done |
+| Scoped API keys, send approvals, and MCP server (`colecto-mcp`) | Done |
+| Account setup wizard with autodiscovery (ISPDB, Autoconfig, DNS SRV/MX, JMAP well-known) | Done |
+| Rich-text composer | Later |
 
-## Platforms and hosting
+## Platforms & Hosting
 
 | Item | Status |
 | --- | --- |
-| Linux, Windows, browser; Docker image `ghcr.io/hexvale-labs/colectod`; AUR packages | Done |
-| Mobile feel: system back and predictive back, press sounds and haptics, compact/medium/expanded layouts, phone Settings | Done; real-device validation pending |
+| Linux, Windows, macOS, Android, and Web release bundles; Docker image `ghcr.io/kogical/colectod`; AUR packages | Done |
 | Android: UnifiedPush from a self-hosted daemon (Web Push, no foreground service) | Next |
 | Android: optional foreground service for local accounts without a daemon | Next |
-| macOS and iOS release builds (removed from CI: unsigned, doubled CI time, no device to test on) | Later (needs an Apple device and developer account) |
 | Several users on one daemon | Later |
-| Synchronizing state between devices | Later |
+| Synchronizing UI state between devices | Later |
 
 ## Not planned
 
+- Extensions / plugin runtime / Wasm UI sandbox (features are built cleanly as first-party modules)
 - POP3
-- 32-bit platforms (Android `armv7` and `x86`, 32-bit Windows and Linux). Release CI
-  builds 64-bit `x64` and `arm64` only.
-
-## Android push design
-
-When the app is connected to a daemon, the daemon already watches every account, so
-the phone does not need its own connection:
-
-1. The app registers with a UnifiedPush distributor (for example ntfy) and sends the
-   resulting endpoint and Web Push keys to the daemon.
-2. On new mail the daemon sends an encrypted Web Push message (RFC 8291, VAPID
-   signed, at most 4 KB) with the account, count and newest senders and subjects.
-3. The distributor wakes the app for a few seconds; a small Kotlin receiver shows the
-   notification at once and queues a WorkManager job to refresh the cache.
-
-Without a daemon, an optional `specialUse` foreground service keeps the Rust core's
-IDLE/push watchers running, with a low-priority persistent notification and a request
-to ignore battery optimisation. `dataSync` is unsuitable: Android 15 limits it to six
-hours a day and blocks starting it at boot.
+- 32-bit platforms

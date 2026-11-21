@@ -1,7 +1,10 @@
 //! JMAP transport (RFC 8620, RFC 8621): receive, search, send with attachments and push.
 //! Tokens and passwords remain in the trusted core.
-use crate::{Error, mime::Attachment};
-use colecto_extension_api::{DraftInput, Message};
+use crate::{
+    Error,
+    mime::Attachment,
+    types::{DraftInput, Folder, FolderRole, Message},
+};
 use reqwest::{
     Url,
     blocking::{Client, RequestBuilder},
@@ -301,7 +304,7 @@ impl JmapAccount {
         Ok(())
     }
 
-    pub fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+    pub fn folders(&self) -> Result<Vec<Folder>, Error> {
         self.session()?.folders()
     }
 
@@ -475,7 +478,7 @@ impl JmapAccount {
     }
 }
 impl Session<'_> {
-    fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+    fn folders(&self) -> Result<Vec<Folder>, Error> {
         let data = self.call(
             "Mailbox/get",
             json!({
@@ -485,11 +488,11 @@ impl Session<'_> {
         list(&data)?
             .iter()
             .map(|mailbox| {
-                Ok(colecto_extension_api::Folder {
+                Ok(Folder {
                     id: field(mailbox, "id")?.into(),
                     name: field(mailbox, "name")?.into(),
                     role: serde_json::from_value(mailbox["role"].clone())
-                        .unwrap_or(colecto_extension_api::FolderRole::Other),
+                        .unwrap_or(FolderRole::Other),
                     total: mailbox["totalEmails"]
                         .as_u64()
                         .and_then(|n| n.try_into().ok())
@@ -902,10 +905,10 @@ mod tests {
             ["Newest", "Older"]
         );
         let folders = session.folders().unwrap();
-        assert_eq!(folders[0].role, colecto_extension_api::FolderRole::Inbox);
+        assert_eq!(folders[0].role, FolderRole::Inbox);
         assert_eq!((folders[0].total, folders[0].unread), (14, 3));
         assert_eq!(folders[1].id, "custom");
-        assert_eq!(folders[1].role, colecto_extension_api::FolderRole::Other);
+        assert_eq!(folders[1].role, FolderRole::Other);
         server.join().unwrap();
     }
     #[test]

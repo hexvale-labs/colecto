@@ -1,34 +1,35 @@
-# Maintainer: Hexvale Labs <https://github.com/hexvale-labs>
-# Repackages the desktop app from the GitHub release. Release CI sets pkgver and the
+# Maintainer: Kogical <https://github.com/kogical>
+# Repackages the prebuilt Linux bundle from the GitHub release. Release CI sets pkgver and
 # checksums before pushing this file to the AUR.
 pkgname=colecto-bin
-pkgver=0.1.0
+pkgver=0.10.0
 pkgrel=1
-pkgdesc='A fast, extensible email client (prebuilt desktop app)'
+pkgdesc='A fast, native email client (prebuilt Flutter desktop app and Rust daemon)'
 arch=('x86_64' 'aarch64')
-url='https://github.com/hexvale-labs/colecto'
+url='https://github.com/kogical/colecto'
 license=('MIT OR Apache-2.0')
-depends=('webkit2gtk-4.1' 'gtk3' 'openssl' 'dbus' 'hicolor-icon-theme')
+depends=('gtk3' 'openssl' 'dbus' 'hicolor-icon-theme')
 optdepends=('org.freedesktop.secrets: keep account passwords in the system keyring')
 provides=('colecto')
 conflicts=('colecto')
 options=('!strip' '!debug')
-source=("LICENSE-MIT-$pkgver::https://raw.githubusercontent.com/hexvale-labs/colecto/v$pkgver/LICENSE-MIT"
-        "LICENSE-APACHE-$pkgver::https://raw.githubusercontent.com/hexvale-labs/colecto/v$pkgver/LICENSE-APACHE")
-source_x86_64=("colecto-$pkgver-x86_64.deb::$url/releases/download/v$pkgver/colecto-v$pkgver-linux-x64.deb")
-source_aarch64=("colecto-$pkgver-aarch64.deb::$url/releases/download/v$pkgver/colecto-v$pkgver-linux-arm64.deb")
+source=("LICENSE-MIT-$pkgver::https://raw.githubusercontent.com/kogical/colecto/v$pkgver/LICENSE-MIT"
+        "LICENSE-APACHE-$pkgver::https://raw.githubusercontent.com/kogical/colecto/v$pkgver/LICENSE-APACHE")
+source_x86_64=("colecto-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/colecto-v$pkgver-linux-x64.tar.gz")
+source_aarch64=("colecto-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/colecto-v$pkgver-linux-arm64.tar.gz")
 sha256sums=('SKIP'
             'SKIP')
 sha256sums_x86_64=('SKIP')
 sha256sums_aarch64=('SKIP')
 
 package() {
-  # makepkg already unpacked the .deb; its data archive holds the installed tree.
-  bsdtar -xf data.tar.* -C "$pkgdir"
-  # Tauri names the 256 px icon directory after its @2x source; use the standard hicolor name.
-  if [[ -d "$pkgdir/usr/share/icons/hicolor/128x128@2" ]]; then
-    mv "$pkgdir/usr/share/icons/hicolor/128x128@2" "$pkgdir/usr/share/icons/hicolor/256x256"
-  fi
+  local bundle="colecto-v$pkgver-linux-x64"
+  [[ "$CARCH" == "aarch64" ]] && bundle="colecto-v$pkgver-linux-arm64"
+  install -dm755 "$pkgdir/usr/lib/colecto" "$pkgdir/usr/bin"
+  cp -a "$bundle"/{colecto,data,lib} "$pkgdir/usr/lib/colecto/"
+  ln -s /usr/lib/colecto/colecto "$pkgdir/usr/bin/colecto"
+  install -Dm755 "$bundle/colecto-daemon" "$bundle/colecto-mcp" -t "$pkgdir/usr/bin/"
+  install -Dm644 "$bundle/Colecto.desktop" -t "$pkgdir/usr/share/applications/"
   install -Dm644 "LICENSE-MIT-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
   install -Dm644 "LICENSE-APACHE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
 }

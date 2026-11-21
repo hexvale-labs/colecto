@@ -2,9 +2,9 @@
 use crate::{
     Account, Error, JmapAccount, MailAccount, MailStore,
     credentials::{Secret, SecretStore, Vault, identifier},
-};
-use colecto_extension_api::{
-    AccountInfo, AccountInput, AccountSettings, DEMO_ACCOUNT, Protocol, SecurityInfo,
+    types::{
+        AccountInfo, AccountInput, AccountSettings, DEMO_ACCOUNT, Message, Protocol, SecurityInfo,
+    },
 };
 use std::{
     collections::BTreeMap,
@@ -69,7 +69,7 @@ fn connect(store: &mut MailStore, settings: &AccountSettings, secret: &str) -> R
 }
 
 impl Accounts {
-    /// Host-owned data, including extension policy, lives beside account stores.
+    /// Service-owned data lives beside account stores in the shared database.
     pub fn database(&self) -> crate::Database {
         self.database.clone()
     }
@@ -142,11 +142,7 @@ impl Accounts {
             })
             .collect()
     }
-    pub fn cached_message(
-        &self,
-        id: &str,
-        message_id: &str,
-    ) -> Result<Option<colecto_extension_api::Message>, Error> {
+    pub fn cached_message(&self, id: &str, message_id: &str) -> Result<Option<Message>, Error> {
         let snapshots = self
             .snapshots
             .get(id)
@@ -174,6 +170,15 @@ impl Accounts {
                 folder: folder.into(),
                 ..Default::default()
             }))
+    }
+    pub fn all_cached(&self, id: &str) -> Result<BTreeMap<String, crate::MailSnapshot>, Error> {
+        let snapshots = self
+            .snapshots
+            .get(id)
+            .ok_or(Error::Missing)?
+            .read()
+            .map_err(crate::storage)?;
+        Ok(snapshots.clone())
     }
     pub fn store(&self, id: &str) -> Result<Arc<Mutex<MailStore>>, Error> {
         self.stores.get(id).cloned().ok_or(Error::Missing)
@@ -328,7 +333,7 @@ impl Accounts {
         // and remove_account_data can safely be retried.
         self.database.remove_account_data(id)
     }
-    /// A Host-owned secret (such as an AI service key) sealed in the credential vault beside
+    /// A service-owned secret (such as an AI service key) sealed in the credential vault beside
     /// account credentials. Names start with `host:` so they never collide with account ids.
     /// Locking the vault makes them unavailable; resetting credentials deletes them.
     pub fn host_secret(&self, name: &str) -> Result<Option<zeroize::Zeroizing<String>>, Error> {
@@ -342,7 +347,7 @@ impl Accounts {
             .get(name)
             .map(|s| zeroize::Zeroizing::new(s.0.clone())))
     }
-    /// Store or, with `None`, delete a Host-owned secret.
+    /// Store or, with `None`, delete a service-owned secret.
     pub fn set_host_secret(&mut self, name: &str, value: Option<String>) -> Result<(), Error> {
         host_secret_name(name)?;
         let value = value.map(Secret);

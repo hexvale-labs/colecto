@@ -1,7 +1,7 @@
-use colecto_core::{Accounts, Database, Error, MailStore, SecretStore};
-use colecto_extension_api::{AccountInput, DraftInput};
+use colecto_core::{AccountInput, Accounts, Database, DraftInput, Error, MailStore, SecretStore};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+
 #[derive(Default)]
 struct MemorySecrets(Mutex<BTreeMap<String, String>>);
 impl SecretStore for MemorySecrets {
@@ -409,22 +409,4 @@ fn cached_list_and_reader_remain_available_while_account_is_locked() {
             .is_some()
     );
     assert!(accounts.cached("other", "inbox").is_err());
-}
-
-#[test]
-fn fresh_vault_ignores_legacy_account_registry() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("accounts.json"),
-        b"unsupported legacy content",
-    )
-    .unwrap();
-    let accounts = Accounts::open(
-        MailStore::open(dir.path()).unwrap(),
-        Arc::new(MemorySecrets::default()),
-    )
-    .unwrap();
-    assert!(accounts.store("unknown").is_err());
-    let state: serde_json::Value = serde_json::from_slice(&vault(dir.path())).unwrap();
-    assert!(state["accounts"].as_array().unwrap().is_empty());
 }

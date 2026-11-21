@@ -1,114 +1,55 @@
 # Agent instructions
 
-Colecto is built by AI agents with one human maintainer. These rules apply to every
-agent. `CLAUDE.md` is a symlink to this file.
+Colecto is built by AI agents with one human maintainer. These rules apply to every agent. `CLAUDE.md` is a symlink to this file.
 
 ## Before you start
 
-- Read [docs/README.md](docs/README.md) (index, technologies, where files live) and
-  [docs/architecture.md](docs/architecture.md).
-- List the skills available to you and read the `SKILL.md` of each one that fits the
-  task, then follow it. Shared project skills live in `.agents/skills/` (pinned in
-  `skills-lock.json`; `.claude/skills` links to the same folder). Your global skills
-  apply too.
-- For interface work (Svelte components, layout, motion, mobile), use the design skills
-  such as `emil-design-eng`, the matching animation and mobile skills, and finish each
-  visible change with `break-ui`.
+- **Identify yourself first:** Before doing anything else in a session, state in 1–2 sentences what model you are, what harness/tool you are running in, and who made you, to the best of your capability (e.g., *"I'm Gemini 4 Neon, running in T3 Code through Antigravity. I am made by Google."*). This ensures downstream text-generation models (such as PR or issue writers) see which model actually did the work and credit everyone accurately.
+- Read [README.md](README.md), [docs/architecture.md](docs/architecture.md), [docs/ui-design.md](docs/ui-design.md), and [docs/decisions.md](docs/decisions.md).
+- List the skills available in `.agents/skills/` (pinned in `skills-lock.json`; `.claude/skills` symlinks to the same folder) and read the `SKILL.md` of each skill that fits the task before editing.
+- For UI work, read [docs/ui-design.md](docs/ui-design.md) and Colecto's `DESIGN.md` principles it carries forward, then follow the Flutter skills (`flutter-*`, `dart-*`) and design skills (`emil-design-eng`, `apple-design`, `animate`, `break-ui`).
 
-## How to work
+## Non-negotiable architectural rules
 
-- Make the smallest complete change. Reuse existing patterns. No speculative
-  abstractions, unused dependencies or boilerplate. Remove code you replace.
-- Decide routine, reversible details yourself and state your assumptions. Ask only when
-  missing intent would materially change the work.
-- Never describe a planned feature, platform or security property as working. Report
-  what you verified and what you did not.
-- Write chat updates, comments and docs in plain, natural language. Comment code only
-  where the reason is not obvious.
-
-## Code rules
-
-### Interface work goes into extensions
-
-- Build every UI feature as a bundled extension in `ui/src/extensions/<id>/`.
-  Only bootstrapping, permission prompts, credential controls and recovery stay in the
-  shell. "Quicker in the shell" is not a reason.
-- Extensions never reach into each other: no imports between extension folders, no
-  shared mutable stores, no reading another extension's state. To make an extension
-  usable by others, expose a versioned request on its bus (the `extensions.bus`
-  capability, see [docs/extensions/README.md](docs/extensions/README.md)), such as
-  `v1/add_button`. Bundled bus names use whole-number versions and are listed in
-  [docs/extensions/bundled-bus.md](docs/extensions/bundled-bus.md).
-
-### Settings
-
-Put each setting in the Settings section that matches what it changes, not in the
-extension that owns it, using `section` (see
-[placing settings](docs/extensions/README.md#placing-settings-in-a-core-section)).
-
-| Section | Holds |
-| --- | --- |
-| **Appearance** | How Colecto looks: text, colour, density, layout of lists and panes |
-| **Notifications** | What to be notified about, and how |
-
-### Extension API versions
-
-- Every change to what extensions can rely on adds the next API version in
-  `crates/colecto-extension-api/api-versions.json`. Follow
-  [docs/extensions/api-versions/README.md](docs/extensions/api-versions/README.md).
-- Raise `api_version` only in the extensions that use the new feature.
-- Change an existing signature in a new version instead of adding a variant such as
-  `request2`. Ask the maintainer before adding a parallel variant.
-
-## Documentation
-
-- Update the page that owns the topic (see the index in `docs/README.md`) in the same
-  change as the code. Add a new page only when none fits, and link it from the index.
-- Start each page with a one-line summary, then short sections with descriptive
-  headings. Use tables for limits, options and mappings, and give exact names of files,
-  routes, fields and commands.
-- Record behaviour, limits, security boundaries and the reasons for non-obvious
-  decisions. Leave out session logs, test counts and history; git keeps those.
-- Keep [docs/roadmap.md](docs/roadmap.md) current when you start or finish an item.
-
-## Checks
-
-Use the `just` recipes (`just` lists them; details in
-[docs/development.md](docs/development.md#check-changes)).
-
-| Change | Run |
-| --- | --- |
-| Rust | `just verify` |
-| UI | `just verify` and `just test browser` |
-| Features | `just perf-check` as well, following [docs/performance/README.md](docs/performance/README.md) |
-
-- Test changed behaviour, important edge cases and regression risks. Skip redundant
-  or implementation-mirroring tests.
-- Before heavy builds, tests or benchmarks, check free memory against the effective
-  cgroup limits (not host RAM), disk space, CPU quota and current load. On constrained
-  machines use `CARGO_BUILD_JOBS=1` and never run two Cargo builds on the same target
-  directory at once. Let load settle before measuring performance.
-
-## Commits, pull requests and issues
-
-- Write commit messages and pull request titles as
-  [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary`,
-  with `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci` or `chore`,
-  and `!` after the type for a breaking change. The scope is optional.
-- End every pull request and issue description with one final line naming the models
-  that helped with it, for example `Assisted by Opus 5.5 and Gemini 4 Neon.`
-- Branch off `develop` and open pull requests against it; `main` moves only when a
-  release ships (see [Branches](docs/development.md#branches)). When the checks pass,
-  merge the pull request yourself. Wait for the maintainer only for failing checks
-  you cannot fix, merge conflicts with unclear intent, missing access or destructive
-  history changes.
-- When a merged change is something users would notice, tell the maintainer in plain
-  words that a release may be worth shipping: once when you open the pull request,
-  and again after the merge.
+1. **No extensions or plugin runtimes.** Do not introduce a plugin ABI, Wasm UI sandbox, or dynamic extension loader. Build features cleanly as first-party, toggleable modules.
+2. **Rust owns mail, storage, crypto, and sync.** Keep IMAP/SMTP, JMAP, MIME decoding, HTML sanitization, Turso storage, credential vault, autodiscovery, IDLE/push sync, AI, and MCP in Rust. Keep Dart/Flutter focused on presentation, navigation, state, and OS UI glue.
+3. **One backend interface in Flutter.** All UI code talks to a single Dart `MailBackend` repository interface with two implementations:
+   - `LocalFfiBackend` (`flutter_rust_bridge`) for desktop and mobile standalone mode.
+   - `RemoteHttpBackend` (HTTP + SSE) for Flutter Web (Wasm) and remote-daemon mode.
+   Never open a loopback HTTP port on desktop or mobile for local mail access.
+4. **Each platform gets its own native design system; never Material on desktop or Web.**
+   - **Linux & Web (Wasm):** `shadcn_ui`, themed with Colecto's palette (dense, 1px borders, hover states, right-click menus, sharp focus rings, no ripples).
+   - **Windows:** `fluent_ui`.
+   - **macOS:** `macos_ui`.
+   - **Android:** Material 3 (`material_ui`) with `dynamic_color` (Material You on by default; the accent setting overrides it).
+   - **iOS:** Cupertino (`cupertino_ui`).
+   Screens use only the Colecto kit (`app/lib/ui/core/kit/`: `ColectoButton`, `ColectoText`, `ColectoTextField`, `ColectoSwitch`, menus, dialogs…), which maps each component onto the active design. Never import a design library in feature code; add or extend a kit component instead. Share business logic, controllers, and core mail views; branch only in the kit and the navigation shell. Those are defaults, not limits: any design must work on any platform and at every window size, and owners pick theirs in Settings → Appearance → Design (`Preferences.design`). Preview with `just run demo linux <design>` (`colecto`, `fluent`, `macos`, `material`, `cupertino`).
+5. **Untrusted HTML email safety & RAM discipline.**
+   - Sanitize HTML in Rust (strip scripts/forms, block remote images by default, rewrite `cid:` inline images).
+   - Render plain-text and simple messages natively in Flutter.
+   - Render HTML emails in a lazy/pooled sandboxed WebView (or `<iframe sandbox>` via `HtmlElementView` on Web); never keep a WebView alive when no HTML message is open.
+6. **Never support POP3.**
 
 ## Releases
 
-Ship a release only when the maintainer asks for one in the current session. Then
-follow [Shipping a release](docs/development.md#shipping-a-release), which covers
-picking the version, the notes and tagging. Never choose a major version unless the
-maintainer asks for one, and never tag or publish at any other time.
+Ship a release only when the maintainer asks for one in the current session. Then follow [Shipping a release](docs/development.md#shipping-a-release), which covers picking the version, writing release notes, running `just bump-version X.Y.Z`, and tagging. Never choose a major version unless the maintainer asks for one, and never tag or publish at any other time.
+
+## How to work
+
+- Make the smallest complete change. Reuse existing patterns. No speculative abstractions, unused dependencies, or boilerplate.
+- Decide routine, reversible details yourself and state your assumptions. Ask only when missing intent would materially change the work.
+- Never claim a platform, feature, or security property works unless you verified it. Report what you verified and what you did not.
+- Keep docs in `docs/` updated in the same change as code.
+
+## Verification
+
+- Run `just verify` to execute the full Rust + Flutter verification suite (see `just --list --list-submodules` for all recipes in `justfile` and `just/*.just`).
+- **Rust changes:** `just check fmt-rust`, `just check lint`, `just test rust` (`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`).
+- **Flutter/Dart changes:** `just check fmt-app`, `just check app`, `just test app` (`dart format --output=none --set-exit-if-changed .`, `flutter analyze`, `flutter test`).
+- Check system memory/CPU constraints before heavy builds; never run concurrent Cargo builds on the same target directory.
+
+## Branching, commits, pull requests, and issues
+
+- **Branch workflow:** Open all feature, fix, refactor, docs, and chore pull requests against **`develop`**, never directly against `main`. Start new branches and worktrees from `origin/develop`. `main` is reserved for releases promoted from `develop`.
+- Use [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary` (`feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`).
+- End every pull request and issue description with one final line naming **all** models that helped with the work (both the coding/review models and any separate model that drafted the PR/issue text), e.g. `Assisted by Claude Haiku 5.5 and Gemini 4 Neon.`
