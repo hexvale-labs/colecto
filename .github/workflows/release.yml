@@ -432,7 +432,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-          pattern: '!(web-assets)'
+          pattern: '{web,linux-*,windows-*,macos-*,android-*,digest-*}'
 
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -463,9 +463,9 @@ jobs:
           footer="Installers are not signed. See https://github.com/$GITHUB_REPOSITORY/blob/main/docs/install.md before installing."
           if [[ -f "$NOTES" ]]; then
             notes=$(cat "$NOTES"; printf '\n\n%s\n' "$footer")
-            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Colecto $TAG" --notes "$notes"
+            gh release create "$TAG" dist/colecto-* dist/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --title "Colecto $TAG" --notes "$notes"
           else
-            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "Colecto $TAG" --generate-notes --notes "$footer"
+            gh release create "$TAG" dist/colecto-* dist/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --title "Colecto $TAG" --generate-notes --notes "$footer"
           fi
 
   aur:
