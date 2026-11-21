@@ -362,5 +362,57 @@ void main() {
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.text('Pick a message and it will open here.'), findsNothing);
     });
+
+    testWidgets(
+      'phone layout does not crash before folders load on Material or Cupertino',
+      (tester) async {
+        for (final design in const [
+          ColectoPlatformStyle.android,
+          ColectoPlatformStyle.ios,
+        ]) {
+          tester.view.physicalSize = const Size(390, 844);
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(tester.view.reset);
+          // Uninitialized controller has empty folders list.
+          final c = MailController()..previewDesign(design);
+          addTearDown(c.dispose);
+          await tester.pumpWidget(ColectoApp(controller: c));
+          await tester.pump();
+          expect(tester.takeException(), isNull);
+        }
+      },
+    );
+
+    testWidgets('whole-interface zoom scales inner MediaQuery size', (
+      tester,
+    ) async {
+      final c = await pumpApp(
+        tester,
+        const Size(1280, 800),
+        ColectoPlatformStyle.desktop,
+      );
+      await c.zoomIn(); // 110%
+      await tester.pumpAndSettle();
+      final innerCtx = tester.element(find.text('Colecto').first);
+      final scaledSize = MediaQuery.sizeOf(innerCtx);
+      expect(scaledSize.width, closeTo(1280 / 1.1, 1.0));
+      expect(scaledSize.height, closeTo(800 / 1.1, 1.0));
+    });
+
+    testWidgets('selectAccount clears content cache and summaries', (
+      tester,
+    ) async {
+      final c = MailController();
+      addTearDown(c.dispose);
+      await c.initialize();
+      final first = c.threads.first;
+      await c.selectThread(first);
+      await c.loadMessageContent(first.latest.id);
+      expect(c.contentFor(first.latest.id), isNotNull);
+
+      await c.selectAccount('other');
+      expect(c.contentFor(first.latest.id), isNull);
+      expect(c.summaryFor(first.latest.id), isNull);
+    });
   });
 }

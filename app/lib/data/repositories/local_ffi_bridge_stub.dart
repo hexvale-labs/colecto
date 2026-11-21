@@ -33,12 +33,12 @@ class NativeFfiBridge {
     );
   }
 
-  FfiResponse request({
+  Future<FfiResponse> request({
     required String method,
     required String path,
     String? account,
     String? body,
-  }) {
+  }) async {
     ensureInitialized();
     throw UnimplementedError();
   }

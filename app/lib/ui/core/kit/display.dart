@@ -70,35 +70,6 @@ String colectoModKey(BuildContext context) =>
     ? '⌘'
     : 'Ctrl';
 
-/// A floating surface (palette, dialogs, connect card).
-class ColectoCard extends StatelessWidget {
-  const ColectoCard({
-    super.key,
-    required this.child,
-    this.padding = const EdgeInsets.all(14),
-    this.radius = 12,
-  });
-
-  final Widget child;
-  final EdgeInsetsGeometry padding;
-  final double radius;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = ColectoPalette.of(context);
-    return Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: p.float,
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: p.line),
-        boxShadow: p.floatShadow,
-      ),
-      child: child,
-    );
-  }
-}
-
 /// A sender avatar with a stable hue per correspondent.
 class ColectoAvatar extends StatelessWidget {
   const ColectoAvatar({
@@ -177,6 +148,14 @@ class _ColectoPulseState extends State<ColectoPulse>
     vsync: this,
     duration: const Duration(milliseconds: 1200),
   );
+  late final CurvedAnimation _curve = CurvedAnimation(
+    parent: _c,
+    curve: Curves.easeInOut,
+  );
+  late final Animation<double> _opacity = Tween(
+    begin: 1.0,
+    end: 0.25,
+  ).animate(_curve);
 
   @override
   void didChangeDependencies() {
@@ -190,6 +169,7 @@ class _ColectoPulseState extends State<ColectoPulse>
 
   @override
   void dispose() {
+    _curve.dispose();
     _c.dispose();
     super.dispose();
   }
@@ -198,39 +178,13 @@ class _ColectoPulseState extends State<ColectoPulse>
   Widget build(BuildContext context) {
     final p = ColectoPalette.of(context);
     return FadeTransition(
-      opacity: Tween(
-        begin: 1.0,
-        end: 0.25,
-      ).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
+      opacity: _opacity,
       child: Container(
         width: widget.size,
         height: widget.size,
         decoration: BoxDecoration(color: p.accent, shape: BoxShape.circle),
       ),
     );
-  }
-}
-
-/// A platform-native busy indicator.
-class ColectoSpinner extends StatelessWidget {
-  const ColectoSpinner({super.key, this.size = 14});
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = ColectoPalette.of(context);
-    return switch (colectoPlatformStyle(context)) {
-      ColectoPlatformStyle.ios => CupertinoActivityIndicator(radius: size / 2),
-      _ => SizedBox.square(
-        dimension: size,
-        child: CircularProgressIndicator(
-          strokeWidth: 1.8,
-          color: p.accent,
-          strokeCap: StrokeCap.round,
-        ),
-      ),
-    };
   }
 }
 
@@ -366,22 +320,5 @@ class ColectoErrorBox extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-/// A hairline divider.
-class ColectoHairline extends StatelessWidget {
-  const ColectoHairline({super.key, this.vertical = false, this.soft = true});
-
-  final bool vertical;
-  final bool soft;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = ColectoPalette.of(context);
-    final c = soft ? p.lineSoft : p.line;
-    return vertical
-        ? Container(width: 1, color: c)
-        : Container(height: 1, color: c);
   }
 }

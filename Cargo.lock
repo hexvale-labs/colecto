@@ -703,7 +703,6 @@ version = "0.10.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
- "colecto-core",
  "colecto-daemon",
  "colecto-service",
  "serde",

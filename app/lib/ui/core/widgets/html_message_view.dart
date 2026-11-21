@@ -22,12 +22,10 @@ class HtmlMessageView extends StatelessWidget {
   final String plainTextFallback;
   final double height;
 
-  /// Mail that paints its own backgrounds or text colours keeps its own
-  /// light sheet, so dark ink stays readable.
-  static bool isDesigned(String html) => RegExp(
-    r'bgcolor\s*=|background(-color)?\s*:|(^|[;\s"])color\s*:',
-    caseSensitive: false,
-  ).hasMatch(html);
+  /// Mail that paints its own background keeps a light sheet, so dark ink stays
+  /// readable. (Rust's `ammonia` sanitizer strips inline `style`, leaving `bgcolor`.)
+  static bool isDesigned(String html) =>
+      RegExp(r'\bbgcolor\s*=', caseSensitive: false).hasMatch(html);
 
   @override
   Widget build(BuildContext context) {
@@ -44,23 +42,5 @@ class HtmlMessageView extends StatelessWidget {
       html: html,
       plainTextFallback: plainTextFallback,
     );
-  }
-
-  static String stripHtml(String input) {
-    return input
-        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
-        .replaceAll(
-          RegExp(r'</(p|div|h[1-6]|li|tr)>', caseSensitive: false),
-          '\n\n',
-        )
-        .replaceAll(RegExp(r'<[^>]+>'), '')
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#39;', "'")
-        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
-        .trim();
   }
 }

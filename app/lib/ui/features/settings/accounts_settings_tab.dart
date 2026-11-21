@@ -122,6 +122,7 @@ class _AccountsSettingsTabState extends State<AccountsSettingsTab> {
   }
 
   Future<void> _saveAccount() async {
+    if (_saving) return;
     setState(() => _saving = true);
     final input = AccountInput(
       id: _editingId,

@@ -79,6 +79,7 @@ class _ComposerViewState extends State<ComposerView> {
 
   bool get _dirty =>
       _state != _SaveState.sent &&
+      _state != _SaveState.sending &&
       (_snapshot() != _baseline || _attachments.isNotEmpty);
 
   bool get _hasContent =>
@@ -121,11 +122,13 @@ class _ComposerViewState extends State<ComposerView> {
     attachments: List.unmodifiable(_attachments),
   );
 
-  Future<void> _save() async {
-    if (_state == _SaveState.saving || _state == _SaveState.sending) return;
+  Future<bool> _save() async {
+    if (_state == _SaveState.saving || _state == _SaveState.sending) {
+      return false;
+    }
     setState(() => _state = _SaveState.saving);
     final saved = await c.saveDraft(_input(), quiet: true);
-    if (!mounted) return;
+    if (!mounted) return saved != null;
     setState(() {
       if (saved != null) {
         _draftId = saved.id;
@@ -135,6 +138,7 @@ class _ComposerViewState extends State<ComposerView> {
         _state = _SaveState.idle;
       }
     });
+    return saved != null;
   }
 
   Future<void> _send() async {
@@ -166,8 +170,8 @@ class _ComposerViewState extends State<ComposerView> {
 
   Future<void> _close() async {
     if (_dirty && _hasContent) {
-      await _save();
-      if (!mounted) return;
+      final ok = await _save();
+      if (!mounted || !ok) return;
       c.showToast('Draft saved', detail: 'Find it in Drafts.');
     }
     _discarded = true;

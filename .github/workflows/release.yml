@@ -95,7 +95,7 @@ jobs:
         working-directory: app
         run: |
           flutter pub get
-          flutter build web --release --build-name=${{ needs.version.outputs.number }}
+          flutter build web --release --no-web-resources-cdn --build-name=${{ needs.version.outputs.number }}
 
       - name: Save Pub packages
         if: github.ref == 'refs/heads/main' && steps.pub-cache.outputs.cache-hit != 'true'
@@ -183,15 +183,15 @@ jobs:
           case "${{ matrix.platform }}" in
             linux)
               COLECTO_FFI_LIB="$(pwd)/../target/${{ matrix.target }}/release/libcolecto_ffi.so" \
-                flutter build linux --release --build-name="$VERSION"
+                flutter build linux --release --dart-define=COLECTO_BACKEND=ffi --build-name="$VERSION"
               ;;
             windows)
               COLECTO_FFI_LIB="$(pwd)/../target/${{ matrix.target }}/release/colecto_ffi.dll" \
-                flutter build windows --release --build-name="$VERSION"
+                flutter build windows --release --dart-define=COLECTO_BACKEND=ffi --build-name="$VERSION"
               ;;
             macos)
               COLECTO_FFI_LIB="$(pwd)/../target/${{ matrix.target }}/release/libcolecto_ffi.dylib" \
-                flutter build macos --release --build-name="$VERSION"
+                flutter build macos --release --dart-define=COLECTO_BACKEND=ffi --build-name="$VERSION"
               ;;
           esac
 
@@ -296,7 +296,7 @@ jobs:
           VERSION: ${{ needs.version.outputs.number }}
         run: |
           flutter pub get
-          flutter build apk --release --target-platform ${{ matrix.flutter_platform }} --build-name="$VERSION"
+          flutter build apk --release --dart-define=COLECTO_BACKEND=ffi --target-platform ${{ matrix.flutter_platform }} --build-name="$VERSION"
 
       - name: Save Gradle downloads
         if: github.ref == 'refs/heads/main' && matrix.arch == 'arm64' && steps.gradle.outputs.cache-hit != 'true'

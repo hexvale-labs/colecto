@@ -412,11 +412,14 @@ class ColectoSelect<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = ColectoPalette.of(context);
+    final matched = options.any((o) => o.$1 == value);
+    final selectedValue = matched ? value : null;
     final current = options.where((o) => o.$1 == value).firstOrNull?.$2 ?? '';
     switch (colectoPlatformStyle(context)) {
       case ColectoPlatformStyle.desktop:
         return shad.ShadSelect<T>(
-          initialValue: value,
+          key: ValueKey(selectedValue),
+          initialValue: selectedValue,
           minWidth: minWidth,
           enabled: onChanged != null,
           onChanged: (v) {
@@ -433,7 +436,7 @@ class ColectoSelect<T> extends StatelessWidget {
         return ConstrainedBox(
           constraints: BoxConstraints(minWidth: minWidth),
           child: fl.ComboBox<T>(
-            value: value,
+            value: selectedValue,
             items: [
               for (final o in options)
                 fl.ComboBoxItem<T>(value: o.$1, child: Text(o.$2)),
@@ -451,7 +454,7 @@ class ColectoSelect<T> extends StatelessWidget {
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: mac.MacosPopupButton<T>(
-            value: value,
+            value: selectedValue,
             items: [
               for (final o in options)
                 mac.MacosPopupMenuItem<T>(value: o.$1, child: Text(o.$2)),

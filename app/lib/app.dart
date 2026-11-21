@@ -76,16 +76,26 @@ class ColectoApp extends StatelessWidget {
           ),
           // `Preferences.font_size` (13–18 px, 14 default) scales every
           // label with the system text size rather than replacing it.
+          // `_Zoom` wraps the `Builder` so the inner `MediaQuery` inherits
+          // `_Zoom`'s scaled `size`, `padding`, and `viewInsets`.
           builder: (context, child) {
-            final mq = MediaQuery.of(context);
             final factor = (prefs.fontSize ?? 14) / 14;
-            final zoomed = MediaQuery(
-              data: mq.copyWith(
-                textScaler: TextScaler.linear(mq.textScaler.scale(1) * factor),
+            return _Zoom(
+              factor: controller.zoom,
+              child: Builder(
+                builder: (zoomedCtx) {
+                  final mq = MediaQuery.of(zoomedCtx);
+                  return MediaQuery(
+                    data: mq.copyWith(
+                      textScaler: factor == 1
+                          ? mq.textScaler
+                          : TextScaler.linear(mq.textScaler.scale(1) * factor),
+                    ),
+                    child: ColectoDesignScope(child: child!),
+                  );
+                },
               ),
-              child: ColectoDesignScope(child: child!),
             );
-            return _Zoom(factor: controller.zoom, child: zoomed);
           },
           home: MailShell(controller: controller),
         );

@@ -23,18 +23,14 @@ class RemoteHttpBackend implements MailBackend {
        _token = token.trim(),
        _client = client ?? http.Client();
 
-  String _baseUrl;
-  String _token;
+  final String _baseUrl;
+  final String _token;
   final http.Client _client;
+  final Set<http.Client> _activeStreamClients = {};
   bool _disposed = false;
 
   String get baseUrl => _baseUrl;
   String get token => _token;
-
-  void configure({required String baseUrl, required String token}) {
-    _baseUrl = _normalizeBaseUrl(baseUrl);
-    _token = token.trim();
-  }
 
   static String _normalizeBaseUrl(String value) {
     final trimmed = value.trim();
@@ -128,27 +124,47 @@ class RemoteHttpBackend implements MailBackend {
     return decoded;
   }
 
+  Map<String, dynamic> _asMap(dynamic data, String context) {
+    if (data is Map<String, dynamic>) return data;
+    throw MailBackendException(
+      'Unexpected response for $context.',
+      category: 'server',
+    );
+  }
+
+  List<dynamic> _asList(dynamic data, String context) {
+    if (data is List<dynamic>) return data;
+    throw MailBackendException(
+      'Unexpected response for $context.',
+      category: 'server',
+    );
+  }
+
   @override
   Future<VersionInfo> version() async {
     final data = await _request('GET', '/version');
-    return VersionInfo.fromJson(data as Map<String, dynamic>);
+    return VersionInfo.fromJson(_asMap(data, 'version'));
   }
 
   @override
   Future<ReleaseStatus> latestRelease() async {
     final data = await _request('GET', '/releases/latest');
-    return ReleaseStatus.fromJson(data as Map<String, dynamic>);
+    return ReleaseStatus.fromJson(_asMap(data, 'latest release'));
   }
 
   @override
   Stream<ServiceEvent> events({bool window = true}) {
     late StreamController<ServiceEvent> controller;
     var cancelled = false;
+    http.Client? liveClient;
 
     Future<void> pump() async {
       var backoffMs = 1000;
       while (!cancelled && !_disposed) {
         final streamClient = http.Client();
+        liveClient = streamClient;
+        _activeStreamClients.add(streamClient);
+        var stopReconnecting = false;
         try {
           final req = http.Request(
             'GET',
@@ -157,6 +173,14 @@ class RemoteHttpBackend implements MailBackend {
           req.headers.addAll(_headers());
           req.headers['Accept'] = 'text/event-stream';
           final response = await streamClient.send(req);
+          if (response.statusCode == 401 || response.statusCode == 403) {
+            stopReconnecting = true;
+            throw MailBackendException(
+              'SSE stream unauthorized (HTTP ${response.statusCode})',
+              category: 'authentication',
+              statusCode: response.statusCode,
+            );
+          }
           if (response.statusCode != 200) {
             throw MailBackendException(
               'SSE stream refused (HTTP ${response.statusCode})',
@@ -185,11 +209,13 @@ class RemoteHttpBackend implements MailBackend {
             }
           }
         } catch (_) {
-          // Reconnect with exponential backoff below.
+          // Reconnect with exponential backoff unless auth failed.
         } finally {
+          _activeStreamClients.remove(streamClient);
+          if (identical(liveClient, streamClient)) liveClient = null;
           streamClient.close();
         }
-        if (cancelled || _disposed) break;
+        if (cancelled || _disposed || stopReconnecting) break;
         await Future<void>.delayed(Duration(milliseconds: backoffMs));
         backoffMs = (backoffMs * 2).clamp(1000, 30000);
       }
@@ -197,10 +223,13 @@ class RemoteHttpBackend implements MailBackend {
 
     controller = StreamController<ServiceEvent>.broadcast(
       onListen: () {
+        cancelled = false;
         unawaited(pump());
       },
       onCancel: () {
         cancelled = true;
+        liveClient?.close();
+        liveClient = null;
       },
     );
     return controller.stream;
@@ -256,27 +285,27 @@ class RemoteHttpBackend implements MailBackend {
   @override
   Future<Preferences> getPreferences() async {
     final data = await _request('GET', '/preferences');
-    return Preferences.fromJson(data as Map<String, dynamic>);
+    return Preferences.fromJson(_asMap(data, 'preferences'));
   }
 
   @override
   Future<Preferences> updatePreferences(PreferencesPatch patch) async {
     final data = await _request('POST', '/preferences', body: patch.toJson());
-    return Preferences.fromJson(data as Map<String, dynamic>);
+    return Preferences.fromJson(_asMap(data, 'preferences'));
   }
 
   @override
   Future<List<AccountInfo>> listAccounts() async {
-    final data = await _request('GET', '/accounts') as List<dynamic>;
+    final data = _asList(await _request('GET', '/accounts'), 'accounts');
     return data
-        .map((e) => AccountInfo.fromJson(e as Map<String, dynamic>))
+        .map((e) => AccountInfo.fromJson(_asMap(e, 'account')))
         .toList(growable: false);
   }
 
   @override
   Future<AccountInfo> upsertAccount(AccountInput input) async {
     final data = await _request('POST', '/accounts', body: input.toJson());
-    return AccountInfo.fromJson(data as Map<String, dynamic>);
+    return AccountInfo.fromJson(_asMap(data, 'account'));
   }
 
   @override
@@ -287,7 +316,7 @@ class RemoteHttpBackend implements MailBackend {
       body: {'address': address},
     );
     if (data == null) return null;
-    return DiscoveryResult.fromJson(data as Map<String, dynamic>);
+    return DiscoveryResult.fromJson(_asMap(data, 'discovery'));
   }
 
   @override
@@ -336,32 +365,33 @@ class RemoteHttpBackend implements MailBackend {
 
   @override
   Future<List<AccountSync>> syncStatus() async {
-    final data = await _request('GET', '/sync') as List<dynamic>;
+    final data = _asList(await _request('GET', '/sync'), 'sync status');
     return data
-        .map((e) => AccountSync.fromJson(e as Map<String, dynamic>))
+        .map((e) => AccountSync.fromJson(_asMap(e, 'sync status')))
         .toList(growable: false);
   }
 
   @override
   Future<List<Folder>> folders(String account) async {
-    final data =
-        await _request('GET', '/folders', account: account) as List<dynamic>;
+    final data = _asList(
+      await _request('GET', '/folders', account: account),
+      'folders',
+    );
     return data
-        .map((e) => Folder.fromJson(e as Map<String, dynamic>))
+        .map((e) => Folder.fromJson(_asMap(e, 'folder')))
         .toList(growable: false);
   }
 
   @override
   Future<LabelMap> labels(String account) async {
-    final data = await _request(
-      'GET',
-      '/labels',
-      account: account,
-    ) as Map<String, dynamic>;
+    final data = _asMap(
+      await _request('GET', '/labels', account: account),
+      'labels',
+    );
     return data.map(
       (k, v) => MapEntry(
         k,
-        (v as List<dynamic>).map((e) => e.toString()).toList(growable: false),
+        _asList(v, 'label $k').map((e) => e.toString()).toList(growable: false),
       ),
     );
   }
@@ -373,16 +403,19 @@ class RemoteHttpBackend implements MailBackend {
     String? messageId,
     bool remove = false,
   }) async {
-    final data = await _request(
-      'POST',
-      '/labels',
-      account: account,
-      body: {'name': name, 'message_id': ?messageId, 'remove': remove},
-    ) as Map<String, dynamic>;
+    final data = _asMap(
+      await _request(
+        'POST',
+        '/labels',
+        account: account,
+        body: {'name': name, 'message_id': ?messageId, 'remove': remove},
+      ),
+      'labels',
+    );
     return data.map(
       (k, v) => MapEntry(
         k,
-        (v as List<dynamic>).map((e) => e.toString()).toList(growable: false),
+        _asList(v, 'label $k').map((e) => e.toString()).toList(growable: false),
       ),
     );
   }
@@ -404,7 +437,7 @@ class RemoteHttpBackend implements MailBackend {
         if (offset > 0) 'offset': '$offset',
       },
     );
-    return MailSnapshot.fromJson(data as Map<String, dynamic>);
+    return MailSnapshot.fromJson(_asMap(data, 'cached messages'));
   }
 
   @override
@@ -414,19 +447,22 @@ class RemoteHttpBackend implements MailBackend {
     String query = '',
     int offset = 0,
   }) async {
-    final data = await _request(
-      'POST',
-      '/messages/refresh',
-      account: account,
-      query: {
-        'folder': folder,
-        if (query.isNotEmpty) 'q': query,
-        if (offset > 0) 'offset': '$offset',
-      },
-      body: const <String, dynamic>{},
-    ) as List<dynamic>;
+    final data = _asList(
+      await _request(
+        'POST',
+        '/messages/refresh',
+        account: account,
+        query: {
+          'folder': folder,
+          if (query.isNotEmpty) 'q': query,
+          if (offset > 0) 'offset': '$offset',
+        },
+        body: const <String, dynamic>{},
+      ),
+      'messages',
+    );
     return data
-        .map((e) => MailMessage.fromJson(e as Map<String, dynamic>))
+        .map((e) => MailMessage.fromJson(_asMap(e, 'message')))
         .toList(growable: false);
   }
 
@@ -468,10 +504,15 @@ class RemoteHttpBackend implements MailBackend {
     final uri = _uri(
       '/messages/${Uri.encodeComponent(messageId)}/attachments/$index',
     );
-    final response = await _client.get(
-      uri,
-      headers: _headers(account: account),
-    );
+    final http.Response response;
+    try {
+      response = await _client.get(uri, headers: _headers(account: account));
+    } catch (_) {
+      throw MailBackendException(
+        'Cannot reach Colecto daemon at $_baseUrl to download attachment.',
+        category: 'network',
+      );
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw MailBackendException(
         'Attachment download failed (HTTP ${response.statusCode})',
@@ -479,16 +520,32 @@ class RemoteHttpBackend implements MailBackend {
       );
     }
     final disposition = response.headers['content-disposition'] ?? '';
-    final match = RegExp(r"filename\*=UTF-8''([^;]+)").firstMatch(disposition);
-    final name = match != null
-        ? Uri.decodeComponent(match.group(1)!)
-        : 'attachment-$index';
+    final name = _parseFilename(disposition, 'attachment-$index');
     return DownloadedAttachment(
       name: name,
       contentType:
           response.headers['content-type'] ?? 'application/octet-stream',
       bytes: response.bodyBytes,
     );
+  }
+
+  static String _parseFilename(String disposition, String fallback) {
+    final ext = RegExp(
+      r"filename\*=UTF-8''([^;]+)",
+      caseSensitive: false,
+    ).firstMatch(disposition);
+    if (ext != null) {
+      try {
+        final decoded = Uri.decodeComponent(ext.group(1)!.trim());
+        if (decoded.isNotEmpty) return decoded;
+      } catch (_) {}
+    }
+    final basic = RegExp(
+      r'filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;\s]+)',
+      caseSensitive: false,
+    ).firstMatch(disposition);
+    final raw = (basic?.group(1) ?? basic?.group(2))?.trim();
+    return raw != null && raw.isNotEmpty ? raw : fallback;
   }
 
   @override
@@ -729,6 +786,10 @@ class RemoteHttpBackend implements MailBackend {
   @override
   void dispose() {
     _disposed = true;
+    for (final c in _activeStreamClients.toList()) {
+      c.close();
+    }
+    _activeStreamClients.clear();
     _client.close();
   }
 }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../data/platform/os_notify.dart';
 import '../../../data/repositories/in_memory_mail_backend.dart';
 import '../../../data/repositories/local_ffi_backend.dart';
 import '../../../data/repositories/mail_backend.dart';
@@ -110,8 +111,18 @@ class MailController extends ChangeNotifier {
   String _daemonToken;
 
   StreamSubscription<ServiceEvent>? _eventSub;
+  bool _eventsConnectedOnce = false;
+  bool _disposed = false;
+  int _mailboxEpoch = 0;
+  int _threadEpoch = 0;
   int _toastSeq = 0;
   final Map<int, Timer> _toastTimers = {};
+
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
+  }
 
   // Global UI state
   ThemeMode _themeMode = ThemeMode.system;
@@ -214,8 +225,7 @@ class MailController extends ChangeNotifier {
     await updatePreferences(PreferencesPatch(zoom: percent));
     // One zoom notice that updates, not a stack of them.
     if (_zoomToast != null) dismissToast(_zoomToast!);
-    showToast('Zoom $percent%');
-    _zoomToast = _toastSeq;
+    _zoomToast = showToast('Zoom $percent%');
   }
 
   Future<void> zoomIn() {
@@ -353,8 +363,8 @@ class MailController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void showToast(String message, {bool isError = false, String? detail}) {
-    if (!_preferences.notifications.enabled && !isError) return;
+  int? showToast(String message, {bool isError = false, String? detail}) {
+    if (!_preferences.notifications.enabled && !isError) return null;
     final id = ++_toastSeq;
     _toasts.add(
       ColectoToast(id: id, message: message, detail: detail, isError: isError),
@@ -365,6 +375,7 @@ class MailController extends ChangeNotifier {
     }
     notifyListeners();
     _armToast(id);
+    return id;
   }
 
   // Notifications leave after six seconds unless hovered.
@@ -473,28 +484,45 @@ class MailController extends ChangeNotifier {
   Future<void> _loadBackgroundMetadata() async {
     try {
       _releaseStatus = await _backend.latestRelease();
+    } catch (_) {}
+    try {
       _sendRequests = await _backend.listSendRequests();
-      _aiSettings = await _backend.aiSettings(account: _activeAccount);
-      notifyListeners();
-    } catch (_) {
-      // Non-critical metadata failures are ignored on boot.
+    } catch (_) {}
+    if (_activeAccount.isNotEmpty) {
+      try {
+        _aiSettings = await _backend.aiSettings(account: _activeAccount);
+      } catch (_) {}
     }
+    notifyListeners();
   }
 
   void _subscribeEvents() {
     _eventSub?.cancel();
+    _eventsConnectedOnce = false;
     _eventSub = _backend.events(window: true).listen(_handleServiceEvent);
   }
 
   void _handleServiceEvent(ServiceEvent event) {
     switch (event) {
       case ReadyServiceEvent():
-        break;
+        if (_eventsConnectedOnce) {
+          unawaited(loadMailbox(refresh: false));
+        } else {
+          _eventsConnectedOnce = true;
+        }
       case ResyncServiceEvent():
         unawaited(loadMailbox(refresh: false));
-      case MailServiceEvent(:final account):
+      case MailServiceEvent(:final account, :final ids):
         if (account == _activeAccount) {
           unawaited(loadMailbox(refresh: false));
+        }
+        if (_preferences.notifications.system && ids.isNotEmpty) {
+          unawaited(
+            sendOsNotification(
+              title: 'New mail',
+              body: '${_plural(ids.length, 'new message')} arrived.',
+            ),
+          );
         }
       case SyncServiceEvent(:final sync):
         _syncByAccount = {..._syncByAccount, sync.account: sync};
@@ -505,6 +533,14 @@ class MailController extends ChangeNotifier {
           'Approval requested',
           detail: '$from wants to send “$subject”.',
         );
+        if (_preferences.notifications.system) {
+          unawaited(
+            sendOsNotification(
+              title: 'Approval requested',
+              body: '$from wants to send “$subject”.',
+            ),
+          );
+        }
       case NavigateServiceEvent(:final target, :final account):
         if (account.isNotEmpty &&
             account != _activeAccount &&
@@ -591,7 +627,12 @@ class MailController extends ChangeNotifier {
     _searchQuery = '';
     _selectedMessageId = null;
     _conversation = const [];
+    _contentCache.clear();
+    _loadingContentIds.clear();
+    _summaries.clear();
+    _loadingSummaryIds.clear();
     _bulkSelectedIds.clear();
+    _threadEpoch++;
     notifyListeners();
     unawaited(updatePreferences(PreferencesPatch(account: accountId)));
     await loadMailbox(refresh: false);
@@ -632,36 +673,62 @@ class MailController extends ChangeNotifier {
   }
 
   Future<void> loadMailbox({bool refresh = true}) async {
+    final epoch = ++_mailboxEpoch;
+    final account = _activeAccount;
+    final folder = _activeFolder;
+    final label = _activeLabel;
+    final query = _searchQuery;
+    if (account.isEmpty) {
+      _folders = const [];
+      _labels = const {};
+      _messages = const [];
+      _threads = const [];
+      _drafts = const [];
+      _refreshing = false;
+      notifyListeners();
+      return;
+    }
     _refreshing = true;
     _error = null;
     notifyListeners();
     try {
-      _folders = await _backend.folders(_activeAccount);
-      _labels = await _backend.labels(_activeAccount);
+      final folders = await _backend.folders(account);
+      if (epoch != _mailboxEpoch) return;
+      final labels = await _backend.labels(account);
+      if (epoch != _mailboxEpoch) return;
 
-      if (_activeFolder == 'drafts' && _activeLabel == null) {
-        _drafts = await _backend.drafts(_activeAccount);
+      if (folder == 'drafts' && label == null) {
+        final drafts = await _backend.drafts(account);
+        if (epoch != _mailboxEpoch) return;
+        _folders = folders;
+        _labels = labels;
+        _drafts = drafts;
         _messages = const [];
         _threads = const [];
       } else {
+        final List<MailMessage> messages;
         if (refresh) {
-          _messages = await _backend.refreshMessages(
-            _activeAccount,
-            folder: _activeFolder,
-            query: _searchQuery,
+          messages = await _backend.refreshMessages(
+            account,
+            folder: folder,
+            query: query,
           );
         } else {
           final snap = await _backend.cachedMessages(
-            _activeAccount,
-            folder: _activeFolder,
-            query: _searchQuery,
+            account,
+            folder: folder,
+            query: query,
           );
-          _messages = snap.messages;
+          messages = snap.messages;
         }
-        var visible = _messages;
-        if (_activeLabel != null) {
-          final allowed = (_labels[_activeLabel!] ?? const <String>[]).toSet();
-          visible = _messages
+        if (epoch != _mailboxEpoch) return;
+        _folders = folders;
+        _labels = labels;
+        _messages = messages;
+        var visible = messages;
+        if (label != null) {
+          final allowed = (labels[label] ?? const <String>[]).toSet();
+          visible = messages
               .where((m) => allowed.contains(m.id))
               .toList(growable: false);
         }
@@ -670,23 +737,30 @@ class MailController extends ChangeNotifier {
       _syncedAt = DateTime.now();
       await _loadSyncStatus();
     } on MailBackendException catch (e) {
+      if (epoch != _mailboxEpoch) return;
       if (e.isAuthRequired) _authRequired = true;
       _error = e.message;
       showToast(e.message, isError: true);
     } finally {
-      _refreshing = false;
-      notifyListeners();
+      if (epoch == _mailboxEpoch) {
+        _refreshing = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> selectThread(ConversationThread thread) async {
+    final epoch = ++_threadEpoch;
+    final account = _activeAccount;
     final latest = thread.latest;
     _selectedMessageId = latest.id;
     _compose = null;
     notifyListeners();
 
     try {
-      _conversation = await _backend.conversation(_activeAccount, latest.id);
+      final conversation = await _backend.conversation(account, latest.id);
+      if (epoch != _threadEpoch || account != _activeAccount) return;
+      _conversation = conversation;
       notifyListeners();
       for (final tm in _conversation) {
         unawaited(loadMessageContent(tm.message.id));
@@ -702,11 +776,12 @@ class MailController extends ChangeNotifier {
       }
       unawaited(loadSummary(latest.id));
     } on MailBackendException catch (e) {
-      showToast(e.message, isError: true);
+      if (epoch == _threadEpoch) showToast(e.message, isError: true);
     }
   }
 
   void clearSelection() {
+    _threadEpoch++;
     _selectedMessageId = null;
     _conversation = const [];
     notifyListeners();
@@ -730,6 +805,7 @@ class MailController extends ChangeNotifier {
     bool? remoteImages,
     bool force = false,
   }) async {
+    final account = _activeAccount;
     if (!force &&
         remoteImages == null &&
         _contentCache.containsKey(messageId)) {
@@ -739,16 +815,19 @@ class MailController extends ChangeNotifier {
     notifyListeners();
     try {
       final content = await _backend.messageContent(
-        _activeAccount,
+        account,
         messageId,
         remoteImages: remoteImages,
       );
+      if (account != _activeAccount) return;
       _contentCache[messageId] = content;
     } on MailBackendException catch (e) {
-      showToast(e.message, isError: true);
+      if (account == _activeAccount) showToast(e.message, isError: true);
     } finally {
-      _loadingContentIds.remove(messageId);
-      notifyListeners();
+      if (account == _activeAccount) {
+        _loadingContentIds.remove(messageId);
+        notifyListeners();
+      }
     }
   }
 
@@ -912,8 +991,23 @@ class MailController extends ChangeNotifier {
     try {
       await _backend.removeAccount(id);
       await reloadAccounts();
-      if (_activeAccount == id && enabledAccounts.isNotEmpty) {
-        await selectAccount(enabledAccounts.first.id);
+      if (_activeAccount == id) {
+        if (enabledAccounts.isNotEmpty) {
+          await selectAccount(enabledAccounts.first.id);
+        } else {
+          _activeAccount = '';
+          _folders = const [];
+          _labels = const {};
+          _messages = const [];
+          _threads = const [];
+          _drafts = const [];
+          _selectedMessageId = null;
+          _conversation = const [];
+          _contentCache.clear();
+          _summaries.clear();
+          _bulkSelectedIds.clear();
+          notifyListeners();
+        }
       }
       showToast('Account removed');
     } on MailBackendException catch (e) {
@@ -1117,6 +1211,7 @@ class MailController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _heldToasts.clear();
     for (final timer in _toastTimers.values) {
       timer.cancel();
