@@ -31,9 +31,12 @@ account. Saving settings does not verify the provider connection: open Inbox to
 check it. Connection errors keep local drafts available.
 
 Passwords/tokens persist as authenticated ciphertext, protected by a random key
-in your operating system credential store: macOS Keychain, Windows Credential
-Manager, or a running Secret Service on Linux. Linux builds
-need `libdbus-1-dev`. If the store is missing or locked, Colecto reports an error;
+in your operating system credential store: macOS/iOS Keychain, Windows Credential
+Manager, a running Secret Service on Linux, or Android Keystore in the Android app
+(an AES-256-GCM wrapping key in `AndroidKeyStore` protecting atomic entry files in
+`noBackupFilesDir/colecto-secrets`). Linux builds
+need `libdbus-1-dev`. If the store is missing or locked, Colecto reports an error and
+the account wizard offers setting a master password inline;
 there is no plaintext fallback. Account management requires the local trusted
 Host; it is not a hosted multi-user authentication system.
 
@@ -331,7 +334,7 @@ This is the recovery path for a forgotten password, not password recovery.
 The implementation follows the official [keyring API](https://docs.rs/keyring/3.6.3/keyring/),
 [Argon2 API](https://docs.rs/argon2/0.5.3/argon2/), and
 [authenticated encryption API](https://docs.rs/chacha20poly1305/0.10.1/chacha20poly1305/).
-OS-keychain behavior on macOS/Windows, live provider connections, and real phone
+OS-keychain behavior on macOS/Windows, Android Keystore, live provider connections, and real phone
 interaction require platform testing; automated tests use an injected credential
 store or a password vault with sample connection settings.
 

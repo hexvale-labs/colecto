@@ -307,10 +307,18 @@ impl Vault {
         self.sync_directory()?;
         let mut key = Zeroizing::new([0u8; 32]);
         OsRng.fill_bytes(key.as_mut());
-        self.backend.set(
+        if let Err(error) = self.backend.set(
             &id,
             &Zeroizing::new(serde_json::to_string(&*key).map_err(storage)?),
-        )?;
+        ) {
+            let _ = self.backend.delete(&id);
+            let mut reverted = self.state.clone();
+            reverted.cleanup.retain(|entry| entry != &id);
+            if self.write(&reverted).is_ok() {
+                self.state = reverted;
+            }
+            return Err(error);
+        }
         let Mode::Password {
             nonce, ciphertext, ..
         } = seal(secrets, accounts, &key, [0; 16])?
