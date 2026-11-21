@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:colecto/app.dart';
 import 'package:colecto/ui/core/theme/colecto_palette.dart';
 import 'package:colecto/ui/features/shell/mail_controller.dart';
 
@@ -74,5 +75,41 @@ void main() {
         },
       );
     }
+
+    testWidgets(
+      'phone layout does not crash before folders load on Material or Cupertino',
+      (tester) async {
+        for (final design in const [
+          ColectoPlatformStyle.android,
+          ColectoPlatformStyle.ios,
+        ]) {
+          tester.view.physicalSize = const Size(390, 844);
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(tester.view.reset);
+          // Uninitialized controller has empty folders list.
+          final c = MailController()..previewDesign(design);
+          addTearDown(c.dispose);
+          await tester.pumpWidget(ColectoApp(controller: c));
+          await tester.pump();
+          expect(tester.takeException(), isNull);
+        }
+      },
+    );
+
+    testWidgets('whole-interface zoom scales inner MediaQuery size', (
+      tester,
+    ) async {
+      final c = await pumpColectoApp(
+        tester,
+        size: const Size(1280, 800),
+        design: ColectoPlatformStyle.desktop,
+      );
+      await c.zoomIn(); // 110%
+      await tester.pumpAndSettle();
+      final innerCtx = tester.element(find.text('Colecto').first);
+      final scaledSize = MediaQuery.sizeOf(innerCtx);
+      expect(scaledSize.width, closeTo(1280 / 1.1, 1.0));
+      expect(scaledSize.height, closeTo(800 / 1.1, 1.0));
+    });
   });
 }

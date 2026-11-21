@@ -172,9 +172,7 @@ class _MailShellState extends State<MailShell> {
         c.organizeMessages('flags', ids: ids, seen: false);
       case LogicalKeyboardKey.keyS:
         c.organizeMessages('flags', ids: [msg.id], flagged: !msg.flagged);
-      case LogicalKeyboardKey.delete ||
-          LogicalKeyboardKey.backspace ||
-          LogicalKeyboardKey.numberSign:
+      case LogicalKeyboardKey.delete || LogicalKeyboardKey.numberSign:
         c.organizeMessages('delete', ids: ids);
       case LogicalKeyboardKey.digit3 when shift:
         c.organizeMessages('delete', ids: ids);
@@ -720,12 +718,11 @@ class _PhoneShellState extends State<_PhoneShell> {
       _drop(old);
       _composerKey = c.composeKey;
       final r = _route(
-        ComposerView(
-          key: ValueKey('compose-${c.composeKey}'),
+        _PhoneComposerPage(
+          composeKey: c.composeKey,
           controller: c,
           request: c.compose!,
           onClose: c.closeCompose,
-          phone: true,
         ),
         sheet: true,
       );
@@ -937,47 +934,53 @@ class _PhoneShellState extends State<_PhoneShell> {
       (LucideIcons.ellipsis, 'More', c.pendingApprovalCount),
     ];
 
-    final Widget bottom = switch (style) {
-      ColectoPlatformStyle.ios => CupertinoTabBar(
-        currentIndex: index,
-        onTap: onTab,
-        activeColor: p.accent,
-        inactiveColor: p.ink3,
-        backgroundColor: p.bg.withValues(alpha: 0.86),
-        border: Border(top: BorderSide(color: p.lineSoft, width: 0.5)),
-        items: [
-          for (final d in destinations)
-            BottomNavigationBarItem(
-              icon: Badge(
-                isLabelVisible: d.$3 > 0,
-                backgroundColor: p.accent,
-                smallSize: 7,
-                child: Icon(d.$1),
-              ),
-              label: d.$2,
+    final Widget? bottom = destinations.length < 2
+        ? null
+        : switch (style) {
+            ColectoPlatformStyle.ios => CupertinoTabBar(
+              currentIndex: index,
+              onTap: onTab,
+              activeColor: p.accent,
+              inactiveColor: p.ink3,
+              backgroundColor: p.bg.withValues(alpha: 0.86),
+              border: Border(top: BorderSide(color: p.lineSoft, width: 0.5)),
+              items: [
+                for (final d in destinations)
+                  BottomNavigationBarItem(
+                    icon: Badge(
+                      isLabelVisible: d.$3 > 0,
+                      backgroundColor: p.accent,
+                      smallSize: 7,
+                      child: Icon(d.$1),
+                    ),
+                    label: d.$2,
+                  ),
+              ],
             ),
-        ],
-      ),
-      ColectoPlatformStyle.android => NavigationBar(
-        selectedIndex: index,
-        onDestinationSelected: onTab,
-        backgroundColor: p.bg,
-        indicatorColor: p.select,
-        destinations: [
-          for (final d in destinations)
-            NavigationDestination(
-              icon: Badge(
-                isLabelVisible: d.$3 > 0,
-                label: Text('${d.$3}'),
-                child: Icon(d.$1, color: p.ink2),
-              ),
-              selectedIcon: Icon(d.$1, color: p.accentHi),
-              label: d.$2,
+            ColectoPlatformStyle.android => NavigationBar(
+              selectedIndex: index,
+              onDestinationSelected: onTab,
+              backgroundColor: p.bg,
+              indicatorColor: p.select,
+              destinations: [
+                for (final d in destinations)
+                  NavigationDestination(
+                    icon: Badge(
+                      isLabelVisible: d.$3 > 0,
+                      label: Text('${d.$3}'),
+                      child: Icon(d.$1, color: p.ink2),
+                    ),
+                    selectedIcon: Icon(d.$1, color: p.accentHi),
+                    label: d.$2,
+                  ),
+              ],
             ),
-        ],
-      ),
-      _ => _FolderBar(destinations: destinations, index: index, onTap: onTab),
-    };
+            _ => _FolderBar(
+              destinations: destinations,
+              index: index,
+              onTap: onTab,
+            ),
+          };
 
     return Scaffold(
       backgroundColor: p.bg,
@@ -1100,6 +1103,38 @@ class _PhoneReaderPage extends StatelessWidget {
             showBackButton: true,
             onBack: () => Navigator.of(context).maybePop(),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PhoneComposerPage extends StatelessWidget {
+  const _PhoneComposerPage({
+    required this.composeKey,
+    required this.controller,
+    required this.request,
+    required this.onClose,
+  });
+
+  final int composeKey;
+  final MailController controller;
+  final ComposeRequest request;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = ColectoPalette.of(context);
+    return Scaffold(
+      backgroundColor: p.bg,
+      body: SafeArea(
+        bottom: false,
+        child: ComposerView(
+          key: ValueKey('compose-$composeKey'),
+          controller: controller,
+          request: request,
+          onClose: onClose,
+          phone: true,
         ),
       ),
     );

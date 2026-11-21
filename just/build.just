@@ -15,11 +15,11 @@ release:
 # `design`: native (default), colecto, fluent, macos, material or cupertino.
 # Build the Flutter Web app (served by colecto-daemon via COLECTO_ASSETS).
 web design='native':
-    cd app && flutter build web --release --dart-define=COLECTO_DESIGN={{design}}
+    cd app && flutter build web --release --no-web-resources-cdn --dart-define=COLECTO_DESIGN={{design}}
 
 # Build the Flutter Web app targeting WebAssembly.
 wasm:
-    cd app && flutter build web --wasm --release
+    cd app && flutter build web --wasm --release --no-web-resources-cdn
 
 # Build the in-process FFI shared library (`libcolecto_ffi`).
 ffi:
@@ -27,7 +27,7 @@ ffi:
 
 # Build the Linux desktop Flutter app (with `libcolecto_ffi` bundled).
 linux: ffi
-    cd app && flutter build linux --release
+    cd app && flutter build linux --release --dart-define=COLECTO_BACKEND=ffi
 
 # Build the colecto-daemon Docker image (bundles app/build/web when present).
 docker tag='colecto-daemon:local':

@@ -32,10 +32,13 @@ class _AiSettingsTabState extends State<AiSettingsTab> {
   RuleField _ruleField = RuleField.any;
   PreviewResult? _previewResult;
 
+  AiSettings? _seeded;
+
   @override
   void initState() {
     super.initState();
     final s = widget.controller.aiSettings.settings;
+    _seeded = s;
     _textUrlCtrl = TextEditingController(text: s.text.baseUrl);
     _textModelCtrl = TextEditingController(text: s.text.model);
     _textMaxTokensCtrl = TextEditingController(text: '${s.text.maxTokens}');
@@ -44,10 +47,35 @@ class _AiSettingsTabState extends State<AiSettingsTab> {
     _decModelCtrl = TextEditingController(text: s.decision.model);
     _decKeyCtrl = TextEditingController();
     _timeoutCtrl = TextEditingController(text: '${s.timeoutSeconds}');
+    widget.controller.addListener(_syncFromController);
+  }
+
+  void _syncFromController() {
+    final s = widget.controller.aiSettings.settings;
+    final prev = _seeded;
+    if (identical(s, prev)) return;
+    _seeded = s;
+    void sync(TextEditingController ctrl, String oldVal, String newVal) {
+      if (ctrl.text == oldVal && ctrl.text != newVal) {
+        ctrl.text = newVal;
+      }
+    }
+
+    sync(_textUrlCtrl, prev?.text.baseUrl ?? '', s.text.baseUrl);
+    sync(_textModelCtrl, prev?.text.model ?? '', s.text.model);
+    sync(
+      _textMaxTokensCtrl,
+      '${prev?.text.maxTokens ?? 1024}',
+      '${s.text.maxTokens}',
+    );
+    sync(_decUrlCtrl, prev?.decision.baseUrl ?? '', s.decision.baseUrl);
+    sync(_decModelCtrl, prev?.decision.model ?? '', s.decision.model);
+    sync(_timeoutCtrl, '${prev?.timeoutSeconds ?? 120}', '${s.timeoutSeconds}');
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_syncFromController);
     _textUrlCtrl.dispose();
     _textModelCtrl.dispose();
     _textMaxTokensCtrl.dispose();

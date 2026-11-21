@@ -63,7 +63,9 @@ class _ReaderPaneState extends State<ReaderPane> {
     _plain = false;
     _aiReplyOpen = false;
     _copied = false;
-    if (_scroll.hasClients) _scroll.jumpTo(0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
+    });
   }
 
   @override

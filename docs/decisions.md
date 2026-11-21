@@ -28,6 +28,7 @@ Before building all screens, validate these two technical risks first:
 1. **Linux (Wayland) HTML Email WebView Spike:**
    - Flutter's official `webview_flutter` does not support Linux.
    - Verify an embedded sandboxed HTML email renderer on Linux/Wayland (and Android/Web) inside a scrollable conversation view, supporting dynamic content height, remote-image blocking, and external link interception.
+   - *Interim status:* Web renders sanitized HTML inside a real `<iframe sandbox>` (`html_message_iframe_web.dart`), while Desktop and Mobile currently render Rust-sanitized HTML natively via `NativeSanitizedHtmlView` (zero WebView RAM) until a pooled cross-platform WebView is wired in.
 2. **`flutter_rust_bridge` + `colecto-core` Skeleton Spike:**
    - Wire `colecto-service` into `colecto-ffi` (account list + folder/message fetch + event stream), generate Dart bindings with `frb_codegen`, and verify builds on Linux desktop, Android, and Flutter Web (talking to `colecto-daemon` over HTTP/SSE).
 
@@ -37,7 +38,7 @@ Before building all screens, validate these two technical risks first:
   - All local state lives inside a single Turso/SQLite database (`colecto.db`, default data directory `.colecto`) tagged with `PRAGMA application_id = 0x434F_4C45` (`"COLE"`) and versioned via forward-only `PRAGMA user_version` migrations (`crates/colecto-core/migrations/`).
   - Never edit a shipped migration; every future schema change adds the next numbered migration. Before applying a newer schema version to an existing database, `colecto-core` creates a pre-migration backup under `backups/v<N>-<timestamp>.db` (retaining the 5 newest backups) and rolls back on failure.
   - Owner and AI settings live in the sparse `settings(scope, key, value)` table (only changed keys are stored; defaults live in code). Structured entities (`drafts`, `labels`, `label_messages`, `api_keys`, `send_approvals`, `ai_summaries`, `ai_autolabel_seen`, mailbox caches) live in proper relational tables; `records` is reserved for atomic opaque documents such as `("core", "vault")`.
-  - **No sidecar config or token files:** Never write `colecto-settings.json`, `colecto-settings.json`, `preferences.json`, `daemon.json`, or `owner-token` files into the data directory.
+  - **No sidecar config or token files:** Never write `colecto-settings.json`, `preferences.json`, `daemon.json`, or `owner-token` files into the data directory.
 - **No database-at-rest email encryption:**
   - Cached email envelopes, bodies, drafts, and labels are stored unencrypted in `colecto.db` (relying on OS filesystem/disk encryption and `0700` directory permissions).
   - Account passwords, JMAP tokens, and AI API keys remain sealed in the XChaCha20-Poly1305 credential vault (`("core", "vault")`) backed by the OS keychain or an Argon2id master password.

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:material_ui/material_ui.dart';
@@ -10,9 +11,10 @@ import '../theme/colecto_palette.dart';
 ///
 /// Renders structured blocks (headings, paragraphs, blockquotes, lists, code
 /// blocks, horizontal rules, inline bold/italic/code/links, and `data:`/`cid:`
-/// images) with **zero WebView RAM** and full `SelectionArea` support.
-/// External links open via the OS browser/mail handler (`openExternalUrl`).
-class NativeSanitizedHtmlView extends StatelessWidget {
+/// or opted-in remote images) with **zero WebView RAM**. Relies on the
+/// enclosing `ReaderPane` `SelectionArea` for text selection, caches parsed
+/// blocks, and disposes link [TapGestureRecognizer]s cleanly.
+class NativeSanitizedHtmlView extends StatefulWidget {
   const NativeSanitizedHtmlView({
     super.key,
     required this.html,
@@ -23,41 +25,77 @@ class NativeSanitizedHtmlView extends StatelessWidget {
   final String plainTextFallback;
 
   @override
+  State<NativeSanitizedHtmlView> createState() =>
+      _NativeSanitizedHtmlViewState();
+}
+
+class _NativeSanitizedHtmlViewState extends State<NativeSanitizedHtmlView> {
+  late List<_HtmlBlock> _blocks;
+  final List<TapGestureRecognizer> _recognizers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _blocks = _parseBlocks(widget.html);
+  }
+
+  @override
+  void didUpdateWidget(NativeSanitizedHtmlView old) {
+    super.didUpdateWidget(old);
+    if (old.html != widget.html) {
+      _blocks = _parseBlocks(widget.html);
+    }
+  }
+
+  void _disposeRecognizers() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+  }
+
+  @override
+  void dispose() {
+    _disposeRecognizers();
+    super.dispose();
+  }
+
+  TapGestureRecognizer _linkRecognizer(String href) {
+    final recognizer = TapGestureRecognizer()
+      ..onTap = () => openExternalUrl(href);
+    _recognizers.add(recognizer);
+    return recognizer;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    _disposeRecognizers();
     final p = ColectoPalette.of(context);
     final baseStyle =
         Theme.of(context).textTheme.bodyMedium ??
         TextStyle(fontSize: 14, color: p.ink, height: 1.45);
-    final blocks = _parseBlocks(html);
 
-    if (blocks.isEmpty) {
-      return SelectionArea(
-        child: Text(
-          plainTextFallback.trim().isNotEmpty ? plainTextFallback : html,
-          style: baseStyle,
-        ),
+    if (_blocks.isEmpty) {
+      return Text(
+        widget.plainTextFallback.trim().isNotEmpty
+            ? widget.plainTextFallback
+            : widget.html,
+        style: baseStyle,
       );
     }
 
-    return SelectionArea(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0) const SizedBox(height: 8),
-            _buildBlock(context, p, baseStyle, blocks[i]),
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < _blocks.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _buildBlock(p, baseStyle, _blocks[i]),
         ],
-      ),
+      ],
     );
   }
 
-  Widget _buildBlock(
-    BuildContext context,
-    ColectoPalette p,
-    TextStyle baseStyle,
-    _HtmlBlock block,
-  ) {
+  Widget _buildBlock(ColectoPalette p, TextStyle baseStyle, _HtmlBlock block) {
     switch (block.kind) {
       case _BlockKind.hr:
         return Divider(height: 16, color: p.line);
@@ -97,7 +135,26 @@ class NativeSanitizedHtmlView extends StatelessWidget {
           ),
         );
       case _BlockKind.image:
-        final data = _decodeDataUri(block.src ?? '');
+        final src = block.src ?? '';
+        if (src.startsWith('http://') || src.startsWith('https://')) {
+          // Remote image URLs only survive Rust's sanitizer when the user
+          // explicitly allowed remote images.
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 380),
+              child: Image.network(
+                src,
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => Text(
+                  '[Image: ${block.raw.isNotEmpty ? block.raw : 'failed to load'}]',
+                  style: baseStyle.copyWith(color: p.ink3, fontSize: 12),
+                ),
+              ),
+            ),
+          );
+        }
+        final data = _decodeDataUri(src);
         if (data == null) {
           return Text(
             '[Image: ${block.raw.isNotEmpty ? block.raw : 'embedded'}]',
@@ -193,7 +250,10 @@ class NativeSanitizedHtmlView extends StatelessWidget {
         final attrs = match.group(3) ?? '';
         final src = _attr(attrs, 'src');
         final alt = _attr(attrs, 'alt') ?? '';
-        if (src != null && src.startsWith('data:image/')) {
+        if (src != null &&
+            (src.startsWith('data:image/') ||
+                src.startsWith('https://') ||
+                src.startsWith('http://'))) {
           blocks.add(_HtmlBlock(_BlockKind.image, alt, src: src));
         }
         continue;
@@ -231,7 +291,7 @@ class NativeSanitizedHtmlView extends StatelessWidget {
     return blocks;
   }
 
-  static List<InlineSpan> _parseInline(
+  List<InlineSpan> _parseInline(
     String input,
     ColectoPalette p,
     TextStyle base,
@@ -299,10 +359,7 @@ class NativeSanitizedHtmlView extends StatelessWidget {
                 color: p.accent,
                 decoration: TextDecoration.underline,
               ),
-              recognizer: href != null
-                  ? (TapGestureRecognizer()
-                      ..onTap = () => openExternalUrl(href))
-                  : null,
+              recognizer: href != null ? _linkRecognizer(href) : null,
             ),
           );
       }
@@ -326,16 +383,41 @@ class NativeSanitizedHtmlView extends StatelessWidget {
   static String _stripTags(String input) =>
       input.replaceAll(RegExp(r'<[^>]+>'), '');
 
-  static String _decodeEntities(String input) => input
-      .replaceAll('&nbsp;', ' ')
-      .replaceAll('&amp;', '&')
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>')
-      .replaceAll('&quot;', '"')
-      .replaceAll('&#39;', "'")
-      .replaceAll('&apos;', "'");
+  static String _decodeEntities(String input) {
+    // Decode named/numeric entities in a single pass so `&amp;lt;` stays `&lt;`.
+    return input.replaceAllMapped(
+      RegExp(r'&(?:#(\d+)|#x([0-9a-fA-F]+)|([a-zA-Z]+));'),
+      (m) {
+        final dec = m.group(1);
+        if (dec != null) {
+          final code = int.tryParse(dec);
+          if (code != null && code > 0 && code <= 0x10FFFF) {
+            return String.fromCharCode(code);
+          }
+          return m.group(0)!;
+        }
+        final hex = m.group(2);
+        if (hex != null) {
+          final code = int.tryParse(hex, radix: 16);
+          if (code != null && code > 0 && code <= 0x10FFFF) {
+            return String.fromCharCode(code);
+          }
+          return m.group(0)!;
+        }
+        return switch (m.group(3)) {
+          'nbsp' => ' ',
+          'lt' => '<',
+          'gt' => '>',
+          'quot' => '"',
+          'apos' => "'",
+          'amp' => '&',
+          _ => m.group(0)!,
+        };
+      },
+    );
+  }
 
-  static dynamic _decodeDataUri(String uri) {
+  static Uint8List? _decodeDataUri(String uri) {
     final comma = uri.indexOf(',');
     if (comma < 0 || !uri.substring(0, comma).contains(';base64')) return null;
     try {

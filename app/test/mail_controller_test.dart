@@ -141,5 +141,16 @@ void main() {
         expect(controller.selectedMessageId, isNot(firstSelected));
       },
     );
+
+    test('selectAccount clears content cache and summaries', () async {
+      final first = controller.threads.first;
+      await controller.selectThread(first);
+      await controller.loadMessageContent(first.latest.id);
+      expect(controller.contentFor(first.latest.id), isNotNull);
+
+      await controller.selectAccount('other');
+      expect(controller.contentFor(first.latest.id), isNull);
+      expect(controller.summaryFor(first.latest.id), isNull);
+    });
   });
 }

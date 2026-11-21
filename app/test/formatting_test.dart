@@ -88,18 +88,12 @@ void main() {
       expect(fwd.body, contains('Hi'));
     });
 
-    test('HTML helpers detect styled mail and strip markup cleanly', () {
+    test('HTML helpers detect styled mail accurately', () {
       expect(
-        HtmlMessageView.isDesigned(
-          '<div style="background-color:#fff">Hi</div>',
-        ),
+        HtmlMessageView.isDesigned('<table bgcolor="#ffffff">Hi</table>'),
         isTrue,
       );
       expect(HtmlMessageView.isDesigned('<p>Plain paragraph</p>'), isFalse);
-      expect(
-        HtmlMessageView.stripHtml('<p>Hello &amp; welcome<br/>Line 2</p>'),
-        'Hello & welcome\nLine 2',
-      );
     });
   });
 

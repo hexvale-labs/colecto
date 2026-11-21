@@ -27,7 +27,6 @@ class ColectoTextField extends StatefulWidget {
     this.autofillHints,
     this.enabled = true,
     this.monospace = false,
-    this.height,
   });
 
   final TextEditingController? controller;
@@ -49,7 +48,6 @@ class ColectoTextField extends StatefulWidget {
   final Iterable<String>? autofillHints;
   final bool enabled;
   final bool monospace;
-  final double? height;
 
   @override
   State<ColectoTextField> createState() => _ColectoTextFieldState();
@@ -58,33 +56,10 @@ class ColectoTextField extends StatefulWidget {
 class _ColectoTextFieldState extends State<ColectoTextField> {
   FocusNode? _ownFocus;
   FocusNode get _focus => widget.focusNode ?? (_ownFocus ??= FocusNode());
-  bool _hasFocus = false;
   bool _reveal = false;
 
   @override
-  void initState() {
-    super.initState();
-    _focus.addListener(_onFocus);
-  }
-
-  @override
-  void didUpdateWidget(ColectoTextField old) {
-    super.didUpdateWidget(old);
-    if (old.focusNode != widget.focusNode) {
-      (old.focusNode ?? _ownFocus)?.removeListener(_onFocus);
-      _focus.addListener(_onFocus);
-    }
-  }
-
-  void _onFocus() {
-    if (_hasFocus != _focus.hasFocus) {
-      setState(() => _hasFocus = _focus.hasFocus);
-    }
-  }
-
-  @override
   void dispose() {
-    _focus.removeListener(_onFocus);
     _ownFocus?.dispose();
     super.dispose();
   }

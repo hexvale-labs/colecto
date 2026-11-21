@@ -30,7 +30,7 @@ class _InProcessFfiClient extends http.BaseClient {
         : request.url.path;
 
     try {
-      final resp = _bridge.request(
+      final resp = await _bridge.request(
         method: request.method,
         path: pathAndQuery,
         account: request.headers['x-colecto-account'],

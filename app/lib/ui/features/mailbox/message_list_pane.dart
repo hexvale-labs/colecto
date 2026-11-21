@@ -55,10 +55,19 @@ class _MessageListPaneState extends State<MessageListPane> {
   void initState() {
     super.initState();
     _searchCtrl.text = c.searchQuery;
+    c.addListener(_syncSearchQuery);
+  }
+
+  void _syncSearchQuery() {
+    if (!widget.searchFocusNode.hasFocus &&
+        _searchCtrl.text.trim() != c.searchQuery) {
+      _searchCtrl.text = c.searchQuery;
+    }
   }
 
   @override
   void dispose() {
+    c.removeListener(_syncSearchQuery);
     _debounce?.cancel();
     _searchCtrl.dispose();
     _scroll.dispose();
