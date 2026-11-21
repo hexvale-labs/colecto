@@ -325,7 +325,7 @@ jobs:
               7z a -tzip "dist/$name.zip" "./stage/$name"
 
               iscc=$(command -v iscc || echo "/c/Program Files (x86)/Inno Setup 6/ISCC.exe")
-              "$iscc" \
+              MSYS_NO_PATHCONV=1 "$iscc" \
                 "/DAppVersion=$VERSION" \
                 "/DStageDir=$(cygpath -w "$PWD/stage/$name")" \
                 "/DOutputDir=$(cygpath -w "$PWD/dist")" \
