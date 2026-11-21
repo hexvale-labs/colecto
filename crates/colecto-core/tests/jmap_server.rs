@@ -1,8 +1,6 @@
-//! End-to-end checks against a real JMAP server. Run with `just test jmap`, which starts the
-//! Cyrus test server in Docker and sets `COLECTO_JMAP_TEST_URL`; otherwise these tests skip.
-//! Push is covered by unit tests only: that server never emits StateChange events.
-use colecto_core::{JmapAccount, MailStore};
-use colecto_extension_api::{DraftInput, OutgoingAttachment};
+//! End-to-end checks against a real JMAP server when `COLECTO_JMAP_TEST_URL` is set;
+//! otherwise these tests skip.
+use colecto_core::{DraftInput, JmapAccount, MailStore, OutgoingAttachment};
 use std::time::{Duration, Instant};
 
 fn account(user: &str) -> Option<(tempfile::TempDir, MailStore)> {
@@ -83,7 +81,6 @@ fn sends_with_attachments_receives_searches_and_files_in_sent() {
 
     let found = recipient.query("inbox", &subject).unwrap();
     assert!(found.iter().any(|m| m.id == id), "search did not find it");
-    // Search filters become JMAP filter conditions on the server (#103).
     let filtered = recipient
         .query(
             "inbox",
@@ -140,7 +137,8 @@ fn organizes_against_scripted_jmap() {
             let response = if first.starts_with("GET") {
                 json!({"apiUrl":base,"primaryAccounts":{"urn:ietf:params:jmap:mail":"a"},"accounts":{"a":{"accountCapabilities":{"urn:ietf:params:jmap:mail":{}}}}})
             } else {
-                let mut bytes = vec![0;length]; reader.read_exact(&mut bytes).unwrap();
+                let mut bytes = vec![0;length];
+                reader.read_exact(&mut bytes).unwrap();
                 let request: Value = serde_json::from_slice(&bytes).unwrap();
                 let call = &request["methodCalls"][0];
                 let result = match call[0].as_str().unwrap() {

@@ -1,4 +1,4 @@
-//! Search filters typed into a search (#103): `from:`, `to:`, `is:starred`, `is:unread`,
+//! Search filters typed into a search: `from:`, `to:`, `is:starred`, `is:unread`,
 //! `is:read`, `after:YYYY-MM-DD` and `before:YYYY-MM-DD`, combined with plain words. Each
 //! becomes the provider's own criterion (IMAP SEARCH keys, JMAP filter conditions), so search
 //! still runs on the server. Anything else, including `word:` prefixes we do not know, stays
@@ -54,7 +54,7 @@ impl Query {
     /// The same filters over saved messages, for the demo account, which has no server.
     /// Its messages carry no recipients or real dates: `to:` matches nothing, and `after:`
     /// and `before:` are ignored.
-    pub fn matches(&self, message: &colecto_extension_api::Message) -> bool {
+    pub fn matches(&self, message: &crate::Message) -> bool {
         let text = self.text.to_lowercase();
         let contains =
             |field: &str, needle: &str| field.to_lowercase().contains(&needle.to_lowercase());

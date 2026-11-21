@@ -1,9 +1,20 @@
-target/
-**/node_modules/
-ui/dist/
-ui/test-results/
-ui/playwright-report/
-.colecto*/
-.git/
-docs/performance/results/
-crates/colecto-app/gen/
+# Keep the Docker build context minimal so Rust layers are not invalidated by
+# Flutter, docs, git history, or local build outputs.
+.git
+.github
+.agents
+.claude
+.gitignore
+*.md
+skills-lock.json
+justfile
+just
+docs
+app
+target
+dist
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*

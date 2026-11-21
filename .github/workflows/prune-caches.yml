@@ -12,9 +12,8 @@ jobs:
       actions: write
     steps:
       # Keeps the newest cache of each family on each branch and deletes the rest. A family
-      # is the key without its toolchain, profile and lockfile hashes (Rust) or lockfile
-      # hash (Bun packages). setup-bun's own `bun-<hash>` caches are left alone: there is one
-      # per platform in use, so they are not superseded copies. Each branch is pruned
+      # is the key without its toolchain, profile and lockfile hashes (Rust), lockfile hash
+      # (Pub packages) or content hash (Flutter Web bundle). Each branch is pruned
       # separately, because tags and pull requests restore from different branches.
       - name: Delete superseded caches
         env:
@@ -24,11 +23,12 @@ jobs:
           set -euo pipefail
           seen=" "
           gh cache list --limit 500 --sort created_at --order desc --json id,key,ref \
-            --jq '.[] | select(.key | startswith("v0-rust-") or startswith("bun-Linux-")) | "\(.id) \(.ref) \(.key)"' |
+            --jq '.[] | select(.key | startswith("v0-rust-") or startswith("pub-") or startswith("web-bundle-")) | "\(.id) \(.ref) \(.key)"' |
           while read -r id ref key; do
             case "$key" in
               v0-rust-*) family=$(sed -E 's/-[0-9a-f]{8,}//g' <<< "$key") ;;
-              *) family=bun-packages ;;
+              pub-*) family=pub-packages ;;
+              web-bundle-*) family=web-bundle ;;
             esac
             family="$ref:$family"
             if [[ "$seen" == *" $family "* ]]; then

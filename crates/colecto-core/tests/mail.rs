@@ -1,5 +1,4 @@
-use colecto_core::MailStore;
-use colecto_extension_api::DraftInput;
+use colecto_core::{DraftInput, MailStore};
 
 fn input(id: Option<String>, subject: &str) -> DraftInput {
     DraftInput {
@@ -79,7 +78,7 @@ fn only_one_store_can_write_a_directory() {
 #[test]
 fn queries_sample_mail_without_losing_reader_state() {
     let directory = tempfile::tempdir().unwrap();
-    let mut store = colecto_core::MailStore::open(directory.path()).unwrap();
+    let mut store = MailStore::open(directory.path()).unwrap();
     let inbox = store.query("inbox", "").unwrap();
     assert_eq!(inbox.len(), 4);
     let matches = store.query("inbox", "bookshop").unwrap();

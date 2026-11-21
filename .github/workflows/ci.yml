@@ -2,8 +2,9 @@ name: CI
 
 on:
   pull_request:
+    branches: [develop, main]
   push:
-    branches: [main, develop]
+    branches: [develop, main]
   workflow_dispatch:
 
 concurrency:
@@ -21,9 +22,53 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  verify:
+  changes:
+    name: Detect changes
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      flutter: ${{ steps.filter.outputs.flutter }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/**'
+              - 'just/**'
+              - 'justfile'
+              - '.github/workflows/ci.yml'
+            flutter:
+              - 'app/**'
+              - 'just/**'
+              - 'justfile'
+              - '.github/workflows/ci.yml'
+            docker:
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'packaging/docker/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/**'
+              - 'app/**'
+              - '.github/workflows/ci.yml'
+
+  rust:
+    name: Rust
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,166 +78,219 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-          # The AI extension's service part is built for wasm32 and shipped with the UI.
-          targets: wasm32-unknown-unknown
 
-      # Only main and develop write the Rust cache; pull requests restore from their base
-      # branch or main instead of each saving a near-identical ~800 MB copy that evicts the
-      # useful one. develop saves only when its dependencies differ from main's (an exact
-      # hit is not saved again), so a dependency change there is cached before the release.
-      # rust-cache keys on dependencies and the lockfile only, but [profile.*] in the root
-      # Cargo.toml changes every artifact too, so its hash is part of each shared-key (a
-      # plain `key` is ignored once shared-key is set).
+      # Fail fast on formatting before installing system packages or restoring caches.
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Install Linux build dependencies
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 10
+        with:
+          packages: libssl-dev libdbus-1-dev pkg-config mold
+
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: verify-${{ hashFiles('Cargo.toml') }}
+          cache-on-failure: false
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
 
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
+          tool: just, cargo-nextest
+
+      # Clippy checks all targets (bins, libs, tests) so a separate `cargo check` pass is redundant.
+      - name: Clippy
+        run: just check lint
+
+      - name: Run unit & integration tests
+        run: cargo nextest run --workspace --locked
+
+      - name: Run doctests
+        run: cargo test --workspace --doc --locked
+
+  flutter:
+    name: Flutter
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.flutter == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Fail fast on Dart formatting before restoring pub cache or running builds.
+      - name: Check Dart formatting
+        run: cd app && dart format --output=none --set-exit-if-changed .
+
+      - name: Restore Pub packages
+        id: pub-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
           tool: just
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: ui/package.json
+      - name: Fetch Flutter dependencies
+        run: just install app
 
-      # Like the Rust cache, only main and develop save Bun and Playwright caches, and only
-      # on a miss; a pull request's copy could only be reused by that pull request and
-      # would crowd out release caches.
-      - name: Restore Bun packages
-        id: bun-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('ui/bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
-
-      - run: just install ui
-
-      - name: Save Bun packages
-        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && steps.bun-cache.outputs.cache-hit != 'true'
+      - name: Save Pub packages
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && steps.pub-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.bun/install/cache
-          key: ${{ steps.bun-cache.outputs.cache-primary-key }}
+          path: ~/.pub-cache
+          key: ${{ steps.pub-cache.outputs.cache-primary-key }}
 
-      # Browser builds depend only on the installed Playwright version and the browsers
-      # installed below, not on the rest of the lockfile.
-      - name: Resolve Playwright cache key
-        id: playwright
-        run: |
-          version=$(jq -r .version ui/node_modules/playwright-core/package.json)
-          echo "key=playwright-${{ runner.os }}-$version-chromium-webkit" >> "$GITHUB_OUTPUT"
+      - name: Analyze Flutter app
+        run: just check app
 
-      # One apt transaction for the Rust build and Playwright's browser libraries. This skips
-      # `playwright install --with-deps`, which always runs a slow `apt-get update` first.
-      - name: List Playwright system libraries
-        id: playwright-deps
-        working-directory: ui
-        run: |
-          packages=$(bunx playwright install-deps --dry-run chromium webkit | sed -n 's/^  \([a-z0-9][a-z0-9.+-]*\)$/\1/p' | xargs)
-          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+      - name: Test Flutter app
+        run: just test app
 
-      - name: Install Linux build and browser dependencies
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 10
-        with:
-          packages: libssl-dev libdbus-1-dev pkg-config ${{ steps.playwright-deps.outputs.packages }}
-
-      - name: Restore Playwright browsers
-        id: playwright-cache
+      - name: Restore cached Flutter Web bundle
+        id: web-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
-          key: ${{ steps.playwright.outputs.key }}
+          path: dist/colecto-web.tar.zst
+          key: web-bundle-${{ runner.os }}-${{ hashFiles('app/pubspec.yaml', 'app/pubspec.lock', 'app/lib/**', 'app/web/**', 'app/assets/**') }}
 
-      - name: Install Playwright browsers
-        working-directory: ui
-        run: bunx playwright install chromium webkit
+      - name: Build and compress Flutter Web bundle
+        if: steps.web-cache.outputs.cache-hit != 'true'
+        run: |
+          just build web
+          mkdir -p dist
+          tar -I 'zstd -T0 -12' -cf dist/colecto-web.tar.zst -C app/build web
+          ls -lh dist/colecto-web.tar.zst
 
-      - name: Save Playwright browsers
-        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && steps.playwright-cache.outputs.cache-hit != 'true'
+      - name: Save Flutter Web bundle cache
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && steps.web-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
-          key: ${{ steps.playwright.outputs.key }}
-      - run: just verify
-      - run: just test browser
+          path: dist/colecto-web.tar.zst
+          key: ${{ steps.web-cache.outputs.cache-primary-key }}
 
-      - name: Upload Playwright traces
-        if: failure()
+      - name: Upload compressed Flutter Web artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-test-results
-          path: ui/test-results/
-          if-no-files-found: ignore
-          retention-days: 7
+          name: colecto-web
+          path: dist/colecto-web.tar.zst
+          compression-level: 0
+          retention-days: 14
 
-  # Sends, receives, searches and downloads attachments through a real JMAP server (Cyrus in Docker).
-  jmap:
+  docker:
+    name: Daemon Docker image
+    needs: [changes, rust, flutter]
+    if: >-
+      always() &&
+      needs.changes.result == 'success' &&
+      (needs.rust.result == 'success' || needs.rust.result == 'skipped') &&
+      (needs.flutter.result == 'success' || needs.flutter.result == 'skipped') &&
+      (github.event_name != 'pull_request' || needs.changes.outputs.docker == 'true')
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Install Linux build dependencies
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 10
+      - name: Download Flutter Web bundle from this run
+        if: needs.flutter.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          packages: libssl-dev libdbus-1-dev pkg-config
+          name: colecto-web
+          path: dist
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - name: Restore cached Flutter Web bundle (when Flutter job was skipped)
+        if: needs.flutter.result == 'skipped'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          toolchain: stable
+          path: dist/colecto-web.tar.zst
+          key: web-bundle-${{ runner.os }}-${{ hashFiles('app/pubspec.yaml', 'app/pubspec.lock', 'app/lib/**', 'app/web/**', 'app/assets/**') }}
 
-      # Reuse verify's cache (it compiles a superset of these crates) instead of storing another.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Unpack Flutter Web bundle
+        id: web
+        run: |
+          mkdir -p dist/web
+          if [ -f dist/colecto-web.tar.zst ]; then
+            tar -I zstd -xf dist/colecto-web.tar.zst -C dist
+            echo "web_bundled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No cached Flutter Web bundle available; building daemon image without bundled web UI."
+            echo "web_bundled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build daemon image (local for smoke test)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          shared-key: verify-${{ hashFiles('Cargo.toml') }}
-          save-if: false
+          context: .
+          build-args: COLECTO_COMMIT=${{ github.sha }}
+          build-contexts: web-assets=dist/web
+          load: true
+          tags: colecto-daemon:ci
+          cache-from: type=gha,scope=daemon-docker
+          cache-to: ${{ (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main') && 'type=gha,mode=max,scope=daemon-docker' || '' }}
 
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: just
+      - name: Smoke-test daemon container
+        run: |
+          # 1. Default non-loopback bind must fail closed without COLECTO_PUBLIC_ORIGIN + COLECTO_TOKEN_FILE.
+          if docker run --rm colecto-daemon:ci >/tmp/fail-closed.log 2>&1; then
+            echo "Expected daemon to fail closed without COLECTO_PUBLIC_ORIGIN"
+            cat /tmp/fail-closed.log
+            exit 1
+          fi
+          grep -q "COLECTO_PUBLIC_ORIGIN" /tmp/fail-closed.log
 
-      - run: just test jmap
+          # 2. Loopback mode must boot and answer /api/v1/version (use --network host so 127.0.0.1 is reachable).
+          cid=$(docker run -d --rm --network host -e COLECTO_BIND=127.0.0.1 colecto-daemon:ci)
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:4173/api/v1/version >/tmp/version.json 2>/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+          cat /tmp/version.json
+          grep -q '"version"' /tmp/version.json
 
-  # The same over IMAP and SMTP (GreenMail in Docker), including the copy Colecto files in Sent.
-  mail:
+          # 3. Verify bundled Flutter Web index.html when present.
+          if [ "${{ steps.web.outputs.web_bundled }}" = "true" ]; then
+            curl -fsS http://127.0.0.1:4173/ | grep -qi '<!DOCTYPE html>'
+          fi
+
+  verify:
+    name: verify
+    needs: [changes, rust, flutter]
+    if: always()
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Linux build dependencies
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 10
-        with:
-          packages: libssl-dev libdbus-1-dev pkg-config
-
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-
-      # Reuse verify's cache (it compiles a superset of these crates) instead of storing another.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: verify-${{ hashFiles('Cargo.toml') }}
-          save-if: false
-
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: just
-
-      - run: just test mail
+      - name: Check required jobs succeeded
+        run: |
+          for result in "${{ needs.changes.result }}" "${{ needs.rust.result }}" "${{ needs.flutter.result }}"; do
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "::error::One or more required CI jobs failed"
+              exit 1
+            fi
+          done
 
   prune-caches:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
-    needs: verify
+    needs: [rust, flutter]
     permissions:
       actions: write
     uses: ./.github/workflows/prune-caches.yml

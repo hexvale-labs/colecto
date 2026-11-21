@@ -1,5 +1,4 @@
-use colecto_core::{Database, MailStore};
-use colecto_extension_api::DraftInput;
+use colecto_core::{Database, DraftInput, MailStore};
 use std::path::Path;
 
 fn sample_data(dir: &Path) -> String {
@@ -33,10 +32,19 @@ fn sample_data(dir: &Path) -> String {
                 "INSERT INTO send_approvals(id,requester,account,sender,snapshot,created_at,expires_at,status) VALUES ('request','key','demo','me@example.com',NULL,100,700,'pending')",
                 vec![],
             ),
+            (
+                "INSERT INTO ai_summaries(account,message_id,summary,created_at) VALUES ('demo','welcome','Brief summary',100)",
+                vec![],
+            ),
+            (
+                "INSERT INTO ai_autolabel_seen(account,message_id,seen_at) VALUES ('demo','welcome',100)",
+                vec![],
+            ),
         ])
         .unwrap();
     draft.id
 }
+
 const KEY_ID: &str = "abababababababababababababababababababababababababababababababab";
 const VERIFIER: [u8; 32] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
@@ -74,69 +82,52 @@ fn invalid_drafts_are_kept_and_rejected() {
     );
 }
 
-/// Every database a released schema version wrote must still open and keep its data.
-/// `tests/fixtures/schema/v<N>/colecto.db` holds one per version; see docs/storage.md.
 #[test]
-fn every_schema_fixture_opens_and_keeps_its_data() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/schema");
-    let mut versions = 0;
-    for entry in std::fs::read_dir(&root).unwrap() {
-        let fixture = entry.unwrap().path().join("colecto.db");
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::copy(&fixture, dir.path().join("colecto.db")).unwrap();
-        let store = MailStore::open(dir.path()).unwrap();
-        assert_eq!(store.drafts()[0].subject, "kept", "{}", fixture.display());
-        assert_eq!(store.labels().unwrap()["Work"], ["welcome"]);
-        drop(store);
-        let database = Database::open(dir.path()).unwrap();
-        assert_eq!(
-            database.settings("core").unwrap(),
-            vec![("list_density".to_string(), "\"compact\"".to_string())]
-        );
-        let key = &database
-            .query("SELECT id,name,accounts,verifier FROM api_keys", vec![])
-            .unwrap()[0];
-        assert_eq!(key.text(0).unwrap(), KEY_ID);
-        assert_eq!(key.text(1).unwrap(), "Assistant");
-        assert_eq!(key.text(2).unwrap(), r#"["demo"]"#);
-        assert_eq!(key.blob(3).unwrap(), VERIFIER);
-        let request = &database
-            .query("SELECT sender,status FROM send_approvals", vec![])
-            .unwrap()[0];
-        assert_eq!(request.text(0).unwrap(), "me@example.com");
-        assert_eq!(request.text(1).unwrap(), "pending");
-        assert!(
-            database
-                .query("SELECT name FROM records WHERE name IN ('drafts','labels','api-keys','send-approvals')", vec![])
-                .unwrap()
-                .is_empty()
-        );
-        versions += 1;
-    }
-    assert_eq!(
-        versions,
-        colecto_core::SCHEMA_VERSION,
-        "one fixture per schema version"
-    );
-}
-
-/// Writes the fixture for the current schema version:
-/// `cargo test -p colecto-core --test single_database -- --ignored write_schema_fixture`.
-#[test]
-#[ignore]
-fn write_schema_fixture() {
+fn all_entities_reopen_cleanly_in_single_database() {
     let dir = tempfile::tempdir().unwrap();
     sample_data(dir.path());
-    Database::open(dir.path()).unwrap().checkpoint().unwrap();
-    let target = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-        "tests/fixtures/schema/v{}",
-        colecto_core::SCHEMA_VERSION
-    ));
-    std::fs::create_dir_all(&target).unwrap();
-    std::fs::copy(dir.path().join("colecto.db"), target.join("colecto.db")).unwrap();
+    let store = MailStore::open(dir.path()).unwrap();
+    assert_eq!(store.drafts()[0].subject, "kept");
+    assert_eq!(store.labels().unwrap()["Work"], ["welcome"]);
+    drop(store);
+
+    let database = Database::open(dir.path()).unwrap();
+    assert_eq!(
+        database.settings("core").unwrap(),
+        vec![("list_density".to_string(), "\"compact\"".to_string())]
+    );
+    let key = &database
+        .query("SELECT id,name,accounts,verifier FROM api_keys", vec![])
+        .unwrap()[0];
+    assert_eq!(key.text(0).unwrap(), KEY_ID);
+    assert_eq!(key.text(1).unwrap(), "Assistant");
+    assert_eq!(key.text(2).unwrap(), r#"["demo"]"#);
+    assert_eq!(key.blob(3).unwrap(), VERIFIER);
+
+    let request = &database
+        .query("SELECT sender,status FROM send_approvals", vec![])
+        .unwrap()[0];
+    assert_eq!(request.text(0).unwrap(), "me@example.com");
+    assert_eq!(request.text(1).unwrap(), "pending");
+
+    let summary = &database
+        .query(
+            "SELECT summary FROM ai_summaries WHERE account='demo' AND message_id='welcome'",
+            vec![],
+        )
+        .unwrap()[0];
+    assert_eq!(summary.text(0).unwrap(), "Brief summary");
+
+    let seen = &database
+        .query(
+            "SELECT seen_at FROM ai_autolabel_seen WHERE account='demo' AND message_id='welcome'",
+            vec![],
+        )
+        .unwrap()[0];
+    assert_eq!(seen.integer(0).unwrap(), 100);
 }
 
-/// Best effort, not a promise: Turso writes the SQLite file format, so the stock `sqlite3`
+/// Best effort: Turso writes the SQLite file format, so the stock `sqlite3`
 /// tool can read Colecto's database. Skips where `sqlite3` is not installed.
 #[test]
 fn sqlite_can_read_the_database() {

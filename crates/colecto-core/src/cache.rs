@@ -143,7 +143,7 @@ impl MailCacheStore {
             let mut rows = transaction
                 .query(
                     "SELECT messages FROM snapshots WHERE account=?1 AND provider=?2 AND folder<>?3",
-                    [self.account.as_str(),provider, folder],
+                    [self.account.as_str(), provider, folder],
                 )
                 .await
                 .map_err(storage)?;
@@ -168,7 +168,7 @@ impl MailCacheStore {
                     .await
                     .map_err(storage)?;
             }
-            transaction.execute("INSERT OR REPLACE INTO snapshots(account,provider,folder,fetched_at,messages) VALUES (?1,?2,?3,?4,?5)", turso::params![self.account.as_str(),provider, folder, fetched_at as i64, text]).await.map_err(storage)?;
+            transaction.execute("INSERT OR REPLACE INTO snapshots(account,provider,folder,fetched_at,messages) VALUES (?1,?2,?3,?4,?5)", turso::params![self.account.as_str(), provider, folder, fetched_at as i64, text]).await.map_err(storage)?;
             transaction.commit().await.map_err(storage)
         })?;
         Ok(())

@@ -1,11 +1,10 @@
 //! Credential persistence; plaintext is never written to the account registry.
-use crate::{Database, Error, storage};
+use crate::{Database, Error, storage, types::AccountSettings};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
     aead::{Aead, AeadCore, KeyInit, OsRng, Payload, rand_core::RngCore},
 };
-use colecto_extension_api::AccountSettings;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
