@@ -91,8 +91,9 @@ branch so links to `blob/main/...` show the released docs.
 
 The version lives in `[workspace.package] version` in the root `Cargo.toml` and `version:`
 in `app/pubspec.yaml`. `just bump-version X.Y.Z` updates `Cargo.toml`, `Cargo.lock`, and
-`app/pubspec.yaml` together. A tag that does not match fails the release workflow before
-anything builds.
+`app/pubspec.yaml` together, setting the build number (the Android `versionCode`) to
+`X*1000000 + Y*1000 + Z` so each release installs over the previous one. A tag that does
+not match fails the release workflow before anything builds.
 
 Pushing a semver tag such as `v0.10.0` runs `.github/workflows/release.yml`:
 

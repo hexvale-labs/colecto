@@ -26,7 +26,10 @@ bump-version version:
     set -euo pipefail
     [[ "{{version}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "expected X.Y.Z, got {{version}}" >&2; exit 1; }
     sed -i -E '/^\[workspace\.package\]/,/^\[/ s/^version = "[^"]+"/version = "{{version}}"/' Cargo.toml
-    sed -i -E 's/^version: [0-9]+\.[0-9]+\.[0-9]+/version: {{version}}/' app/pubspec.yaml
+    # Build number = major*1000000 + minor*1000 + patch, the Android versionCode v0.9.0 used,
+    # so every release installs over the one before it.
+    IFS=. read -r major minor patch <<< "{{version}}"
+    sed -i -E "s/^version: .*/version: {{version}}+$((major * 1000000 + minor * 1000 + patch))/" app/pubspec.yaml
     cargo update --workspace --offline --quiet
-    grep -q '^version = "{{version}}"' Cargo.toml && grep -q '^version: {{version}}' app/pubspec.yaml
+    grep -q '^version = "{{version}}"' Cargo.toml && grep -q '^version: {{version}}+' app/pubspec.yaml
     echo "Version set to {{version}}"
