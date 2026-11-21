@@ -146,7 +146,7 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 .dock-frame { position: absolute; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
 .dock-head { display: flex; align-items: stretch; height: var(--head-h); flex-shrink: 0; padding: 0 2px 0 4px; }
 .dock-tabs { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-.dock-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 0 10px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); font-weight: 580; white-space: nowrap; cursor: grab; touch-action: none; transition: color 120ms ease; }
+.dock-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 0 10px; color: var(--ink-3); font-size: calc(12.5px * var(--text-scale)); font-weight: 580; white-space: nowrap; cursor: grab; touch-action: none; transition: color 120ms ease, transform 120ms var(--ease-out); }
 .dock-head:has(.tab-strip) .dock-tabs { flex: 0 1 auto; }
 .dock-head .tab-strip { flex: 1; min-width: 0; height: var(--head-h); }
 @media (hover: hover) and (pointer: fine) { .dock-tab:hover { color: var(--ink-2); } }
@@ -179,7 +179,8 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 .dock-area[data-resizing='row'] { cursor: col-resize; }
 .dock-area[data-resizing='column'] { cursor: row-resize; }
 .drop-overlay { position: absolute; inset: 0; z-index: var(--layer-drag); cursor: grabbing; }
-.drop-preview { position: absolute; border: 1.5px solid color-mix(in oklch, var(--mint) 65%, transparent); border-radius: 3px; background: color-mix(in oklch, var(--mint) 11%, transparent); transition: left 160ms var(--ease-out), top 160ms var(--ease-out), width 160ms var(--ease-out), height 160ms var(--ease-out); }
+.drop-preview { position: absolute; border: 1.5px solid color-mix(in oklch, var(--mint) 65%, transparent); border-radius: 3px; background: color-mix(in oklch, var(--mint) 11%, transparent); transition: opacity 120ms var(--ease-out); }
+@starting-style { .drop-preview { opacity: 0; } }
 .drag-ghost { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px; background: var(--float); border: 1px solid var(--line); color: var(--ink); font-size: calc(12.5px * var(--text-scale)); font-weight: 600; box-shadow: 0 8px 20px -6px oklch(0 0 0 / 0.6); pointer-events: none; }
 .drag-ghost .icon { color: var(--mint); }
 .dock-area.compact .pane { inset: 0; background: var(--bg); }
@@ -211,8 +212,7 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 @media (hover: hover) and (pointer: fine) { .chip-remove:hover:not(:disabled) { background: oklch(0.28 0.03 158); } }
 .label-new { display: inline-flex; align-items: center; flex-shrink: 0; height: 26px; border-radius: 999px; border: 1px dashed var(--line); }
 .label-new:focus-within { border-style: solid; border-color: color-mix(in oklch, var(--mint) 55%, var(--line)); }
-.label-new input { width: 8.5em; height: 24px; padding: 0 2px 0 10px; border: 0; background: none; font-size: calc(12.5px * var(--text-scale)); outline: none; transition: width 180ms var(--ease-out); }
-.label-new input:focus { width: 13em; }
+.label-new input { width: 10.5em; height: 24px; padding: 0 2px 0 10px; border: 0; background: none; font-size: calc(12.5px * var(--text-scale)); outline: none; }
 .label-new button { display: inline-grid; place-items: center; width: 24px; height: 24px; color: var(--ink-3); border-radius: 999px; }
 .label-new button:not(:disabled) { color: var(--mint); }
 .pane-note { margin: 16px; color: var(--ink-3); font-size: calc(13px * var(--text-scale)); }
@@ -394,13 +394,13 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 /* Settings: a card floating over the workspace, which stays put (and inert) underneath. */
 .settings-overlay { position: fixed; inset: 0; z-index: var(--layer-settings); display: grid; place-items: center; padding: 28px; background: oklch(0.08 0.004 165 / 0.62); transition: opacity 180ms var(--ease-out); }
 @starting-style { .settings-overlay { opacity: 0; } }
-.settings-window { display: grid; grid-template-columns: 228px minmax(0, 1fr); width: min(1080px, 100%); height: min(780px, 100%); border: 1px solid var(--line); border-radius: 16px; background: var(--bg); box-shadow: 0 40px 100px -30px oklch(0 0 0 / 0.8), 0 2px 8px oklch(0 0 0 / 0.3); overflow: hidden; outline: none; transition: grid-template-columns 240ms var(--ease-out), transform 220ms var(--ease-out), opacity 220ms var(--ease-out); }
+.settings-window { display: grid; grid-template-columns: 228px minmax(0, 1fr); width: min(1080px, 100%); height: min(780px, 100%); border: 1px solid var(--line); border-radius: 16px; background: var(--bg); box-shadow: 0 40px 100px -30px oklch(0 0 0 / 0.8), 0 2px 8px oklch(0 0 0 / 0.3); overflow: hidden; outline: none; transition: transform 220ms var(--ease-out), opacity 220ms var(--ease-out); }
 @starting-style { .settings-window { opacity: 0; transform: scale(0.97) translateY(6px); } }
 .settings-nav { display: flex; flex-direction: column; gap: 2px; padding: 12px 10px; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--line-soft); background: var(--sunk); }
 .settings-nav-head { display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 0 6px; }
 .settings-nav h1 { flex: 1; min-width: 0; padding: 0 10px; font-size: calc(18px * var(--text-scale)); font-stretch: 108%; white-space: nowrap; outline: none; }
 .nav-item > .icon:last-child { display: none; }
-/* The section list collapses to an icon rail; its width animates with the window's columns. */
+/* The section list collapses to an icon rail without animating the grid track (#97). */
 .settings-window.collapsed { grid-template-columns: 64px minmax(0, 1fr); }
 .settings-window.collapsed .settings-nav { padding-inline: 10px; }
 .settings-window.collapsed .settings-nav-head { justify-content: center; }
@@ -764,7 +764,7 @@ dialog::backdrop { background: oklch(0.1 0.005 165 / 0.72); }
 
 /* Accent swatches */
 .swatches { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-.swatch { position: relative; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--swatch); color: color-mix(in oklch, var(--swatch) 14%, black); cursor: pointer; transition: transform 140ms var(--ease-out), box-shadow 140ms ease; }
+.swatch { position: relative; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--swatch); color: color-mix(in oklch, var(--swatch) 14%, black); cursor: pointer; transition: transform 140ms var(--ease-out); }
 .swatch:active { transform: scale(0.92); }
 .swatch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border-radius: 50%; opacity: 0; cursor: pointer; }
 .swatch .icon { opacity: 0; transform: scale(0.6); transition: opacity 140ms ease, transform 180ms var(--ease-out); pointer-events: none; }

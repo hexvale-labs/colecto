@@ -49,6 +49,8 @@ let olderOf = '';
 /** Whether this listing asked for older mail yet: a list shorter than a page just ends. */
 let paged = false;
 let more: 'available' | 'loading' | 'end' | 'error' = 'end';
+/** The footer status last drawn, so sync ticks can skip or patch it; empty when no footer is shown. */
+let renderedStatus = '';
 const PAGE = 100;
 // ---- Provider folders (#132) ----
 /** Provider folders besides Inbox, Drafts and Sent, as the folder bar and message menu show them.
@@ -302,6 +304,7 @@ function render() {
   const filtered = !!appliedQuery || !!query.trim() || !!labelFilter;
   const state = status();
   const off = !app.accounts.length;
+  renderedStatus = !off && folder !== 'Drafts' ? `${state.text}\0${state.detail}\0${state.busy}\0${state.offline}` : '';
   const names = Object.keys(labels);
   const empty: Node[] = loading && !list.length ? [{ type: 'empty_state', preset: 'list', text: folder.startsWith('folder:') ? `Loading ${title}…` : `Loading your ${title.toLowerCase()}…` }]
     : searching && !list.length ? [{ type: 'empty_state', preset: 'list', text: 'Searching…' }]
@@ -347,7 +350,7 @@ function render() {
         ...(error ? [{ type: 'empty_state', preset: 'error', text: error, ...(items.length ? { hint: [{ text: 'Showing saved mail; it may be out of date.' }] } : {}), actions: [{ type: 'button', id: 'retry', variant: 'secondary', label: 'Try again' }] } as Node] : []),
         { type: 'list', id: 'messages', mode: 'virtual', label: clip(`${title} messages`, 128), rows: rows(list), ...(selected ? { selected } : {}), arrived, context_menu: folder !== 'Drafts', ...(list.length && !narrowed && (more !== 'end' || paged) ? { more } : {}), children: empty },
         { type: 'stack', preset: 'footer', children: folder === 'Drafts' ? [{ type: 'text', text: 'Drafts are saved by your mail service.' }] : [
-          { type: 'text', preset: 'list_status', tone: state.offline ? 'danger' : 'default', title: [state.text, state.detail].filter(Boolean).join(' · '), spans: [{ text: state.text }, ...(state.detail ? [{ text: state.detail }] : [])] },
+          { type: 'text', id: 'list-status', preset: 'list_status', tone: state.offline ? 'danger' : 'default', title: [state.text, state.detail].filter(Boolean).join(' · '), spans: [{ text: state.text }, ...(state.detail ? [{ text: state.detail }] : [])] },
           { type: 'button', id: 'refresh', variant: 'icon', icon: 'refresh', label: 'Refresh', title: 'Refresh', busy: state.busy, disabled: fetching },
         ] },
       ] },
@@ -546,9 +549,21 @@ app.on('host:sync', message => {
   if (typeof event.account !== 'string' || typeof event.mode !== 'string') return;
   const previous = sync[event.account];
   sync[event.account] = event as AccountSync;
+  if (event.account !== account) return;
   // Background downloads just finished: the reader can warm its cache from what the Host holds.
-  if (event.account === account && previous && previous.activity !== 'idle' && event.activity === 'idle') warm(items);
-  render();
+  if (previous && previous.activity !== 'idle' && event.activity === 'idle') warm(items);
+  // Empty when the last render had no footer to patch (a patch to a missing node stops the extension).
+  if (!renderedStatus) return;
+  const state = status();
+  const signature = `${state.text}\0${state.detail}\0${state.busy}\0${state.offline}`;
+  if (signature === renderedStatus) return;
+  renderedStatus = signature;
+  // Patch only the footer status and refresh spinner so background sync ticks do not rebuild
+  // and re-send the entire message list every 200 ms (#97).
+  app.patch('pane', [
+    { op: 'set', node: 'list-status', props: { tone: state.offline ? 'danger' : 'default', title: [state.text, state.detail].filter(Boolean).join(' · '), spans: [{ text: state.text }, ...(state.detail ? [{ text: state.detail }] : [])] } },
+    { op: 'set', node: 'refresh', props: { busy: state.busy } },
+  ]);
 });
 for (const name of ['host:ready', 'host:resync']) app.on(name, () => void call<AccountSync[]>('GET', '/sync').then(list => { sync = Object.fromEntries(list.map(status => [status.account, status])); render(); }).catch(() => {}));
 // Other extensions open a message here: notifications, for example.
@@ -559,7 +574,12 @@ bus.handle('v1/open', payload => {
   return null;
 });
 // Keep the highlight on what the reader or composer actually shows.
-bus.listen('reader/v1/viewing', payload => { if (payload?.account === account && folder !== 'Drafts') { selected = payload.message_id ?? null; render(); } });
+bus.listen('reader/v1/viewing', payload => {
+  if (payload?.account !== account || folder === 'Drafts') return;
+  const next = payload.message_id ?? null;
+  if (next === selected) return;
+  selected = next; render();
+});
 bus.listen('composer/v1/editing', payload => { if (folder === 'Drafts') { selected = payload?.draft_id ?? null; render(); } });
 bus.listen('composer/v1/saved', () => { if (folder === 'Drafts') void load(); });
 bus.listen('ai/v1/labeled', payload => { if (payload?.account === account) void call<Labels>('GET', '/labels').then(next => { labels = next; render(); }).catch(() => {}); });

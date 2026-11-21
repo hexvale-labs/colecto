@@ -117,9 +117,9 @@ export const storage = {
   set: (key: string, value: unknown) => call('PUT', `/extensions/${state.id}/storage/${encodeURIComponent(key)}`, { body: { value } }),
 };
 
+const encoder = new TextEncoder();
 /** `text` cut to at most `bytes` of UTF-8, on a character boundary, with an ellipsis when cut. */
 export function clip(text: string, bytes: number) {
-  const encoder = new TextEncoder();
   if (encoder.encode(text).length <= bytes) return text;
   let out = '';
   for (const char of text) { if (encoder.encode(out + char + '…').length > bytes) break; out += char; }

@@ -24,7 +24,8 @@ export const LIMITS = {
 export class ProtocolError extends Error {}
 const fail = (why: string): never => { throw new ProtocolError(why); };
 
-const bytes = (text: string) => new TextEncoder().encode(text).length;
+const encoder = new TextEncoder();
+const bytes = (text: string) => encoder.encode(text).length;
 type Check = (value: unknown) => boolean;
 const str = (max: number): Check => value => typeof value === 'string' && bytes(value) <= max;
 const text = str(LIMITS.text);
@@ -129,11 +130,13 @@ export function checkTree(tree: unknown, budget = { nodes: 0, ids: new Set<strin
   return node;
 }
 
+const rowShape = shape({ key: label, kind: oneOf('row', 'heading'), node: () => true }, ['key', 'kind', 'node']);
+
 export function checkRows(rows: unknown, budget = { nodes: 0, ids: new Set<string>() }, depth = 0): Row[] {
   if (!Array.isArray(rows) || rows.length > LIMITS.rows) fail('Invalid rows');
   const keys = new Set<string>();
   for (const row of rows as Row[]) {
-    if (!shape({ key: label, kind: oneOf('row', 'heading'), node: () => true }, ['key', 'kind', 'node'])(row)) fail('Invalid row');
+    if (!rowShape(row)) fail('Invalid row');
     if (keys.has(row.key)) fail('Duplicate row key');
     keys.add(row.key);
     // Rows are budgeted on their own: up to 32 nodes each, and not part of the surface count.
