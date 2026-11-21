@@ -178,6 +178,8 @@ test('compact back asks before discarding a dirty draft and closes instead of op
   await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
   await expect(subject).toBeVisible();
   await expect(subject).toHaveValue('Unsaved compact draft');
+  // Closing the dialog moves history back one step; a back pressed before that lands is lost.
+  await expect.poll(() => page.evaluate(() => history.state)).toEqual({ colectoBack: 1 });
   await back(page);
   await expect(page.getByRole('heading', { name: 'Discard unsaved changes?' })).toBeVisible();
   await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
