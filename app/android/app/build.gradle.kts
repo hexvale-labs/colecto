@@ -39,7 +39,7 @@ android {
 
     sourceSets {
         getByName("main") {
-            jniLibs.srcDirs(layout.buildDirectory.dir("generated/colectoJniLibs"))
+            jniLibs.srcDirs(layout.buildDirectory.dir("generated/colectoJniLibs").get().asFile)
         }
     }
 }
