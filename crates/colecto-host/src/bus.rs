@@ -256,11 +256,24 @@ pub(super) async fn request_http(
 ) -> Result<Json<Value>, Failure> {
     let (caller, account) = identity(&host, &principal, &headers)?;
     validate(&input).map_err(|e| Failure(StatusCode::BAD_REQUEST, e))?;
-    let permit = host
-        .execution
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| Failure(StatusCode::TOO_MANY_REQUESTS, "Extensions busy".into()))?;
+    // Only a service part runs in the Host and needs an execution slot. A client part answers
+    // from the browser, so waiting for it must not compete with mail refreshes for the slots.
+    let hosted = host
+        .extensions
+        .lock()
+        .map_err(|_| forbidden())?
+        .service(&bus)
+        .is_some();
+    let permit = if hosted {
+        Some(
+            host.execution
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| Failure(StatusCode::TOO_MANY_REQUESTS, "Extensions busy".into()))?,
+        )
+    } else {
+        None
+    };
     let data = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         invoke(&host, &caller, &account, &bus, &input)
@@ -394,6 +407,48 @@ mod tests {
         }
         assert_eq!(task.await.unwrap(), json!("first"));
         assert!(host.bus_replies.lock().unwrap().is_empty());
+    }
+    #[tokio::test]
+    async fn client_answered_request_needs_no_execution_slot() {
+        let (host, _dir) = host();
+        // Background refreshes hold every slot.
+        let _held = host.execution.clone().try_acquire_many_owned(2).unwrap();
+        let mut events = host.events.subscribe();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-colecto-extension", "composer".parse().unwrap());
+        headers.insert("x-colecto-account", "demo".parse().unwrap());
+        let request = tokio::spawn(request_http(
+            State(host.clone()),
+            axum::Extension(Principal::Owner),
+            headers.clone(),
+            Path("reader".into()),
+            Json(Input {
+                name: "v1/get_html".into(),
+                payload: Value::Null,
+            }),
+        ));
+        let (_, payload) = events.recv().await.unwrap();
+        let id = serde_json::from_str::<Value>(&payload).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        headers.insert("x-colecto-extension", "reader".parse().unwrap());
+        let _ = reply_http(
+            State(host.clone()),
+            axum::Extension(Principal::Owner),
+            headers,
+            Path(id),
+            Json(Reply {
+                data: json!("answered"),
+            }),
+        )
+        .await
+        .ok()
+        .unwrap();
+        let Ok(Json(response)) = request.await.unwrap() else {
+            panic!("request refused");
+        };
+        assert_eq!(response, json!({"data": "answered"}));
     }
     #[test]
     fn missing_roundtrip_depth_and_permission() {

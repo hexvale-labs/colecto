@@ -335,7 +335,9 @@ Service requests use the capability names as operations, plus `settings.read`,
 (`ai.decide`: one decision against the owner's hourly budget). Identity and account come from the Host invocation, never
 from guest input. Each invocation gets a fresh instance: 32 MiB memory, 1,024 table
 elements, 10,000,000 fuel, 64 service requests, 64 KiB per bridge input or output,
-32 KiB of output, two invocations at once. Disable, removal and reinstall invalidate
+32 KiB of output, two invocations at once (shared with background mail refreshes; a bus
+request that finds both taken gets `429 Extensions busy`, while one answered by a client part
+takes no slot). Disable, removal and reinstall invalidate
 running invocations at their next request. This is an in-process Wasm sandbox, not OS
 isolation, and not a security audit; native mail work it asks for still takes its
 normal time. Rust service parts can use the [Rust SDK](rust-sdk.md).
