@@ -33,6 +33,11 @@
   let secret = $state('');
   let reveal = $state(false);
   let error = $state('');
+  // Shown only when saving failed because no system credential store is available, so the owner
+  // can set a master password right here without losing what they entered (including in onboarding).
+  let needsMasterPassword = $state(false);
+  let masterPassword = $state('');
+  let masterConfirm = $state('');
 
   // An existing account counts as edited everywhere, so a lookup never rewrites it.
   const touched = new Set<Field>(saved ? Object.keys(initialFields) as Field[] : []);
@@ -51,14 +56,14 @@
     return joinJmap(fields.jmap_host, fields.jmap_port);
   }
   const baseline = JSON.stringify(settings());
-  let dirty = $derived(JSON.stringify(settings()) !== baseline || !!secret);
+  let dirty = $derived(JSON.stringify(settings()) !== baseline || !!secret || !!masterPassword || !!masterConfirm);
   $effect(() => ondirty?.(dirty));
 
   let body = $state<HTMLElement>();
   let form = $state<HTMLFormElement>();
   async function go(next: Step, focus?: string) {
     direction = steps.findIndex(s => s.id === next) >= steps.findIndex(s => s.id === step) ? 1 : -1;
-    step = next; error = '';
+    step = next; error = ''; needsMasterPassword = false; masterPassword = ''; masterConfirm = '';
     await tick();
     body?.scrollTo({ top: 0 });
     const target = focus ? document.getElementById(focus) : body?.querySelector<HTMLElement>(next === 'email' ? 'input' : 'h3');
@@ -137,12 +142,26 @@
     if (step === 'servers') return go('review');
     error = ''; working = true;
     try {
+      if (needsMasterPassword) {
+        if (masterPassword.length < 12) { error = 'Use a master password of at least 12 characters.'; return; }
+        if (masterPassword !== masterConfirm) { error = 'Master passwords do not match.'; return; }
+        await hostService.securityAction('protect', masterPassword);
+        masterPassword = ''; masterConfirm = ''; needsMasterPassword = false;
+      }
       const value = settings();
       const stored = await hostService.save({ ...value, id: account?.id, secret });
       secret = '';
       ondirty?.(false);
       await onsaved(stored, value.name || value.address);
-    } catch (e) { error = (e as Error).message; }
+    } catch (e) {
+      const message = (e as Error).message;
+      error = message;
+      if (!needsMasterPassword && message.includes('master password protection')) {
+        needsMasterPassword = true;
+        await tick();
+        body?.scrollTo({ top: body.scrollHeight, behavior: 'smooth' });
+      }
+    }
     finally { working = false; }
   }
   function back() {
@@ -295,6 +314,15 @@
       </ul>
       <label class="field"><span>Account name <span class="optional">(optional)</span></span><input maxlength="100" autocomplete="off" bind:value={name} placeholder="Work, Personal…" /></label>
       <p class="hint">Saving does not test the connection; Colecto checks it in the background.</p>
+      {#if needsMasterPassword}
+        <section class="master-fallback" aria-labelledby="wizard-master-title">
+          <h4 id="wizard-master-title"><Icon name="shield" size={15} />Protect credentials with a master password</h4>
+          <p class="security-disclosure">Protects credentials only. Local emails and drafts remain unencrypted. A forgotten master password cannot be recovered.</p>
+          <label class="field">Master password<input type="password" required minlength="12" maxlength="1024" autocomplete="new-password" bind:value={masterPassword} /></label>
+          <label class="field">Confirm master password<input type="password" required maxlength="1024" autocomplete="new-password" bind:value={masterConfirm} /></label>
+          <button type="button" class="text-button" onclick={() => { needsMasterPassword = false; masterPassword = ''; masterConfirm = ''; error = ''; }}>Try system credential store again</button>
+        </section>
+      {/if}
     {/if}
     </fieldset>
     {/key}
@@ -306,7 +334,7 @@
       <button class="primary" type="submit" disabled={looking}>{looking ? 'Looking up…' : 'Continue'}</button>
     {:else}
       <button type="button" class="secondary" disabled={working} onclick={back}>Back</button>
-      <button class="primary" type="submit" disabled={working}>{step === 'servers' ? 'Continue' : working ? 'Saving…' : submitLabel}</button>
+      <button class="primary" type="submit" disabled={working || (step === 'review' && needsMasterPassword && (masterPassword.length < 12 || !masterConfirm))}>{step === 'servers' ? 'Continue' : working ? 'Saving…' : needsMasterPassword ? 'Protect & save' : submitLabel}</button>
     {/if}
   </footer>
 </form>
@@ -360,6 +388,11 @@
   .review-warn { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; color: oklch(0.85 0.1 75); font-size: calc(12.5px * var(--text-scale)); line-height: calc(1.45 * var(--line-scale)); }
   .review-warn :global(.icon) { margin-top: 2px; }
   .review-list .text-button, .review-identity .text-button { flex-shrink: 0; }
+  .master-fallback { display: grid; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--sunk); overflow-wrap: anywhere; animation: note-in 260ms var(--ease-out) both; }
+  .master-fallback h4 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink); font-size: calc(13.5px * var(--text-scale)); font-weight: 600; }
+  .master-fallback h4 :global(.icon) { flex-shrink: 0; color: var(--mint); }
+  .master-fallback .text-button { justify-self: start; }
+  @media (prefers-reduced-motion: reduce) { .master-fallback { animation: none; } }
   @media (max-width: 520px) {
     .wizard-steps { padding: 10px 16px 0; }
     .port-row { grid-template-columns: minmax(0, 1fr); }

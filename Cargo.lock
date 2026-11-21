@@ -871,6 +871,7 @@ name = "colecto-app"
 version = "0.9.0"
 dependencies = [
  "axum",
+ "colecto-core",
  "colecto-host",
  "futures-util",
  "glib",
@@ -5722,6 +5723,7 @@ dependencies = [
 name = "tauri-plugin-colecto-native"
 version = "0.9.0"
 dependencies = [
+ "serde",
  "tauri",
  "tauri-plugin",
 ]

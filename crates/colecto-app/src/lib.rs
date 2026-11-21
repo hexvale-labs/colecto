@@ -8,6 +8,45 @@ use std::net::Ipv4Addr;
 use std::{path::PathBuf, sync::Arc};
 use tauri::Manager;
 
+#[cfg(target_os = "android")]
+mod android_secrets {
+    use colecto_core::{Error, SecretStore};
+    use tauri::Runtime;
+    use tauri_plugin_colecto_native::{Keystore, KeystoreError};
+
+    pub(super) struct AndroidSecrets<R: Runtime>(pub Keystore<R>);
+
+    fn map_error(operation: &'static str, error: KeystoreError) -> Error {
+        match error {
+            KeystoreError::Missing => Error::Invalid(
+                "Android Keystore entry missing. Reset saved credentials in Settings, or restore this device's data."
+                    .into(),
+            ),
+            KeystoreError::Unavailable(detail) => {
+                tracing::warn!(operation, %detail, "Android Keystore unavailable");
+                Error::Invalid(
+                    "Android Keystore unavailable. Unlock your device, or enable master password protection before adding accounts."
+                        .into(),
+                )
+            }
+        }
+    }
+
+    impl<R: Runtime> SecretStore for AndroidSecrets<R> {
+        fn get(&self, id: &str) -> Result<String, Error> {
+            self.0.get(id).map_err(|e| map_error("get", e))
+        }
+
+        fn set(&self, id: &str, value: &str) -> Result<(), Error> {
+            self.0.set(id, value).map_err(|e| map_error("set", e))
+        }
+
+        fn delete(&self, id: &str) -> Result<(), Error> {
+            self.0.delete(id).map_err(|e| map_error("delete", e))
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Some(command) = std::env::args().nth(1) {
@@ -109,6 +148,18 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
                     .get(path.to_owned())
                     .map(|asset| (asset.bytes, asset.mime_type))
             }));
+            #[cfg(target_os = "android")]
+            let accounts = {
+                let keystore = app
+                    .state::<tauri_plugin_colecto_native::Keystore<tauri::Wry>>()
+                    .inner()
+                    .clone();
+                colecto_host::runtime::open_accounts_with_secrets(
+                    &directory,
+                    Arc::new(android_secrets::AndroidSecrets(keystore)),
+                )?
+            };
+            #[cfg(not(target_os = "android"))]
             let accounts = colecto_host::runtime::open_accounts(&directory)?;
             let mut policy = colecto_host::AccessPolicy::local(authority.clone());
             policy.service_command = Some(colecto_host::runtime::service_command()?);

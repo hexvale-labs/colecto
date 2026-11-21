@@ -14,6 +14,14 @@ pub fn open_accounts(directory: &Path) -> Result<Accounts, Box<dyn std::error::E
     Ok(Accounts::open(store, Arc::new(SystemSecrets(namespace)))?)
 }
 
+pub fn open_accounts_with_secrets(
+    directory: &Path,
+    secrets: Arc<dyn SecretStore>,
+) -> Result<Accounts, Box<dyn std::error::Error>> {
+    let store = MailStore::open(directory)?;
+    Ok(Accounts::open(store, secrets)?)
+}
+
 struct SystemSecrets(String);
 fn credential_error(_: keyring::Error) -> Error {
     Error::Invalid("System credential store unavailable or locked. Unlock your desktop keychain, or enable master password protection before adding accounts.".into())
@@ -23,6 +31,7 @@ impl SystemSecrets {
         if !cfg!(any(
             target_os = "linux",
             target_os = "macos",
+            target_os = "ios",
             target_os = "windows",
             target_os = "freebsd",
             target_os = "openbsd"
