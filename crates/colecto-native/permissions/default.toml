@@ -1,5 +1,0 @@
-"$schema" = "schemas/schema.json"
-
-[default]
-description = "Lets Colecto's own page ask for press feedback (a click sound and haptics)."
-permissions = ["allow-press"]

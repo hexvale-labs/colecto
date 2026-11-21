@@ -5,19 +5,24 @@ mod content;
 mod database;
 pub use cache::{MailCacheStore, MailSnapshot, SnapshotHandle};
 pub use content::{MAX_CONTENT_BYTES, MAX_CONTENT_MESSAGES};
-pub use database::{Database, Row, SCHEMA_VERSION, Value};
+pub use database::{APPLICATION_ID, Database, Row, SCHEMA_VERSION, Value};
 mod credentials;
 pub use accounts::Accounts;
 pub use credentials::SecretStore;
+pub mod html;
 mod jmap;
 mod labels;
 pub mod mime;
 mod remote;
 pub mod search;
+pub mod threading;
+pub mod types;
+pub use html::{InlineImage, SanitizeOptions, SanitizedHtml};
 pub use jmap::JmapAccount;
 pub use remote::MailAccount;
+pub use threading::{ConversationThread, ThreadMessage};
+pub use types::*;
 
-use colecto_extension_api::{AttachmentInfo, Draft, DraftInput, Message, MessageContent};
 use std::{
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
@@ -105,9 +110,17 @@ impl MailReader {
         }
         Ok(raw)
     }
-    /// HTML, attachments and reply headers for one message.
+    /// Sanitized HTML, attachments and reply headers for one message (remote images blocked).
     pub fn content(&self, id: &str) -> Result<MessageContent, Error> {
-        mime::content(&self.raw(id)?)
+        self.content_with_options(id, false)
+    }
+    /// Sanitized HTML, attachments and reply headers for one message with explicit remote image policy.
+    pub fn content_with_options(
+        &self,
+        id: &str,
+        allow_remote_images: bool,
+    ) -> Result<MessageContent, Error> {
+        mime::sanitized_content(&self.raw(id)?, allow_remote_images)
     }
     pub fn attachment(&self, id: &str, index: usize) -> Result<(AttachmentInfo, Vec<u8>), Error> {
         let file = mime::attachment(&self.raw(id)?, index)?;
@@ -156,6 +169,8 @@ pub struct QueryJob {
     search: String,
     /// Messages to skip from the newest, for loading older pages.
     offset: usize,
+    /// Maximum number of messages to fetch in this page (`1..=MAX_LIST_MESSAGES`).
+    limit: usize,
     known: std::collections::HashMap<String, Message>,
 }
 impl QueryJob {
@@ -173,11 +188,17 @@ impl QueryJob {
                 &self.folder,
                 &self.search,
                 self.offset,
+                self.limit,
                 &self.known,
                 progress,
             )?,
             Account::Jmap(account) => Listing {
-                messages: account.query_page(&self.folder, &self.search, self.offset)?,
+                messages: account.query_page_with_limit(
+                    &self.folder,
+                    &self.search,
+                    self.offset,
+                    self.limit,
+                )?,
                 identity: None,
                 raws: Vec::new(),
             },
@@ -226,7 +247,7 @@ pub struct MailStore {
 
 impl MailStore {
     pub fn open(directory: impl AsRef<Path>) -> Result<Self, Error> {
-        Self::open_inner(directory.as_ref(), None, "demo")
+        Self::open_inner(directory.as_ref(), None, DEMO_ACCOUNT)
     }
     pub fn open_with_database(
         directory: impl AsRef<Path>,
@@ -432,8 +453,8 @@ impl MailStore {
             .find(|folder| folder.id == folder_id)
             .ok_or_else(|| Error::Invalid("Unknown folder".into()))?;
         let preserve = match folder.role {
-            colecto_extension_api::FolderRole::Inbox => Some("inbox"),
-            colecto_extension_api::FolderRole::Sent => Some("sent"),
+            FolderRole::Inbox => Some("inbox"),
+            FolderRole::Sent => Some("sent"),
             _ => None,
         };
         self.organize(ids, None, None, Some(folder_id), false, preserve)
@@ -442,7 +463,7 @@ impl MailStore {
         let folder = self
             .folders()?
             .into_iter()
-            .find(|folder| folder.role == colecto_extension_api::FolderRole::Archive)
+            .find(|folder| folder.role == FolderRole::Archive)
             .ok_or_else(|| Error::Invalid("This account has no Archive folder".into()))?;
         self.organize(ids, None, None, Some(&folder.id), false, None)
     }
@@ -469,7 +490,7 @@ impl MailStore {
         let trash = if delete {
             self.folders()?
                 .into_iter()
-                .find(|folder| folder.role == colecto_extension_api::FolderRole::Trash)
+                .find(|folder| folder.role == FolderRole::Trash)
                 .map(|folder| folder.id)
         } else {
             None
@@ -569,8 +590,7 @@ impl MailStore {
     }
 
     /// Returns the last discovered folders when the provider is temporarily unavailable.
-    pub fn folders(&mut self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
-        use colecto_extension_api::{Folder, FolderRole};
+    pub fn folders(&mut self) -> Result<Vec<Folder>, Error> {
         let Some(account) = &self.account else {
             return Ok([
                 ("inbox", "Inbox", FolderRole::Inbox),
@@ -656,7 +676,17 @@ impl MailStore {
         search: &str,
         offset: usize,
     ) -> Result<Vec<Message>, Error> {
-        let Some(job) = self.begin_query(folder, search, offset)? else {
+        self.query_page_with_limit(folder, search, offset, MAX_LIST_MESSAGES)
+    }
+    /// One page of a folder: up to `limit` messages (`1..=MAX_LIST_MESSAGES`), skipping the newest `offset`.
+    pub fn query_page_with_limit(
+        &mut self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Message>, Error> {
+        let Some(job) = self.begin_query_with_limit(folder, search, offset, limit)? else {
             let query = search::Query::parse(search.trim());
             let messages = match folder {
                 "inbox" => self.messages.clone(),
@@ -674,7 +704,7 @@ impl MailStore {
                 .into_iter()
                 .filter(|m| query.matches(m))
                 .skip(offset)
-                .take(MAX_LIST_MESSAGES)
+                .take(limit)
                 .collect();
             return self.apply_listing(folder, search.trim(), offset, messages);
         };
@@ -697,8 +727,19 @@ impl MailStore {
         search: &str,
         offset: usize,
     ) -> Result<Option<QueryJob>, Error> {
+        self.begin_query_with_limit(folder, search, offset, MAX_LIST_MESSAGES)
+    }
+    /// Prepare a provider query with an explicit page size (`1..=MAX_LIST_MESSAGES`).
+    pub fn begin_query_with_limit(
+        &self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<QueryJob>, Error> {
         validate_query(folder, search)?;
         validate_offset(offset)?;
+        validate_limit(limit)?;
         let Some(reader) = self.reader() else {
             return Ok(None);
         };
@@ -721,6 +762,7 @@ impl MailStore {
             folder: folder.into(),
             search: search.trim().into(),
             offset,
+            limit,
             known,
         }))
     }
@@ -771,7 +813,7 @@ impl MailStore {
             remove += 1;
         }
         self.reader_cache.drain(..remove);
-        if folder == "inbox" && snapshot {
+        if folder == "inbox" && snapshot && self.account.is_some() {
             self.messages = messages.clone();
         }
         Ok(messages)
@@ -804,11 +846,18 @@ impl MailStore {
     fn raw(&self, id: &str) -> Result<Vec<u8>, Error> {
         self.reader().ok_or(Error::Missing)?.raw(id)
     }
-    /// HTML, attachments, and reply headers for one message, from the content cache or
+    /// Sanitized HTML, attachments, and reply headers for one message, from the content cache or
     /// the provider. Prefer `reader()` to avoid holding the store lock during network work.
     pub fn content(&self, id: &str) -> Result<MessageContent, Error> {
+        self.content_with_options(id, false)
+    }
+    pub fn content_with_options(
+        &self,
+        id: &str,
+        allow_remote_images: bool,
+    ) -> Result<MessageContent, Error> {
         match self.reader() {
-            Some(reader) => reader.content(id),
+            Some(reader) => reader.content_with_options(id, allow_remote_images),
             None => {
                 let message = self.message(id).ok_or(Error::Missing)?;
                 Ok(MessageContent {
@@ -980,6 +1029,14 @@ fn validate_offset(offset: usize) -> Result<(), Error> {
     }
     Ok(())
 }
+fn validate_limit(limit: usize) -> Result<(), Error> {
+    if limit == 0 || limit > MAX_LIST_MESSAGES {
+        return Err(Error::Invalid(format!(
+            "Page size must be between 1 and {MAX_LIST_MESSAGES}"
+        )));
+    }
+    Ok(())
+}
 
 /// Waits for the provider to report Inbox changes: IMAP IDLE or JMAP push.
 pub struct PushWatcher {
@@ -1133,7 +1190,6 @@ mod cache_tests {
     }
     #[test]
     fn offline_folders_survive_restart_and_are_provider_scoped() {
-        use colecto_extension_api::{Folder, FolderRole};
         let dir = tempfile::tempdir().unwrap();
         let mut provider = account();
         provider.imap_host = "127.0.0.1".into();

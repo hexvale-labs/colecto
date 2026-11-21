@@ -1,6 +1,9 @@
 //! Single-account TLS mail transports. Credentials stay in the trusted core.
-use crate::{Error, mime::Attachment};
-use colecto_extension_api::{DraftInput, Message};
+use crate::{
+    Error,
+    mime::Attachment,
+    types::{DraftInput, Folder, FolderRole, Message},
+};
 use lettre::{
     SmtpTransport, Transport,
     message::{MultiPart, SinglePart, header::ContentType},
@@ -132,7 +135,7 @@ impl MailAccount {
         })
     }
 
-    pub fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+    pub fn folders(&self) -> Result<Vec<Folder>, Error> {
         self.with_session(folders_session)
     }
 
@@ -218,14 +221,16 @@ impl MailAccount {
         folder: &str,
         search: &str,
         offset: usize,
+        limit: usize,
         known: &std::collections::HashMap<String, Message>,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<crate::Listing, Error> {
         self.validate()?;
         crate::validate_query(folder, search)?;
         crate::validate_offset(offset)?;
+        crate::validate_limit(limit)?;
         self.with_session(|session| {
-            query_session_with_identity(session, folder, search, offset, known, progress)
+            query_session_with_limit(session, folder, search, offset, limit, known, progress)
         })
     }
     pub(crate) fn query_with_identity(
@@ -233,7 +238,14 @@ impl MailAccount {
         folder: &str,
         search: &str,
     ) -> Result<(Vec<Message>, String), Error> {
-        let listing = self.list(folder, search, 0, &Default::default(), &mut |_, _| {})?;
+        let listing = self.list(
+            folder,
+            search,
+            0,
+            crate::MAX_LIST_MESSAGES,
+            &Default::default(),
+            &mut |_, _| {},
+        )?;
         Ok((listing.messages, listing.identity.unwrap_or_default()))
     }
     /// IMAP IDLE (RFC 2177) on a read-only Inbox: `Ok(true)` when the server reports a change,
@@ -330,7 +342,7 @@ impl MailAccount {
             .build()
             .send(&email)
             .map_err(smtp_error)?;
-        // SMTP only delivers; the copy in Sent is the client's job (#90). The message has
+        // SMTP only delivers; the copy in Sent is the client's job. The message has
         // already gone out, so a failed copy is logged rather than reported as a failed send.
         if !provider_saves_sent(&self.imap_host)
             && let Err(error) = self.save_sent(&email.formatted())
@@ -500,11 +512,32 @@ fn uid_set(uids: &[u32]) -> String {
         .join(",")
 }
 
+#[cfg(test)]
 fn query_session_with_identity<T: std::io::Read + std::io::Write>(
     session: &mut imap::Session<T>,
     folder: &str,
     search: &str,
     offset: usize,
+    known: &std::collections::HashMap<String, Message>,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<crate::Listing, Error> {
+    query_session_with_limit(
+        session,
+        folder,
+        search,
+        offset,
+        crate::MAX_LIST_MESSAGES,
+        known,
+        progress,
+    )
+}
+
+fn query_session_with_limit<T: std::io::Read + std::io::Write>(
+    session: &mut imap::Session<T>,
+    folder: &str,
+    search: &str,
+    offset: usize,
+    limit: usize,
     known: &std::collections::HashMap<String, Message>,
     progress: &mut dyn FnMut(usize, usize),
 ) -> Result<crate::Listing, Error> {
@@ -535,7 +568,7 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
     }
     // One round trip for every UID, size and flag; message text only for what is new.
     let headers = if search.is_empty() {
-        let start = end.saturating_sub(crate::MAX_LIST_MESSAGES - 1).max(1);
+        let start = end.saturating_sub(limit - 1).max(1);
         let range = if offset == 0 {
             format!("{start}:*")
         } else {
@@ -551,12 +584,7 @@ fn query_session_with_identity<T: std::io::Read + std::io::Write>(
             .into_iter()
             .collect();
         ids.sort_unstable();
-        let selected: Vec<_> = ids
-            .into_iter()
-            .rev()
-            .skip(offset)
-            .take(crate::MAX_LIST_MESSAGES)
-            .collect();
+        let selected: Vec<_> = ids.into_iter().rev().skip(offset).take(limit).collect();
         if selected.is_empty() {
             return Ok(empty(identity));
         }
@@ -1073,7 +1101,6 @@ mod tests {
     }
     #[test]
     fn folder_listing_skips_containers_and_reads_status_counts() {
-        use colecto_extension_api::FolderRole;
         let server = mock_imap(vec![
             ("LOGIN", String::new()),
             ("LIST", "* LIST (\\Noselect) \"/\" \"[Gmail]\"\r\n* LIST (\\Sent) \"/\" \"Outbox\"\r\n* LIST () \"/\" \"INBOX\"\r\n".into()),
@@ -1703,7 +1730,6 @@ mod tests {
 #[cfg(test)]
 mod folder_tests {
     use super::*;
-    use colecto_extension_api::FolderRole;
     #[test]
     fn roles_prefer_special_use_and_recognize_provider_names() {
         for (name, attributes, expected) in [
@@ -1721,8 +1747,8 @@ mod folder_tests {
     }
 }
 
-fn folder_role(name: &str, attributes: &[&str]) -> colecto_extension_api::FolderRole {
-    use colecto_extension_api::FolderRole::*;
+fn folder_role(name: &str, attributes: &[&str]) -> FolderRole {
+    use FolderRole::*;
     for (attribute, role) in [
         ("\\Inbox", Inbox),
         ("\\Sent", Sent),
@@ -1756,7 +1782,7 @@ fn folder_role(name: &str, attributes: &[&str]) -> colecto_extension_api::Folder
 
 fn folders_session<T: std::io::Read + std::io::Write>(
     session: &mut imap::Session<T>,
-) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+) -> Result<Vec<Folder>, Error> {
     use imap::types::NameAttribute;
     let names = session.list(Some(""), Some("*")).map_err(imap_error)?;
     let mut folders = Vec::new();
@@ -1794,7 +1820,7 @@ fn folders_session<T: std::io::Read + std::io::Write>(
                 }
             }
         }
-        folders.push(colecto_extension_api::Folder {
+        folders.push(Folder {
             id: name.name().into(),
             name: name.name().into(),
             role: folder_role(name.name(), &attributes),

@@ -1,7 +1,10 @@
 //! JMAP transport (RFC 8620, RFC 8621): receive, search, send with attachments and push.
 //! Tokens and passwords remain in the trusted core.
-use crate::{Error, mime::Attachment};
-use colecto_extension_api::{DraftInput, Message};
+use crate::{
+    Error,
+    mime::Attachment,
+    types::{DraftInput, Folder, FolderRole, Message},
+};
 use reqwest::{
     Url,
     blocking::{Client, RequestBuilder},
@@ -301,7 +304,7 @@ impl JmapAccount {
         Ok(())
     }
 
-    pub fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+    pub fn folders(&self) -> Result<Vec<Folder>, Error> {
         self.session()?.folders()
     }
 
@@ -315,9 +318,20 @@ impl JmapAccount {
         search: &str,
         offset: usize,
     ) -> Result<Vec<Message>, Error> {
+        self.query_page_with_limit(folder, search, offset, crate::MAX_LIST_MESSAGES)
+    }
+    /// One page of a folder of up to `limit` messages, skipping the newest `offset`.
+    pub fn query_page_with_limit(
+        &self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Message>, Error> {
         crate::validate_query(folder, search)?;
         crate::validate_offset(offset)?;
-        self.session()?.query(folder, search, offset)
+        crate::validate_limit(limit)?;
+        self.session()?.query(folder, search, offset, limit)
     }
     /// Download one complete message as RFC 5322 bytes.
     pub(crate) fn fetch_raw(&self, id: &str) -> Result<Vec<u8>, Error> {
@@ -475,7 +489,7 @@ impl JmapAccount {
     }
 }
 impl Session<'_> {
-    fn folders(&self) -> Result<Vec<colecto_extension_api::Folder>, Error> {
+    fn folders(&self) -> Result<Vec<Folder>, Error> {
         let data = self.call(
             "Mailbox/get",
             json!({
@@ -485,11 +499,11 @@ impl Session<'_> {
         list(&data)?
             .iter()
             .map(|mailbox| {
-                Ok(colecto_extension_api::Folder {
+                Ok(Folder {
                     id: field(mailbox, "id")?.into(),
                     name: field(mailbox, "name")?.into(),
                     role: serde_json::from_value(mailbox["role"].clone())
-                        .unwrap_or(colecto_extension_api::FolderRole::Other),
+                        .unwrap_or(FolderRole::Other),
                     total: mailbox["totalEmails"]
                         .as_u64()
                         .and_then(|n| n.try_into().ok())
@@ -503,7 +517,13 @@ impl Session<'_> {
             .collect()
     }
 
-    fn query(&self, folder: &str, search: &str, offset: usize) -> Result<Vec<Message>, Error> {
+    fn query(
+        &self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Message>, Error> {
         // `inbox` and `sent` are roles; anything else is a mailbox id from `folders()`.
         let mailbox = match folder {
             "inbox" | "sent" => self.mailbox(folder)?,
@@ -539,7 +559,7 @@ impl Session<'_> {
             (
                 "Email/query",
                 json!({"filter":filter,
-                "sort":[{"property":"receivedAt","isAscending":false}],"position":offset,"limit":crate::MAX_LIST_MESSAGES}),
+                "sort":[{"property":"receivedAt","isAscending":false}],"position":offset,"limit":limit}),
             ),
             (
                 "Email/get",
@@ -893,7 +913,9 @@ mod tests {
             submission: false,
             event_source: None,
         };
-        let messages = session.query("sent", "needle", 0).unwrap();
+        let messages = session
+            .query("sent", "needle", 0, crate::MAX_LIST_MESSAGES)
+            .unwrap();
         assert_eq!(
             messages
                 .iter()
@@ -902,10 +924,10 @@ mod tests {
             ["Newest", "Older"]
         );
         let folders = session.folders().unwrap();
-        assert_eq!(folders[0].role, colecto_extension_api::FolderRole::Inbox);
+        assert_eq!(folders[0].role, FolderRole::Inbox);
         assert_eq!((folders[0].total, folders[0].unread), (14, 3));
         assert_eq!(folders[1].id, "custom");
-        assert_eq!(folders[1].role, colecto_extension_api::FolderRole::Other);
+        assert_eq!(folders[1].role, FolderRole::Other);
         server.join().unwrap();
     }
     #[test]

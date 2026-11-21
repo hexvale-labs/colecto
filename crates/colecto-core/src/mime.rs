@@ -1,14 +1,20 @@
 //! MIME reading and outgoing attachment helpers. All message content is untrusted.
-use crate::Error;
+use crate::{
+    Error,
+    html::{self, InlineImage, SanitizeOptions},
+    types::{AttachmentInfo, MessageContent, OutgoingAttachment},
+};
 use base64::Engine;
-use colecto_extension_api::{AttachmentInfo, MessageContent, OutgoingAttachment};
 use mailparse::{DispositionType, MailHeaderMap, ParsedMail};
+use std::collections::BTreeMap;
 
 /// Largest raw message the client opens on demand.
 pub(crate) const MAX_RAW: usize = 30_000_000;
 /// Largest total attachment size accepted for one outgoing message.
 pub const MAX_ATTACHMENTS: usize = 25_000_000;
 const MAX_HTML: usize = 2_000_000;
+const MAX_INLINE_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+const MAX_TOTAL_INLINE_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 
 pub(crate) struct Attachment {
     pub name: String,
@@ -171,6 +177,84 @@ pub(crate) fn truncate(mut text: String, limit: usize) -> String {
     text
 }
 
+/// Extract safe inline raster images keyed by normalized `Content-ID`.
+pub fn inline_images(raw: &[u8]) -> Result<BTreeMap<String, InlineImage>, Error> {
+    let mail = parse(raw)?;
+    Ok(inline_images_from_mail(&mail))
+}
+
+fn inline_images_from_mail(mail: &ParsedMail<'_>) -> BTreeMap<String, InlineImage> {
+    let mut parts = Vec::new();
+    leaves(mail, &mut parts);
+    let mut images = BTreeMap::new();
+    let mut total_bytes = 0usize;
+    for part in parts {
+        let Some(cid) = part.headers.get_first_value("Content-ID") else {
+            continue;
+        };
+        let key = html::normalize_cid(&cid);
+        if key.is_empty() || !html::is_safe_raster_mime(&part.ctype.mimetype) {
+            continue;
+        }
+        let Ok(data) = part.get_body_raw() else {
+            continue;
+        };
+        if data.is_empty() || data.len() > MAX_INLINE_IMAGE_BYTES {
+            continue;
+        }
+        if total_bytes.saturating_add(data.len()) > MAX_TOTAL_INLINE_IMAGE_BYTES {
+            break;
+        }
+        total_bytes += data.len();
+        images.entry(key).or_insert(InlineImage {
+            content_type: part.ctype.mimetype.clone(),
+            data,
+        });
+    }
+    images
+}
+
+/// Decode MIME content and sanitize HTML (blocking remote images unless `allow_remote_images`
+/// is true and resolving `cid:` inline images).
+pub fn sanitized_content(raw: &[u8], allow_remote_images: bool) -> Result<MessageContent, Error> {
+    let mail = parse(raw)?;
+    let header = |name: &str| mail.headers.get_first_value(name).unwrap_or_default();
+    let attachments = attachment_parts(&mail)
+        .into_iter()
+        .enumerate()
+        .map(|(index, part)| {
+            let size = part.get_body_raw().map_err(|_| undecodable())?.len();
+            Ok(info(part, index, size))
+        })
+        .collect::<Result<_, Error>>()?;
+    let inline = inline_images_from_mail(&mail);
+    let (html, blocked_remote_images) = match first_body(&mail, "text/html")? {
+        Some(raw_html) => {
+            let sanitized = html::sanitize(
+                &truncate(raw_html, MAX_HTML),
+                &inline,
+                SanitizeOptions {
+                    allow_remote_images,
+                },
+            );
+            (Some(sanitized.html), sanitized.blocked_remote_images)
+        }
+        None => (None, 0),
+    };
+    Ok(MessageContent {
+        text: crate::bounded_body(text(&mail)?),
+        html,
+        blocked_remote_images,
+        attachments,
+        message_id: header("Message-ID"),
+        references: header("References"),
+        reply_to: header("Reply-To"),
+        to: header("To"),
+        cc: header("Cc"),
+    })
+}
+
+#[cfg(test)]
 pub(crate) fn content(raw: &[u8]) -> Result<MessageContent, Error> {
     let mail = parse(raw)?;
     let header = |name: &str| mail.headers.get_first_value(name).unwrap_or_default();
@@ -185,6 +269,7 @@ pub(crate) fn content(raw: &[u8]) -> Result<MessageContent, Error> {
     Ok(MessageContent {
         text: crate::bounded_body(text(&mail)?),
         html: first_body(&mail, "text/html")?.map(|html| truncate(html, MAX_HTML)),
+        blocked_remote_images: 0,
         attachments,
         message_id: header("Message-ID"),
         references: header("References"),
@@ -300,7 +385,7 @@ pub(crate) fn html_text(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const RAW: &[u8] = b"From: a@example.test\r\nTo: Me <me@example.test>, b@example.test\r\nCc: c@example.test\r\nMessage-ID: <m1@example.test>\r\nReferences: <m0@example.test>\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: multipart/related; boundary=r\r\n\r\n--r\r\nContent-Type: text/html\r\n\r\n<style>p{color:red}</style><p>Hi&nbsp;<b>there</b></p><img src=\"cid:logo\">\r\n--r\r\nContent-Type: image/png\r\nContent-ID: <logo>\r\n\r\nPNG\r\n--r--\r\n--b\r\nContent-Type: application/pdf; name=\"../report.pdf\"\r\nContent-Disposition: attachment\r\nContent-Transfer-Encoding: base64\r\n\r\nUERG\r\n--b--\r\n";
+    const RAW: &[u8] = b"From: a@example.test\r\nTo: Me <me@example.test>, b@example.test\r\nCc: c@example.test\r\nMessage-ID: <m1@example.test>\r\nReferences: <m0@example.test>\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: multipart/related; boundary=r\r\n\r\n--r\r\nContent-Type: text/html\r\n\r\n<style>p{color:red}</style><p>Hi&nbsp;<b>there</b></p><img src=\"cid:logo\"><img src=\"https://track.test/p.gif\"><script>bad()</script>\r\n--r\r\nContent-Type: image/png\r\nContent-ID: <logo>\r\n\r\nPNG\r\n--r--\r\n--b\r\nContent-Type: application/pdf; name=\"../report.pdf\"\r\nContent-Disposition: attachment\r\nContent-Transfer-Encoding: base64\r\n\r\nUERG\r\n--b--\r\n";
 
     #[test]
     fn rejects_hostile_nesting_and_part_counts_before_parsing() {
@@ -339,6 +424,21 @@ mod tests {
         );
         assert_eq!(attachment(RAW, 0).unwrap().data, b"PDF");
         assert!(matches!(attachment(RAW, 1), Err(Error::Missing)));
+    }
+
+    #[test]
+    fn sanitized_content_strips_scripts_blocks_remote_and_inlines_cid() {
+        let content = sanitized_content(RAW, false).unwrap();
+        let html = content.html.unwrap();
+        assert!(!html.contains("<script"));
+        assert!(!html.contains("<style"));
+        assert!(!html.contains("track.test"));
+        assert_eq!(content.blocked_remote_images, 1);
+        assert!(html.contains("data:image/png;base64,UE5H"));
+
+        let allowed = sanitized_content(RAW, true).unwrap();
+        assert_eq!(allowed.blocked_remote_images, 0);
+        assert!(allowed.html.unwrap().contains("track.test"));
     }
 
     #[test]

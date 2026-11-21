@@ -1,7 +1,7 @@
-use colecto_core::{Accounts, Database, Error, MailStore, SecretStore};
-use colecto_extension_api::{AccountInput, DraftInput};
+use colecto_core::{AccountInput, Accounts, Database, DraftInput, Error, MailStore, SecretStore};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+
 #[derive(Default)]
 struct MemorySecrets(Mutex<BTreeMap<String, String>>);
 impl SecretStore for MemorySecrets {
@@ -207,7 +207,7 @@ fn system_backend_failure_has_no_plaintext_fallback() {
             Err(Error::Invalid("keychain locked".into()))
         }
         fn delete(&self, _: &str) -> Result<(), Error> {
-            Ok(())
+            Err(Error::Invalid("keychain locked".into()))
         }
     }
     let dir = tempfile::tempdir().unwrap();
@@ -215,16 +215,23 @@ fn system_backend_failure_has_no_plaintext_fallback() {
         Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(Unavailable)).unwrap();
     assert!(accounts.upsert(input(None, "a@example.test")).is_err());
     assert_eq!(accounts.list().len(), 1);
+    assert!(!accounts.security().cleanup_pending);
     assert!(
         !String::from_utf8(vault(dir.path()))
             .unwrap()
             .contains("test-secret")
     );
-    // Password protection works independently of a missing desktop keychain.
+    // Restarting after a failed system write still succeeds because no orphan was left behind.
+    drop(accounts);
+    let mut accounts =
+        Accounts::open(MailStore::open(dir.path()).unwrap(), Arc::new(Unavailable)).unwrap();
+    assert!(!accounts.security().cleanup_pending);
+    // Password protection works independently of a missing or unsupported system store.
     accounts.protect("a strong master password").unwrap();
     assert!(accounts.upsert(input(None, "a@example.test")).is_ok());
     assert!(accounts.unprotect().is_err());
     assert!(accounts.security().protected);
+    assert!(!accounts.security().cleanup_pending);
 }
 
 #[test]
@@ -402,22 +409,4 @@ fn cached_list_and_reader_remain_available_while_account_is_locked() {
             .is_some()
     );
     assert!(accounts.cached("other", "inbox").is_err());
-}
-
-#[test]
-fn fresh_vault_ignores_legacy_account_registry() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("accounts.json"),
-        b"unsupported legacy content",
-    )
-    .unwrap();
-    let accounts = Accounts::open(
-        MailStore::open(dir.path()).unwrap(),
-        Arc::new(MemorySecrets::default()),
-    )
-    .unwrap();
-    assert!(accounts.store("unknown").is_err());
-    let state: serde_json::Value = serde_json::from_slice(&vault(dir.path())).unwrap();
-    assert!(state["accounts"].as_array().unwrap().is_empty());
 }

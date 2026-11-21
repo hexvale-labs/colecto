@@ -1,11 +1,10 @@
 //! Credential persistence; plaintext is never written to the account registry.
-use crate::{Database, Error, storage};
+use crate::{Database, Error, storage, types::AccountSettings};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
     aead::{Aead, AeadCore, KeyInit, OsRng, Payload, rand_core::RngCore},
 };
-use colecto_extension_api::AccountSettings;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
@@ -307,10 +306,18 @@ impl Vault {
         self.sync_directory()?;
         let mut key = Zeroizing::new([0u8; 32]);
         OsRng.fill_bytes(key.as_mut());
-        self.backend.set(
+        if let Err(error) = self.backend.set(
             &id,
             &Zeroizing::new(serde_json::to_string(&*key).map_err(storage)?),
-        )?;
+        ) {
+            let _ = self.backend.delete(&id);
+            let mut reverted = self.state.clone();
+            reverted.cleanup.retain(|entry| entry != &id);
+            if self.write(&reverted).is_ok() {
+                self.state = reverted;
+            }
+            return Err(error);
+        }
         let Mode::Password {
             nonce, ciphertext, ..
         } = seal(secrets, accounts, &key, [0; 16])?

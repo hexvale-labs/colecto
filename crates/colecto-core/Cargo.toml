@@ -12,7 +12,6 @@ workspace = true
 [dependencies]
 turso.workspace = true
 futures-executor.workspace = true
-colecto-extension-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 imap.workspace = true
@@ -21,6 +20,7 @@ lettre.workspace = true
 mailparse.workspace = true
 base64.workspace = true
 reqwest.workspace = true
+ammonia.workspace = true
 tracing.workspace = true
 
 argon2.workspace = true

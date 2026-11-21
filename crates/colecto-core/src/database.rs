@@ -4,17 +4,20 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 const MAX_RECORD_BYTES: usize = 32_000_000;
-/// Marks a database as Colecto's (`PRAGMA application_id`, the bytes "COLE"). A database
-/// without it, including one from Colecto alpha, is refused rather than guessed at.
+const MAX_BACKUPS: usize = 5;
+/// Marks a database as Colecto's (`PRAGMA application_id`, the bytes "COLE").
+/// A foreign database without it is refused rather than guessed at.
 pub const APPLICATION_ID: i64 = 0x434F_4C45;
 /// Schema steps in order. `PRAGMA user_version` counts the steps already applied. A step
 /// that has shipped never changes; a schema change adds the next file.
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_initial.sql"),
     include_str!("../migrations/0002_tables.sql"),
+    include_str!("../migrations/0003_ai_tables.sql"),
 ];
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
@@ -65,6 +68,12 @@ pub struct Database {
 }
 impl Database {
     pub fn open(directory: impl AsRef<Path>) -> Result<Self, Error> {
+        Self::open_with_migrations(directory, MIGRATIONS)
+    }
+    fn open_with_migrations(
+        directory: impl AsRef<Path>,
+        migrations: &[&str],
+    ) -> Result<Self, Error> {
         private_directory(directory.as_ref())?;
         let path = fs::canonicalize(directory)
             .map_err(storage)?
@@ -83,7 +92,7 @@ impl Database {
             .await
             .map_err(storage)?;
             let connection = database.connect().map_err(storage)?;
-            migrate(&connection, &path).await?;
+            migrate(&connection, &path, migrations).await?;
             Ok(connection)
         })?;
         Ok(Self {
@@ -221,8 +230,8 @@ impl Database {
             transaction.commit().await.map_err(storage)
         })
     }
-    /// Run one statement against the schema in `migrations/` and return its rows. For Core
-    /// and the Host only; clients and extensions never send SQL.
+    /// Run one statement against the schema in `migrations/` and return its rows.
+    /// For internal core and service layers only; untrusted clients never send SQL.
     pub fn query(&self, sql: &str, params: Vec<Value>) -> Result<Vec<Row>, Error> {
         let connection = self.connection()?;
         futures_executor::block_on(async {
@@ -261,6 +270,8 @@ impl Database {
                 "DELETE FROM drafts WHERE account=?1",
                 "DELETE FROM labels WHERE account=?1",
                 "DELETE FROM label_messages WHERE account=?1",
+                "DELETE FROM ai_summaries WHERE account=?1",
+                "DELETE FROM ai_autolabel_seen WHERE account=?1",
             ] {
                 transaction.execute(sql, [account]).await.map_err(storage)?;
             }
@@ -275,6 +286,7 @@ impl Database {
         })
     }
 }
+
 async fn pragma(connection: &turso::Connection, name: &str) -> Result<i64, Error> {
     let mut rows = connection
         .query(&format!("PRAGMA {name}"), ())
@@ -287,9 +299,15 @@ async fn pragma(connection: &turso::Connection, name: &str) -> Result<i64, Error
         .get::<i64>(0)
         .map_err(storage)
 }
-/// Bring the schema up to [`SCHEMA_VERSION`], one transaction per step, after copying the
-/// database aside. Refuses databases that are not Colecto's or come from a newer build.
-async fn migrate(connection: &turso::Connection, path: &Path) -> Result<(), Error> {
+
+/// Bring the schema up to the latest migration, one transaction per step, after copying
+/// the database into `backups/`. Refuses foreign databases or ones from a newer Colecto build.
+async fn migrate(
+    connection: &turso::Connection,
+    path: &Path,
+    migrations: &[&str],
+) -> Result<(), Error> {
+    let target_version = migrations.len() as i64;
     let version = pragma(connection, "user_version").await?;
     let id = pragma(connection, "application_id").await?;
     let mut tables = connection
@@ -307,21 +325,21 @@ async fn migrate(connection: &turso::Connection, path: &Path) -> Result<(), Erro
     drop(tables);
     if !empty && id != APPLICATION_ID {
         return Err(storage(
-            "colecto.db was made by Colecto alpha or another program. Move it out of the data directory to start fresh.",
+            "colecto.db was made by another program. Move it out of the data directory to start fresh.",
         ));
     }
-    if version > SCHEMA_VERSION {
+    if version > target_version {
         return Err(storage(
             "colecto.db was made by a newer Colecto. Update Colecto to open it.",
         ));
     }
-    if version == SCHEMA_VERSION {
+    if version == target_version {
         return Ok(());
     }
     if !empty {
         backup(connection, path, version).await?;
     }
-    for (step, sql) in MIGRATIONS.iter().enumerate().skip(version as usize) {
+    for (step, sql) in migrations.iter().enumerate().skip(version as usize) {
         let next = step as i64 + 1;
         connection
             .execute_batch(&format!(
@@ -335,6 +353,7 @@ async fn migrate(connection: &turso::Connection, path: &Path) -> Result<(), Erro
     }
     Ok(())
 }
+
 /// Move everything in the write-ahead log into `colecto.db` itself.
 async fn checkpoint(connection: &turso::Connection) -> Result<(), Error> {
     let mut rows = connection
@@ -344,28 +363,45 @@ async fn checkpoint(connection: &turso::Connection) -> Result<(), Error> {
     while rows.next().await.map_err(storage)?.is_some() {}
     Ok(())
 }
-/// Copy the database to `colecto.db.before-v<N>` before migrating it, keeping one copy.
+
+/// Copy the database to `backups/v<N>-<ts>.db` before migrating it, keeping the 5 newest backups.
 async fn backup(connection: &turso::Connection, path: &Path, version: i64) -> Result<(), Error> {
     checkpoint(connection).await?;
     let directory = path
         .parent()
         .ok_or_else(|| storage("Invalid database path"))?;
-    for entry in fs::read_dir(directory).map_err(storage)?.flatten() {
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with("colecto.db.before-v")
-        {
-            fs::remove_file(entry.path()).map_err(storage)?;
-        }
+    let backups = directory.join("backups");
+    private_directory(&backups)?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let mut candidate = backups.join(format!("v{version}-{stamp:016}.db"));
+    let mut suffix = 0u32;
+    while candidate.exists() {
+        suffix += 1;
+        candidate = backups.join(format!("v{version}-{stamp:016}-{suffix}.db"));
     }
-    fs::copy(
-        path,
-        directory.join(format!("colecto.db.before-v{version}")),
-    )
-    .map_err(storage)?;
+    fs::copy(path, &candidate).map_err(storage)?;
+    let mut existing: Vec<_> = fs::read_dir(&backups)
+        .map_err(storage)?
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with('v') && name.ends_with(".db")
+        })
+        .collect();
+    existing.sort_by_key(|entry| entry.file_name());
+    for stale in existing
+        .iter()
+        .take(existing.len().saturating_sub(MAX_BACKUPS))
+    {
+        fs::remove_file(stale.path()).map_err(storage)?;
+    }
     Ok(())
 }
+
 fn validate(namespace: &str, name: &str, value: &[u8]) -> Result<(), Error> {
     if namespace.is_empty()
         || namespace.len() > 256
@@ -378,6 +414,7 @@ fn validate(namespace: &str, name: &str, value: &[u8]) -> Result<(), Error> {
     }
     Ok(())
 }
+
 pub(crate) fn private_directory(directory: &Path) -> Result<(), Error> {
     fs::create_dir_all(directory).map_err(storage)?;
     #[cfg(unix)]
@@ -395,9 +432,11 @@ pub(crate) fn private_directory(directory: &Path) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn user_version(db: &Database) -> i64 {
         futures_executor::block_on(pragma(&db.connection().unwrap(), "user_version")).unwrap()
     }
+
     #[test]
     fn new_database_is_marked_and_migrated() {
         let dir = tempfile::tempdir().unwrap();
@@ -408,11 +447,13 @@ mod tests {
                 .unwrap(),
             APPLICATION_ID
         );
+        assert!(dir.path().join("colecto.db").exists());
         drop(db);
-        // Reopening an up-to-date database neither migrates nor copies it.
+        // Reopening an up-to-date database neither migrates nor backs up.
         Database::open(dir.path()).unwrap();
-        assert!(!dir.path().join("colecto.db.before-v1").exists());
+        assert!(!dir.path().join("backups").exists());
     }
+
     #[test]
     fn foreign_and_newer_databases_are_refused() {
         let dir = tempfile::tempdir().unwrap();
@@ -427,7 +468,7 @@ mod tests {
         let error = Database::open(dir.path()).err().unwrap().to_string();
         assert!(error.contains("newer Colecto"), "{error}");
 
-        // An alpha database: tables, but no application ID.
+        // A database without Colecto's application ID.
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open(dir.path()).unwrap();
         futures_executor::block_on(
@@ -438,44 +479,94 @@ mod tests {
         .unwrap();
         drop(db);
         let error = Database::open(dir.path()).err().unwrap().to_string();
-        assert!(error.contains("Colecto alpha"), "{error}");
+        assert!(error.contains("another program"), "{error}");
     }
+
     #[test]
-    fn an_older_database_is_copied_before_migrating() {
+    fn forward_migration_backs_up_database_and_rolls_back_on_error() {
         let dir = tempfile::tempdir().unwrap();
-        let db = Database::open(dir.path()).unwrap();
+        let db = Database::open_with_migrations(dir.path(), &MIGRATIONS[..1]).unwrap();
         db.set_record("x", "y", b"kept").unwrap();
-        // Pretend no step ran yet. Step 1 then fails on the existing tables, after the copy.
-        futures_executor::block_on(
-            db.connection()
-                .unwrap()
-                .execute_batch("PRAGMA user_version=0;"),
-        )
-        .unwrap();
         drop(db);
-        let error = Database::open(dir.path()).err().unwrap().to_string();
-        assert!(dir.path().join("colecto.db.before-v0").exists(), "{error}");
-        let copy = tempfile::tempdir().unwrap();
-        fs::copy(
-            dir.path().join("colecto.db.before-v0"),
-            copy.path().join("colecto.db"),
-        )
-        .unwrap();
-        futures_executor::block_on(async {
-            let database =
-                turso::Builder::new_local(copy.path().join("colecto.db").to_str().unwrap())
-                    .build()
-                    .await
-                    .unwrap();
-            let connection = database.connect().unwrap();
-            let mut rows = connection
-                .query("SELECT value FROM records WHERE name='y'", ())
-                .await
-                .unwrap();
-            let row = rows.next().await.unwrap().unwrap();
-            assert_eq!(row.get::<Vec<u8>>(0).unwrap(), b"kept");
-        });
+
+        // A valid v1 -> v2 migration creates a backup under backups/ and upgrades cleanly.
+        let v2_migrations = &[
+            MIGRATIONS[0],
+            "CREATE TABLE extra_meta(id TEXT PRIMARY KEY, val TEXT NOT NULL);",
+        ];
+        let db2 = Database::open_with_migrations(dir.path(), v2_migrations).unwrap();
+        assert_eq!(user_version(&db2), 2);
+        assert_eq!(db2.get_record("x", "y").unwrap().unwrap(), b"kept");
+        let backups: Vec<_> = fs::read_dir(dir.path().join("backups"))
+            .unwrap()
+            .flatten()
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert!(backups[0].file_name().to_string_lossy().starts_with("v1-"));
+        drop(db2);
+
+        // Failing v2 -> v3 migration creates a backup, leaves user_version at 2, and rolls back DDL.
+        let bad_v3 = &[
+            MIGRATIONS[0],
+            "CREATE TABLE extra_meta(id TEXT PRIMARY KEY, val TEXT NOT NULL);",
+            "CREATE TABLE should_rollback(id TEXT PRIMARY KEY); INVALID SQL SYNTAX HERE;",
+        ];
+        let err = Database::open_with_migrations(dir.path(), bad_v3)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("Database migration 3 failed"), "{err}");
+        let db_check = Database::open_with_migrations(dir.path(), v2_migrations).unwrap();
+        assert_eq!(user_version(&db_check), 2);
+        assert!(
+            db_check
+                .query(
+                    "SELECT name FROM sqlite_schema WHERE name='should_rollback'",
+                    vec![]
+                )
+                .unwrap()
+                .is_empty()
+        );
+        drop(db_check);
+
+        // Trigger repeated migrations to confirm at most MAX_BACKUPS (5) are retained.
+        let mut chain: Vec<String> = v2_migrations.iter().map(|s| (*s).to_owned()).collect();
+        for step in 3..=9 {
+            chain.push(format!("CREATE TABLE step_{step}(id TEXT PRIMARY KEY);"));
+            let refs: Vec<&str> = chain.iter().map(String::as_str).collect();
+            let db_n = Database::open_with_migrations(dir.path(), &refs).unwrap();
+            assert_eq!(user_version(&db_n), step as i64);
+        }
+        let retained: Vec<_> = fs::read_dir(dir.path().join("backups"))
+            .unwrap()
+            .flatten()
+            .collect();
+        assert_eq!(retained.len(), MAX_BACKUPS);
     }
+
+    #[test]
+    fn v2_tauri_database_migrates_forward_to_current_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_v2 = Database::open_with_migrations(dir.path(), &MIGRATIONS[..2]).unwrap();
+        assert_eq!(user_version(&db_v2), 2);
+        db_v2.set_record("core", "marker", b"from-v0.9.0").unwrap();
+        drop(db_v2);
+
+        let db_v3 = Database::open(dir.path()).unwrap();
+        assert_eq!(user_version(&db_v3), SCHEMA_VERSION);
+        assert_eq!(
+            db_v3.get_record("core", "marker").unwrap().unwrap(),
+            b"from-v0.9.0"
+        );
+        let tables = db_v3
+            .query(
+                "SELECT name FROM sqlite_schema WHERE name IN ('ai_summaries', 'ai_autolabel_seen')",
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(tables.len(), 2);
+    }
+
     #[test]
     fn records_and_settings_round_trip() {
         let dir = tempfile::tempdir().unwrap();

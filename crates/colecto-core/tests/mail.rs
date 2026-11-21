@@ -1,5 +1,4 @@
-use colecto_core::MailStore;
-use colecto_extension_api::DraftInput;
+use colecto_core::{DraftInput, MailStore};
 
 fn input(id: Option<String>, subject: &str) -> DraftInput {
     DraftInput {
@@ -79,7 +78,7 @@ fn only_one_store_can_write_a_directory() {
 #[test]
 fn queries_sample_mail_without_losing_reader_state() {
     let directory = tempfile::tempdir().unwrap();
-    let mut store = colecto_core::MailStore::open(directory.path()).unwrap();
+    let mut store = MailStore::open(directory.path()).unwrap();
     let inbox = store.query("inbox", "").unwrap();
     assert_eq!(inbox.len(), 4);
     let matches = store.query("inbox", "bookshop").unwrap();
@@ -93,6 +92,23 @@ fn queries_sample_mail_without_losing_reader_state() {
     assert_eq!(store.query_page("inbox", "", 3).unwrap().len(), 1);
     assert!(store.query_page("inbox", "", 4).unwrap().is_empty());
     assert!(store.query_page("inbox", "", 100_001).is_err());
+    // Explicit page limits bound each batch and reject zero or oversized limits.
+    assert_eq!(
+        store
+            .query_page_with_limit("inbox", "", 0, 2)
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        store
+            .query_page_with_limit("inbox", "", 2, 2)
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(store.query_page_with_limit("inbox", "", 0, 0).is_err());
+    assert!(store.query_page_with_limit("inbox", "", 0, 101).is_err());
     // A paged listing never replaces the saved Inbox.
     assert_eq!(store.messages().len(), 4);
     // The sample account's other folders list what was moved there.

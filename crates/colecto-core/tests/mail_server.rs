@@ -1,8 +1,6 @@
-//! End-to-end checks against a real IMAP and SMTP server. Run with `just test mail`, which
-//! starts GreenMail in Docker with a certificate for `localhost` and sets
-//! `COLECTO_MAIL_TEST_CERT` to it; otherwise these tests skip.
-use colecto_core::{MailAccount, MailStore};
-use colecto_extension_api::{DraftInput, OutgoingAttachment};
+//! End-to-end checks against a real IMAP and SMTP server when `COLECTO_MAIL_TEST_CERT` is set;
+//! otherwise these tests skip.
+use colecto_core::{DraftInput, MailAccount, MailStore, OutgoingAttachment};
 use std::time::{Duration, Instant};
 
 const IMAP_PORT: u16 = 3993;
@@ -35,8 +33,6 @@ fn account(user: &str, certificate: &str) -> (tempfile::TempDir, MailStore) {
     (directory, store)
 }
 
-/// GreenMail starts with only an Inbox, and a folder named under it is what servers without
-/// SPECIAL-USE often have, so the sender gets `INBOX.Sent`.
 fn create_folder(user: &str, certificate: &str, name: &str) {
     let tls = native_tls::TlsConnector::builder()
         .disable_built_in_roots(true)
@@ -117,7 +113,6 @@ fn sends_with_attachments_receives_searches_and_files_in_sent() {
 
     let found = recipient.query("inbox", &subject).unwrap();
     assert!(found.iter().any(|m| m.id == id), "search did not find it");
-    // Search filters become IMAP SEARCH keys on the server (#103).
     let filtered = recipient
         .query(
             "inbox",
@@ -147,7 +142,6 @@ fn sends_with_attachments_receives_searches_and_files_in_sent() {
             .is_empty()
     );
 
-    // SMTP only delivers; Colecto files its own copy in Sent (#90).
     wait_for(&mut sender, "sent", &subject);
 }
 

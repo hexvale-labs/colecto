@@ -19,10 +19,15 @@ Where the directory is:
 
 | Runs as | Default (`COLECTO_DATA_DIR` overrides) |
 | --- | --- |
-| Desktop and mobile app | The platform's app data directory for `com.kogical.colecto`, for example `~/.local/share/com.kogical.colecto` |
+| Desktop app | The platform's data directory joined with `com.kogical.colecto`: `$XDG_DATA_HOME` or `~/.local/share` on Linux, `~/Library/Application Support` on macOS, `%APPDATA%` on Windows |
+| Android app | The app's data directory, `/data/user/0/com.kogical.colecto` |
+| iOS app | The app's Application Support directory |
 | `colecto-daemon` from the systemd unit | `~/.local/state/colecto` |
 | Docker image | `/data` |
 | `colecto-daemon` started by hand | `.colecto` in the working directory |
+
+These are the directories the Tauri app (v0.9.0 and earlier) used, so its `colecto.db`
+opens and migrates forward after an update.
 
 Before opening Turso, Core checks directory ownership on Unix and restricts it to mode
 `0700`. It rejects a database that is a symbolic link.
