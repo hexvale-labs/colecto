@@ -21,3 +21,7 @@ tower.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+# native-tls uses OpenSSL on Android, and the NDK ships none: build it from source.
+[target.'cfg(target_os = "android")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
