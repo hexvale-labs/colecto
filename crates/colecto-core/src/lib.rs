@@ -951,16 +951,14 @@ fn message_bytes(message: &Message) -> usize {
         + message.body.len()
         + message.date.len()
 }
-fn bounded_body(mut body: String) -> String {
+fn bounded_body(body: String) -> String {
     if body.len() > MAX_BODY_BYTES {
-        let mut end = MAX_BODY_BYTES;
-        while !body.is_char_boundary(end) {
-            end -= 1;
-        }
-        body.truncate(end);
+        let mut body = mime::truncate(body, MAX_BODY_BYTES);
         body.push_str("\n[Body truncated]");
+        body
+    } else {
+        body
     }
-    body
 }
 
 /// `folder` is `inbox`, `sent`, or a provider folder id from `folders()` (an IMAP mailbox
@@ -983,7 +981,6 @@ fn validate_offset(offset: usize) -> Result<(), Error> {
     Ok(())
 }
 
-/// Parse a comma-separated address list; an empty list is allowed.
 /// Waits for the provider to report Inbox changes: IMAP IDLE or JMAP push.
 pub struct PushWatcher {
     account: Arc<PushCredentials>,

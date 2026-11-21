@@ -165,3 +165,25 @@ test('sliders follow a finger and ignore a swipe that becomes a scroll', async (
   await touch('pointerdown', 0.9); await touch('pointercancel', 0.9);
   await expect(slider).toHaveValue(tapped);
 });
+
+test('compact back asks before discarding a dirty draft and closes instead of opening a blank one', async ({ page }) => {
+  await inbox(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Compose', exact: true }).click();
+  const subject = page.getByLabel('Subject', { exact: true });
+  await subject.fill('Unsaved compact draft');
+  await back(page);
+  await expect(page.getByRole('heading', { name: 'Discard unsaved changes?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
+  await expect(subject).toBeVisible();
+  await expect(subject).toHaveValue('Unsaved compact draft');
+  // Closing the dialog moves history back one step; a back pressed before that lands is lost.
+  await expect.poll(() => page.evaluate(() => history.state)).toEqual({ colectoBack: 1 });
+  await back(page);
+  await expect(page.getByRole('heading', { name: 'Discard unsaved changes?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await expect(subject).not.toBeVisible();
+  await expect(page.getByRole('button', { name: /Maya Chen/ })).toBeVisible();
+});
+

@@ -15,6 +15,9 @@ export type SettingsPage = typeof settingsPages[number]['id'] | `extension:${str
 
 export type Folder = 'Inbox' | 'Drafts' | 'Sent';
 
+/** Bundled extensions whose workspace panes keep their original layout IDs. */
+export const bundledPanes: Record<string, string> = { inbox: 'mailbox', reader: 'reader' };
+
 /** Settings sections that bundled extensions draw, by their old page name. */
 const extensionPages = {
   mail: { extension: 'inbox', name: 'Mail' },
@@ -23,6 +26,10 @@ const extensionPages = {
 } as const;
 /** The Settings sidebar's order for core and bundled sections. */
 const settingsOrder = ['accounts', 'mail', 'appearance', 'notifications', 'privacy', 'servers', 'extensions', 'ai', 'api-keys', 'send-approvals'];
+/** The Settings sidebar's order using `SettingsPage` identifiers (`extension:<id>` for bundled sections). */
+export const builtInSettingsOrder: readonly string[] = settingsOrder.map(
+  page => page in extensionPages ? `extension:${extensionPages[page as keyof typeof extensionPages].extension}` : page,
+);
 export type Destination = 'inbox' | 'drafts' | 'sent' | 'compose' | `settings/${SettingsPage}` | `settings/${keyof typeof extensionPages}`;
 
 export const destinations: { target: Destination; name: string }[] = [

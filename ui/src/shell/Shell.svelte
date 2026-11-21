@@ -29,7 +29,7 @@
   import ToastSettings from '../ToastSettings.svelte';
   import AppearanceSettings from '../AppearanceSettings.svelte';
   import { notify, notificationPosition } from './toast-store.svelte';
-  import { destinations, isDestination, resolve, settingsPages, type Destination, type SettingsPage } from '../lib/navigation';
+  import { builtInSettingsOrder, bundledPanes, destinations, isDestination, resolve, settingsPages, type Destination, type SettingsPage } from '../lib/navigation';
   let { extensionStates, extensionSettings, onsettings }: { extensionSettings: import('svelte').Snippet<[Workspace?]>; onsettings: () => void; extensionStates: ExtensionState[] } = $props();
 
   let connected = $state(false);
@@ -49,15 +49,14 @@
   // ---- Extensions ----
 
   // Bundled panes keep their old ids, so saved layouts survive the move to the runtime.
-  const paneIds: Record<string, string> = { inbox: 'mailbox', reader: 'reader' };
-  const paneOf = (id: string) => paneIds[id] ?? `ext:${id}`;
-  const extensionOf = (pane: string) => Object.entries(paneIds).find(([, value]) => value === pane)?.[0] ?? (pane.startsWith('ext:') ? pane.slice(4) : '');
+  const paneOf = (id: string) => bundledPanes[id] ?? `ext:${id}`;
+  const extensionOf = (pane: string) => Object.entries(bundledPanes).find(([, value]) => value === pane)?.[0] ?? (pane.startsWith('ext:') ? pane.slice(4) : '');
   let withPanes = $derived(extensionStates.filter(extension => extension.enabled && extension.manifest.pane && extension.manifest.client));
   let panes: PaneInfo[] = $derived([
     ...withPanes.filter(extension => extension.manifest.id === 'inbox').map(extension => ({ id: 'mailbox', title: extension.manifest.name, icon: extension.manifest.pane!.icon as IconName })),
     ...withPanes.filter(extension => extension.manifest.id === 'reader').map(extension => ({ id: 'reader', title: extension.manifest.name, icon: extension.manifest.pane!.icon as IconName })),
     { id: 'accounts', title: 'Accounts', icon: 'account' },
-    ...withPanes.filter(extension => !paneIds[extension.manifest.id]).map(extension => ({ id: paneOf(extension.manifest.id), title: extension.manifest.name, icon: extension.manifest.pane!.icon as IconName })),
+    ...withPanes.filter(extension => !bundledPanes[extension.manifest.id]).map(extension => ({ id: paneOf(extension.manifest.id), title: extension.manifest.name, icon: extension.manifest.pane!.icon as IconName })),
   ]);
   /** Which extension opens a destination such as `inbox` or `compose` (its `navigation`). */
   const owner = (target: string) => extensionStates.find(extension => extension.enabled && extension.manifest.navigation?.includes(target))?.manifest.id;
@@ -119,11 +118,9 @@
   $effect(() => { runtimes.ready = initialized; });
   let unsaved: Layout | null = null;
   let saving = false;
-  function commitLayout(next: Layout) {
-    if (next === layout) return;
-    savedLayout = next; unsaved = next;
-    // Resizing commits many times a second: keep one save in flight and always finish on the latest layout.
-    if (saving) return;
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  function flushLayout() {
+    if (saving || !unsaved) return;
     saving = true;
     void (async () => {
       while (unsaved) {
@@ -132,6 +129,17 @@
       }
       saving = false;
     })();
+  }
+  function commitLayout(next: Layout, live = false) {
+    const changed = next !== layout;
+    if (changed) { savedLayout = next; unsaved = next; }
+    clearTimeout(saveTimer);
+    if (live) {
+      // Defer persistence while dragging a splitter so we do not write to disk on every frame (#97).
+      saveTimer = setTimeout(flushLayout, 250);
+    } else if (changed || unsaved) {
+      flushLayout();
+    }
   }
   function activate(pane: string) { focus = pane; commitLayout(showPane(layout, pane)); }
   const shownPane = (pane: string) => !!groupOf(layout, pane);
@@ -222,14 +230,13 @@
     .sort((a, b) => Number(b.bundled) - Number(a.bundled));
   let currentExtension = $derived(extensionPages.find(e => `extension:${e.manifest.id}` === settingsPage));
   // Bundled sections keep the order the owner knows; third-party ones get their own group.
-  const builtInOrder = ['accounts', 'extension:inbox', 'appearance', 'notifications', 'extension:reader', 'servers', 'extensions', 'extension:ai', 'api-keys', 'send-approvals'];
   type NavEntry = { id: SettingsPage; name: string; icon?: IconName; extension?: ExtensionState };
   let builtIn = $derived.by((): NavEntry[] => {
     const entries: NavEntry[] = [
       ...settingsPages.map(page => ({ id: page.id as SettingsPage, name: page.name, icon: page.icon as IconName })),
       ...extensionPages.filter(e => e.bundled).map(e => ({ id: `extension:${e.manifest.id}` as SettingsPage, name: e.manifest.settings_page?.title ?? e.manifest.name, icon: e.manifest.settings_page?.icon as IconName | undefined, extension: e })),
     ];
-    const rank = (id: string) => { const at = builtInOrder.indexOf(id); return at < 0 ? builtInOrder.length : at; };
+    const rank = (id: string) => { const at = builtInSettingsOrder.indexOf(id); return at < 0 ? builtInSettingsOrder.length : at; };
     return entries.sort((a, b) => rank(a.id) - rank(b.id));
   });
   const discardSettings = () => !settingsDirty || window.confirm('Discard unsaved settings changes?');
@@ -275,7 +282,7 @@
       close: () => {
         const runtime = runtimes.get(extensionOf(pane));
         if (runtime?.states.pane?.back) runtime.send({ t: 'back', surface: 'pane' });
-        activate('mailbox');
+        else activate('mailbox');
       },
       isOpen: () => compact && focus === pane,
       surface: () => document.getElementById(`pane-${pane}`),

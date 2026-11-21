@@ -25,6 +25,7 @@
         - /placeholder: Model name
       - text: Max tokens
       - spinbutton "Max tokens" [disabled]: /\d+/
+      - paragraph: Changing the base URL removes the saved key.
       - text: API key
       - textbox "API key" [disabled]:
         - /placeholder: Paste the key; services on your computer often need none
@@ -50,6 +51,7 @@
       - textbox "Base URL" [disabled]: https://openrouter.ai
       - text: Model
       - textbox "Model" [disabled]: /typesafe\/jev-\d+\.\d+/
+      - paragraph: Changing the base URL removes the saved key.
       - text: API key
       - textbox "API key" [disabled]:
         - /placeholder: Paste the key; services on your computer often need none

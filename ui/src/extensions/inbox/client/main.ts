@@ -49,6 +49,8 @@ let olderOf = '';
 /** Whether this listing asked for older mail yet: a list shorter than a page just ends. */
 let paged = false;
 let more: 'available' | 'loading' | 'end' | 'error' = 'end';
+/** The footer status last drawn, so sync ticks can skip or patch it; empty when no footer is shown. */
+let renderedStatus = '';
 const PAGE = 100;
 // ---- Provider folders (#132) ----
 /** Provider folders besides Inbox, Drafts and Sent, as the folder bar and message menu show them.
@@ -302,6 +304,7 @@ function render() {
   const filtered = !!appliedQuery || !!query.trim() || !!labelFilter;
   const state = status();
   const off = !app.accounts.length;
+  renderedStatus = !off && folder !== 'Drafts' ? `${state.text}\0${state.detail}\0${state.busy}\0${state.offline}` : '';
   const names = Object.keys(labels);
   const empty: Node[] = loading && !list.length ? [{ type: 'empty_state', preset: 'list', text: folder.startsWith('folder:') ? `Loading ${title}…` : `Loading your ${title.toLowerCase()}…` }]
     : searching && !list.length ? [{ type: 'empty_state', preset: 'list', text: 'Searching…' }]
@@ -333,8 +336,8 @@ function render() {
         ...(names.length ? [{ type: 'button', id: 'label-all', variant: 'chip', label: 'All', pressed: !labelFilter }] : []),
         // Label names can hold any character, so nodes are named by position.
         ...names.map((name, index) => ({ type: 'stack', preset: 'chip_group', children: [
-          { type: 'button', id: `label.${index}`, variant: 'chip', label: name, pressed: labelFilter === name },
-          ...(labelFilter === name ? [{ type: 'button', id: `delete-label.${index}`, variant: 'chip_remove', icon: 'close', label: `Delete label ${name}`, disabled: labeling || loading }] : []),
+          { type: 'button', id: `label.${index}`, variant: 'chip', label: clip(name, 128), pressed: labelFilter === name },
+          ...(labelFilter === name ? [{ type: 'button', id: `delete-label.${index}`, variant: 'chip_remove', icon: 'close', label: clip(`Delete label ${name}`, 128), disabled: labeling || loading }] : []),
         ] })),
         { type: 'form', id: `new-label-form-${labelEpoch}`, preset: 'chip_input', children: [
           { type: 'input', id: 'new-label', preset: 'chip', label: 'New label', placeholder: 'New label', maxlength: 80, report: 'input', debounce_ms: 0 },
@@ -347,7 +350,7 @@ function render() {
         ...(error ? [{ type: 'empty_state', preset: 'error', text: error, ...(items.length ? { hint: [{ text: 'Showing saved mail; it may be out of date.' }] } : {}), actions: [{ type: 'button', id: 'retry', variant: 'secondary', label: 'Try again' }] } as Node] : []),
         { type: 'list', id: 'messages', mode: 'virtual', label: clip(`${title} messages`, 128), rows: rows(list), ...(selected ? { selected } : {}), arrived, context_menu: folder !== 'Drafts', ...(list.length && !narrowed && (more !== 'end' || paged) ? { more } : {}), children: empty },
         { type: 'stack', preset: 'footer', children: folder === 'Drafts' ? [{ type: 'text', text: 'Drafts are saved by your mail service.' }] : [
-          { type: 'text', preset: 'list_status', tone: state.offline ? 'danger' : 'default', title: [state.text, state.detail].filter(Boolean).join(' · '), spans: [{ text: state.text }, ...(state.detail ? [{ text: state.detail }] : [])] },
+          { type: 'text', id: 'list-status', preset: 'list_status', tone: state.offline ? 'danger' : 'default', title: [state.text, state.detail].filter(Boolean).join(' · '), spans: [{ text: state.text }, ...(state.detail ? [{ text: state.detail }] : [])] },
           { type: 'button', id: 'refresh', variant: 'icon', icon: 'refresh', label: 'Refresh', title: 'Refresh', busy: state.busy, disabled: fetching },
         ] },
       ] },
@@ -363,7 +366,7 @@ function commands() {
     ...(labelFilter || sort !== 'newest' || appliedQuery ? [{ id: 'clear-filters', name: 'Clear search, sorting and filters' }] : []),
     { id: 'new-label', name: 'Create a local label' },
     { id: 'refresh', name: 'Refresh current mailbox' },
-    ...Object.keys(labels).map(name => ({ id: `label:${name}`, name: clip(`Filter label: ${name}`, 96) })),
+    ...Object.keys(labels).map((name, index) => ({ id: `label:${index}`, name: clip(`Filter label: ${name}`, 96) })),
   ].slice(0, 64) });
 }
 
@@ -424,19 +427,22 @@ function showMenu(id: string) {
   if (!folderList.length) void loadFolders();
   const here = remoteOf(folder);
   const archive = folderList.find(entry => entry.role === 'archive');
-  const names = Object.keys(labels).slice(0, 8);
+  const showArchive = Boolean(archive && folder !== 'Sent' && here !== archive.id);
+  const fixed = 3 + (showArchive ? 1 : 0);
+  const actions = rowActions.slice(0, Math.max(0, 24 - fixed));
+  const names = Object.keys(labels).slice(0, Math.min(8, Math.max(0, 24 - fixed - actions.length)));
   const head = [
     { id: 'read', label: item.seen ? 'Mark as unread' : 'Mark as read', icon: item.seen ? 'mail' : 'eye' },
     { id: 'star', label: item.flagged ? 'Remove star' : 'Star', icon: 'star' },
-    ...rowActions.map((action, index) => ({ id: `ext:${index}`, label: clip(action.label, 64), icon: action.icon, ...(index === 0 ? { separator: true } : {}) })),
+    ...actions.map((action, index) => ({ id: `ext:${index}`, label: clip(action.label, 64), icon: action.icon, ...(index === 0 ? { separator: true } : {}) })),
     ...names.map((name, index) => ({ id: `label:${index}`, label: clip(`Label: ${name}`, 64), checked: !!labels[name]?.includes(id), ...(index === 0 ? { separator: true } : {}) })),
-    ...(archive && folder !== 'Sent' && here !== archive.id ? [{ id: 'archive', label: 'Archive', icon: 'archive', separator: true }] : []),
+    ...(showArchive ? [{ id: 'archive', label: 'Archive', icon: 'archive', separator: true }] : []),
   ];
   // The same folders the folder bar shows, as many as the menu's 24 entries allow.
-  const others = otherFolders().filter(entry => entry.role !== 'archive' && entry.role !== 'trash' && entry.id !== here).slice(0, 24 - head.length - 1);
+  const others = otherFolders().filter(entry => entry.role !== 'archive' && entry.role !== 'trash' && entry.id !== here).slice(0, Math.max(0, 24 - head.length - 1));
   app.send({ t: 'menu', surface: 'pane', node: 'messages', key: id, items: [
     ...head,
-    ...others.map((entry, index) => ({ id: `move:${entry.id}`, label: clip(`Move to ${folderLabel(entry)}`, 64), icon: folderIcon(entry.role), ...(index === 0 && !head.some(entry => entry.id === 'archive') ? { separator: true } : {}) })),
+    ...others.map((entry, index) => ({ id: `move:${entry.id}`, label: clip(`Move to ${folderLabel(entry)}`, 64), icon: folderIcon(entry.role), ...(index === 0 && !showArchive ? { separator: true } : {}) })),
     { id: 'delete', label: 'Move to Trash', icon: 'trash', danger: true, separator: true },
   ] });
 }
@@ -505,7 +511,10 @@ app.on('command', message => {
   else if (id === 'clear-filters') { sort = 'newest'; labelFilter = ''; if (appliedQuery) { query = ''; searchEpoch++; void runSearch(); } render(); }
   else if (id === 'new-label') { if (folder === 'Drafts') navigate('Inbox'); app.send({ t: 'show', surface: 'pane' }); app.send({ t: 'focus', surface: 'pane', node: 'new-label' }); }
   else if (id === 'refresh') void load();
-  else if (id.startsWith('label:')) { if (folder !== 'Inbox') navigate('Inbox'); labelFilter = id.slice(6); render(); }
+  else if (id.startsWith('label:')) {
+    const name = Object.keys(labels)[Number(id.slice(6))];
+    if (name) { if (folder !== 'Inbox') navigate('Inbox'); labelFilter = name; render(); }
+  }
   else if (id.startsWith('open:')) open(id.slice(5));
 });
 
@@ -515,7 +524,7 @@ app.on('command_query', message => {
   // The command runner takes the same filters as the search field.
   const parsed = parse(String(message.query).trim());
   const hits = parsed.words.length || parsed.filters.length ? items.filter(item => matches(item, parsed)).slice(0, 6)
-    .map(item => ({ id: `open:${item.id}`, title: item.subject || '(No subject)', hint: item.name })) : [];
+    .map(item => ({ id: `open:${item.id}`, title: clip(item.subject || '(No subject)', 128), hint: clip(item.name, 128) })) : [];
   app.send({ t: 'command_hits', seq: message.seq, hits });
 });
 app.on('command_submit', message => { query = String(message.query); searchEpoch++; if (folder === 'Drafts') navigate('Inbox'); void load(true); });
@@ -540,9 +549,21 @@ app.on('host:sync', message => {
   if (typeof event.account !== 'string' || typeof event.mode !== 'string') return;
   const previous = sync[event.account];
   sync[event.account] = event as AccountSync;
+  if (event.account !== account) return;
   // Background downloads just finished: the reader can warm its cache from what the Host holds.
-  if (event.account === account && previous && previous.activity !== 'idle' && event.activity === 'idle') warm(items);
-  render();
+  if (previous && previous.activity !== 'idle' && event.activity === 'idle') warm(items);
+  // Empty when the last render had no footer to patch (a patch to a missing node stops the extension).
+  if (!renderedStatus) return;
+  const state = status();
+  const signature = `${state.text}\0${state.detail}\0${state.busy}\0${state.offline}`;
+  if (signature === renderedStatus) return;
+  renderedStatus = signature;
+  // Patch only the footer status and refresh spinner so background sync ticks do not rebuild
+  // and re-send the entire message list every 200 ms (#97).
+  app.patch('pane', [
+    { op: 'set', node: 'list-status', props: { tone: state.offline ? 'danger' : 'default', title: [state.text, state.detail].filter(Boolean).join(' · '), spans: [{ text: state.text }, ...(state.detail ? [{ text: state.detail }] : [])] } },
+    { op: 'set', node: 'refresh', props: { busy: state.busy } },
+  ]);
 });
 for (const name of ['host:ready', 'host:resync']) app.on(name, () => void call<AccountSync[]>('GET', '/sync').then(list => { sync = Object.fromEntries(list.map(status => [status.account, status])); render(); }).catch(() => {}));
 // Other extensions open a message here: notifications, for example.
@@ -553,7 +574,12 @@ bus.handle('v1/open', payload => {
   return null;
 });
 // Keep the highlight on what the reader or composer actually shows.
-bus.listen('reader/v1/viewing', payload => { if (payload?.account === account && folder !== 'Drafts') { selected = payload.message_id ?? null; render(); } });
+bus.listen('reader/v1/viewing', payload => {
+  if (payload?.account !== account || folder === 'Drafts') return;
+  const next = payload.message_id ?? null;
+  if (next === selected) return;
+  selected = next; render();
+});
 bus.listen('composer/v1/editing', payload => { if (folder === 'Drafts') { selected = payload?.draft_id ?? null; render(); } });
 bus.listen('composer/v1/saved', () => { if (folder === 'Drafts') void load(); });
 bus.listen('ai/v1/labeled', payload => { if (payload?.account === account) void call<Labels>('GET', '/labels').then(next => { labels = next; render(); }).catch(() => {}); });

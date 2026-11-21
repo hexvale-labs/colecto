@@ -1,13 +1,14 @@
 <script lang="ts" module>
   /** Lets Settings show or hide an extension's pane in the dockable workspace. */
   export interface Workspace { shown: (pane: string) => boolean; toggle: (pane: string, on: boolean) => void }
-  const bundledPanes: Record<string, string> = { inbox: 'mailbox', reader: 'reader' };
 </script>
 <script lang="ts">
   import { onMount } from 'svelte';
   import Shell from './shell/Shell.svelte';
   import Toasts from './shell/Toasts.svelte';
   import { capabilityLabel } from './lib/capabilities';
+  import { bundledPanes } from './lib/navigation';
+  import { modal } from './lib/ui';
   import FilePick from './FilePick.svelte';
   import InstallWarning from './InstallWarning.svelte';
   import ApiVersionError, { type Discontinued } from './ApiVersionError.svelte';
@@ -18,7 +19,6 @@
   import type { AccountInfo, Capability, ExtensionState } from './lib/api';
   let authRequired = $state(false);
   let token = $state('');
-  function connectDialog(node: HTMLDialogElement) { node.showModal(); return { destroy() { node.close(); } }; }
   async function connect(event: SubmitEvent) { event.preventDefault(); busy = true; error = ''; setAccessToken(token); try { await hostService.accounts(); authRequired = false; token = ''; await Promise.all([reload(), checkOnboarding()]); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   let packageFile = $state<FileList | undefined>();
   let warning = $state<File | null>(null);
@@ -168,7 +168,7 @@
 {/snippet}
 
 {#if authRequired}
-  <dialog class="connect-page" aria-label="Connect to mail service" use:connectDialog oncancel={(event) => event.preventDefault()}><form onsubmit={connect}><img src={mark} alt="Colecto" width="44" height="44" /><h1>Connect to your mail</h1><p>Enter this daemon’s owner access token. For a local service, it is in the owner-token file in your Colecto data directory. The token stays in this browser session only; the native app connects automatically.</p><label class="field">Daemon access token<input type="password" bind:value={token} autocomplete="off" required /></label>{#if error}<p role="alert" class="error-box">{error}</p>{/if}<button class="primary" disabled={busy}>Connect</button></form></dialog>
+  <dialog class="connect-page" aria-label="Connect to mail service" use:modal oncancel={(event) => event.preventDefault()}><form onsubmit={connect}><img src={mark} alt="Colecto" width="44" height="44" /><h1>Connect to your mail</h1><p>Enter this daemon’s owner access token. For a local service, it is in the owner-token file in your Colecto data directory. The token stays in this browser session only; the native app connects automatically.</p><label class="field">Daemon access token<input type="password" bind:value={token} autocomplete="off" required /></label>{#if error}<p role="alert" class="error-box">{error}</p>{/if}<button class="primary" disabled={busy}>Connect</button></form></dialog>
 {/if}
 
 {#if managing}

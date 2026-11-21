@@ -153,17 +153,7 @@ fn classify(account: &str, ids: &[String], force: bool, cx: &mut Context) -> Res
     if fresh.is_empty() {
         return Ok(outcome);
     }
-    seen.extend(
-        fresh
-            .iter()
-            .filter(|id| !seen.contains(id))
-            .cloned()
-            .collect::<Vec<_>>(),
-    );
-    while seen.len() > SEEN_PER_ACCOUNT {
-        seen.pop_front();
-    }
-    cx.store(&key, &seen)?;
+    let existing = cx.labels()?;
     // One message at a time: the whole saved Inbox (`messages.list`, bodies included) does
     // not fit the 64 KiB bridge reply once it holds real mail, which failed every pass.
     let mut messages = Vec::new();
@@ -172,7 +162,22 @@ fn classify(account: &str, ids: &[String], force: bool, cx: &mut Context) -> Res
             messages.push(message);
         }
     }
-    let existing = cx.labels()?;
+    if messages.is_empty() {
+        return Ok(outcome);
+    }
+    let mut seen_changed = false;
+    for message in &messages {
+        if !seen.contains(&message.id) {
+            seen.push_back(message.id.clone());
+            seen_changed = true;
+        }
+    }
+    while seen.len() > SEEN_PER_ACCOUNT {
+        seen.pop_front();
+    }
+    if seen_changed {
+        cx.store(&key, &seen)?;
+    }
     let compiled: BTreeMap<&String, Vec<(Field, regex::Regex)>> = rules
         .iter()
         .filter(|(name, _)| existing.contains_key(*name))
@@ -236,10 +241,9 @@ fn classify(account: &str, ids: &[String], force: bool, cx: &mut Context) -> Res
             ) {
                 Ok(answers) => {
                     for (name, p) in ask.iter().zip(answers) {
-                        decided.insert(
-                            (*name).clone(),
-                            p.is_some_and(|p| p >= settings.decision.threshold),
-                        );
+                        if let Some(p) = p {
+                            decided.insert((*name).clone(), p >= settings.decision.threshold);
+                        }
                     }
                 }
                 // The Host reports why; stop asking for this pass.
@@ -425,5 +429,91 @@ mod tests {
         assert!(compile("  ").is_none());
         assert!(compile("(").is_none());
         assert!(compile(&"a".repeat(301)).is_none());
+    }
+
+    #[test]
+    fn transient_load_failure_does_not_mark_messages_seen() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let store = Rc::new(RefCell::new(Value::Null));
+        let (calls, stored) = (log.clone(), store.clone());
+        let config = settings(true);
+        let mut host = TestHost::new(move |request| {
+            calls.borrow_mut().push(request.clone());
+            match request["operation"].as_str() {
+                Some("ai.settings") => Ok(config.clone()),
+                Some("storage.get") => Ok(stored.borrow().clone()),
+                Some("storage.set") => {
+                    *stored.borrow_mut() = request["value"].clone();
+                    Ok(Value::Null)
+                }
+                Some("labels.list") => Err("temporary failure".into()),
+                _ => Err("unexpected".into()),
+            }
+        });
+        let event = json!({"event": "mail", "account": "a", "ids": ["1", "2"]}).to_string();
+        host.run(crate::colecto_main, &event);
+        assert_eq!(*store.borrow(), Value::Null);
+        assert!(!log.borrow().iter().any(|c| c["operation"] == "storage.set"));
+
+        // When only message "1" loads and "2" fails transiently, only "1" is marked seen.
+        let store2 = Rc::new(RefCell::new(Value::Null));
+        let stored2 = store2.clone();
+        let config = settings(true);
+        let mut host = TestHost::new(move |request| match request["operation"].as_str() {
+            Some("ai.settings") => Ok(config.clone()),
+            Some("storage.get") => Ok(stored2.borrow().clone()),
+            Some("storage.set") => {
+                *stored2.borrow_mut() = request["value"].clone();
+                Ok(Value::Null)
+            }
+            Some("labels.list") => Ok(json!({"Receipts": [], "Friends": []})),
+            Some("messages.read") if request["id"] == "1" => sample(&request["id"]),
+            Some("messages.read") => Err("temporary read failure".into()),
+            Some("ai.decide") => Ok(json!([0.1])),
+            Some("messages.label") | Some("bus.emit") => Ok(json!({})),
+            _ => Err("unexpected".into()),
+        });
+        host.run(crate::colecto_main, &event);
+        assert_eq!(*store2.borrow(), json!(["1"]));
+    }
+
+    #[test]
+    fn reclassify_keeps_existing_label_when_decision_model_returns_none() {
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let calls = log.clone();
+        let mut config = settings(true);
+        config["autolabel"] = json!(false);
+        let mut host = TestHost::new(move |request| {
+            calls.borrow_mut().push(request.clone());
+            match request["operation"].as_str() {
+                Some("ai.settings") => Ok(config.clone()),
+                Some("storage.get") => Ok(json!(["2"])),
+                Some("storage.set") | Some("bus.emit") => Ok(Value::Null),
+                Some("messages.read") => sample(&request["id"]),
+                Some("labels.list") => Ok(json!({"Receipts": [], "Friends": ["2"]})),
+                Some("ai.decide") => Ok(json!([null])),
+                Some("messages.label") => Ok(json!({})),
+                _ => Err("unexpected".into()),
+            }
+        });
+        let outcome = host
+            .with(|cx| {
+                reclassify(
+                    Reclassify {
+                        account: "a".into(),
+                        ids: vec!["2".into()],
+                    },
+                    cx,
+                )
+            })
+            .unwrap();
+        assert_eq!(outcome.checked, 1);
+        assert_eq!(outcome.changed, 0);
+        assert!(
+            !log.borrow()
+                .iter()
+                .any(|c| c["operation"] == "messages.label")
+        );
+        assert!(!log.borrow().iter().any(|c| c["operation"] == "storage.set"));
     }
 }

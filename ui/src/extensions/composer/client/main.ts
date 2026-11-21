@@ -16,7 +16,7 @@ let files: File[] = [];
 let saving = false, sending = false, sent = false, saved = false;
 let error = '';
 let epoch = 0;
-let pendingOpen: Draft | null | undefined;
+let pendingOpen: Draft | null | 'close' | undefined;
 let openError = '';
 const snapshot = () => JSON.stringify([fields.recipient, fields.cc, fields.subject, fields.body]);
 const dirty = () => open && (snapshot() !== baseline || files.length > 0);
@@ -40,9 +40,9 @@ function start(draft: Draft | null) {
   render();
 }
 
-/** Open a draft, asking first when unsaved changes would be lost. */
-function request(draft: Draft | null) {
-  if (!dirty()) { start(draft); return; }
+/** Open a draft (or close the composer), asking first when unsaved changes would be lost. */
+function request(draft: Draft | null | 'close') {
+  if (!dirty()) { if (draft === 'close') close(); else start(draft); return; }
   pendingOpen = draft;
   app.send({ t: 'dialog', tree: { type: 'stack', gap: 12, children: [
     { type: 'heading', level: 2, text: 'Discard unsaved changes?' },
@@ -51,7 +51,13 @@ function request(draft: Draft | null) {
   ] } });
 }
 app.when('keep', 'press', () => { pendingOpen = undefined; app.send({ t: 'dialog', tree: null }); }, 'dialog');
-app.when('discard', 'press', () => { app.send({ t: 'dialog', tree: null }); if (pendingOpen !== undefined) start(pendingOpen); else close(); pendingOpen = undefined; }, 'dialog');
+app.when('discard', 'press', () => {
+  app.send({ t: 'dialog', tree: null });
+  const next = pendingOpen;
+  pendingOpen = undefined;
+  if (next === 'close' || next === undefined) close();
+  else start(next);
+}, 'dialog');
 
 function close() { open = false; openError = ''; files = []; error = ''; void bus.emit('v1/editing', { draft_id: null }).catch(() => {}); render(); app.send({ t: 'leave', surface: 'pane' }); }
 
@@ -150,10 +156,10 @@ const typed = (key: keyof Fields) => (value: { value: string }) => {
 for (const key of ['recipient', 'cc', 'subject', 'body'] as const) app.when(key, 'input', typed(key));
 app.on('event', message => { if (message.kind === 'submit' && String(message.node).startsWith('draft-')) void save(); });
 app.when('send', 'press', () => void send());
-app.when('back', 'press', () => { if (dirty()) { pendingOpen = undefined; request(null); } else close(); });
+app.when('back', 'press', () => request('close'));
 app.when('attach', 'files', value => attach(value));
 app.when('files', 'remove', ({ index }) => { files = files.filter((_, other) => other !== index); render(); });
-app.on('back', () => { if (dirty()) request(null); else close(); });
+app.on('back', () => request('close'));
 app.on('app_action', message => { if (message.id === 'compose') request(null); });
 app.on('navigate', message => { if (message.target === 'compose') request(null); });
 app.on('host:navigate', message => { if ((message.data as { target?: string }).target === 'compose') request(null); });

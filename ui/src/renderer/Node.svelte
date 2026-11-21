@@ -101,7 +101,6 @@
   const stackClass: Record<string, string> = { pane: 'mail-pane', pane_header: 'mail-head', chip_bar: 'label-bar', chip_group: 'chip-group', note: 'sort-note', body_controls: 'body-controls', compose_footer: 'compose-footer', actions: 'bus-actions', attachments_block: 'compose-attachments', welcome: 'welcome' };
   const size = (format: unknown, value: number, unit?: string) => format === 'percent' ? `${Math.round(value * 100)}%` : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)}${unit ? ` ${unit}` : ''}`;
   let rangeDraft = $state<number | null>(null);
-  let fileInput = $state<HTMLInputElement>();
   async function pick(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
     const files = Array.from(input.files ?? []);
@@ -303,7 +302,7 @@
     {#if p('low') || p('high')}<span class="range-ends" aria-hidden="true"><span>{p('low')}</span><span>{p('high')}</span></span>{/if}
   </div>
 {:else if node.type === 'file_picker'}
-  <label class="tool attach-button" class:disabled={p('disabled')}>{#if p('icon')}<Icon name={p<IconName>('icon')} />{/if}<span>{p('label')}</span><input bind:this={fileInput} class="sr-only" type="file" multiple={p('multiple')} disabled={p('disabled')} onchange={pick} /></label>
+  <label class="tool attach-button" class:disabled={p('disabled')}>{#if p('icon')}<Icon name={p<IconName>('icon')} />{/if}<span>{p('label')}</span><input class="sr-only" type="file" multiple={p('multiple')} disabled={p('disabled')} onchange={pick} /></label>
 {:else if node.type === 'secret_field'}
   <SecretField label={p<string>('label')} target={p<'ai.text' | 'ai.decision'>('target')} saved={p<boolean>('saved')} onsaved={(saved) => emit('saved', { saved })} />
 {:else if node.type === 'list'}

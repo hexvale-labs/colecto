@@ -3,13 +3,13 @@
   export interface PaneInfo { id: string; title: string; icon: IconName }
 </script>
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { tick, type Snippet } from 'svelte';
   import Icon from './Icon.svelte';
   import Select from './Select.svelte';
   import { HEAD, MIN, dock, dockEdge, leaves, measure, preview, resize, setVisible, zoneIn, type Edge, type Gutter, type Layout, type Rect, type Zone } from './lib/layout';
   let { layout, panes, focus, compact, content, header, onactivate, onchange }: {
     layout: Layout; panes: PaneInfo[]; focus: string; compact: boolean; content: Snippet<[string]>; header?: Snippet<[string]>;
-    onactivate: (pane: string) => void; onchange: (layout: Layout) => void;
+    onactivate: (pane: string) => void; onchange: (layout: Layout, live?: boolean) => void;
   } = $props();
   type MenuAction = Edge | 'hide' | `show:${string}`;
   const arrange: { value: MenuAction; label: string; group?: string }[] = [
@@ -31,12 +31,15 @@
   let measured = $derived(measure(layout.root, { x: 0, y: 0, w: width, h: height }));
   let placed = $derived(groups.flatMap(group => group.panes.filter(pane => info.has(pane)).map(pane => ({ pane, group }))));
   type Target = { group: string; zone: Zone; index?: number } | { edge: Edge };
-  let dragging = $state<{ pane: string; x: number; y: number; target: Target | null; shape: Rect | null } | null>(null);
+  let dragging = $state<{ pane: string; target: Target | null; shape: Rect | null } | null>(null);
+  let ghost = $state<HTMLElement>();
   let resizing = $state<'row' | 'column' | null>(null);
   const box = (rect: Rect | undefined) => rect ? `left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px` : 'display:none';
   const body = (rect: Rect | undefined) => rect && box({ ...rect, y: rect.y + HEAD, h: rect.h - HEAD });
+  const sameRect = (a: Rect | null, b: Rect | null) => a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
+  const sameTarget = (a: Target | null, b: Target | null) => a === b || (!!a && !!b && ('edge' in a ? 'edge' in b && a.edge === b.edge : !('edge' in b) && a.group === b.group && a.zone === b.zone && a.index === b.index));
 
-  function targetAt(x: number, y: number): { target: Target; shape: Rect } | null {
+  function targetAt(x: number, y: number, tabMids: Map<string, number[]>): { target: Target; shape: Rect } | null {
     if (x < 0 || y < 0 || x > width || y > height) return null;
     const edge: Edge | null = x < EDGE ? 'left' : x > width - EDGE ? 'right' : y < EDGE ? 'top' : y > height - EDGE ? 'bottom' : null;
     if (edge) return { target: { edge }, shape: preview({ x: 0, y: 0, w: width, h: height }, edge) };
@@ -45,10 +48,9 @@
       const zone = zoneIn(rect, x, y);
       let index: number | undefined;
       if (zone === 'center' && y < rect.y + HEAD) {
-        const tabs = [...(area?.querySelectorAll<HTMLElement>(`[data-group="${group}"] .dock-tab`) ?? [])];
-        const left = area?.getBoundingClientRect().left ?? 0;
-        index = tabs.findIndex(tab => { const r = tab.getBoundingClientRect(); return x + left < r.left + r.width / 2; });
-        if (index < 0) index = tabs.length;
+        const mids = tabMids.get(group) ?? [];
+        index = mids.findIndex(mid => x < mid);
+        if (index < 0) index = mids.length;
       }
       return { target: { group, zone, index }, shape: preview(rect, zone) };
     }
@@ -58,14 +60,41 @@
     if (event.button !== 0 || compact || !area) return;
     const start = { x: event.clientX, y: event.clientY };
     const origin = area.getBoundingClientRect();
+    // Measure tab midpoints once at drag start instead of querying DOM on every pointermove (#97).
+    const tabMids = new Map<string, number[]>();
+    for (const group of measured.groups.keys()) {
+      const tabs = [...area.querySelectorAll<HTMLElement>(`[data-group="${group}"] .dock-tab`)];
+      tabMids.set(group, tabs.map(tab => { const r = tab.getBoundingClientRect(); return r.left - origin.left + r.width / 2; }));
+    }
+    let pending: { x: number; y: number } | null = null;
+    let frame = 0;
+    const placeGhost = (x: number, y: number) => {
+      if (ghost) ghost.style.transform = `translate3d(${Math.min(x + 12, width - 150)}px, ${Math.min(y + 10, height - 34)}px, 0)`;
+    };
+    const flush = () => {
+      frame = 0;
+      if (!pending) return;
+      const { x, y } = pending; pending = null;
+      const hit = targetAt(x, y, tabMids);
+      const nextTarget = hit?.target ?? null;
+      const nextShape = hit?.shape ?? null;
+      if (!dragging || !sameTarget(dragging.target, nextTarget) || !sameRect(dragging.shape, nextShape)) {
+        dragging = { pane, target: nextTarget, shape: nextShape };
+      }
+      // The ghost mounts with the first drag update: place it once Svelte has drawn it, before this frame paints.
+      if (ghost) placeGhost(x, y);
+      else void tick().then(() => placeGhost(x, y));
+    };
     const moveTo = (e: PointerEvent) => {
       if (!dragging && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 6) return;
-      const x = e.clientX - origin.left, y = e.clientY - origin.top;
-      const hit = targetAt(x, y);
-      dragging = { pane, x, y, target: hit?.target ?? null, shape: hit?.shape ?? null };
+      pending = { x: e.clientX - origin.left, y: e.clientY - origin.top };
+      frame ||= requestAnimationFrame(flush);
     };
     const stop = (e: PointerEvent | KeyboardEvent) => {
       window.removeEventListener('pointermove', moveTo); window.removeEventListener('pointerup', stop); window.removeEventListener('keydown', cancel);
+      if (frame) { cancelAnimationFrame(frame); frame = 0; }
+      if (pending && e.type === 'pointerup') flush();
+      pending = null;
       const target = dragging?.target;
       if (target && e.type === 'pointerup') onchange('edge' in target ? dockEdge(layout, pane, target.edge) : dock(layout, pane, target.group, target.zone, target.index));
       dragging = null;
@@ -96,8 +125,24 @@
     resizing = gutter.dir;
     const start = gutter.dir === 'row' ? event.clientX : event.clientY;
     const sizes = [...split.sizes];
-    const update = (e: PointerEvent) => onchange(resize(layout, gutter.path, sizesFor(gutter, sizes, (gutter.dir === 'row' ? e.clientX : e.clientY) - start)));
-    const stop = () => { handle.removeEventListener('pointermove', update); handle.removeEventListener('pointerup', stop); handle.removeEventListener('lostpointercapture', stop); resizing = null; };
+    let latest: number | null = null;
+    let moved = false;
+    let frame = 0;
+    const apply = (live: boolean) => {
+      frame = 0;
+      if (latest === null) return;
+      const delta = latest - start; latest = null;
+      moved = true;
+      onchange(resize(layout, gutter.path, sizesFor(gutter, sizes, delta)), live);
+    };
+    const update = (e: PointerEvent) => { latest = gutter.dir === 'row' ? e.clientX : e.clientY; frame ||= requestAnimationFrame(() => apply(true)); };
+    const stop = () => {
+      handle.removeEventListener('pointermove', update); handle.removeEventListener('pointerup', stop); handle.removeEventListener('lostpointercapture', stop);
+      if (frame) { cancelAnimationFrame(frame); frame = 0; }
+      if (latest !== null) apply(false);
+      else if (moved) onchange(layout, false);
+      resizing = null;
+    };
     handle.addEventListener('pointermove', update); handle.addEventListener('pointerup', stop); handle.addEventListener('lostpointercapture', stop);
   }
   function resizeKey(event: KeyboardEvent, gutter: Gutter) {
@@ -156,7 +201,7 @@
   {#if dragging}
     <div class="drop-overlay" aria-hidden="true">
       {#if dragging.shape}<div class="drop-preview" style={box(dragging.shape)}></div>{/if}
-      <span class="drag-ghost" style:transform={`translate(${Math.min(dragging.x + 12, width - 150)}px, ${Math.min(dragging.y + 10, height - 34)}px)`}><Icon name={info.get(dragging.pane)?.icon ?? 'layout'} size={14} />{info.get(dragging.pane)?.title}</span>
+      <span bind:this={ghost} class="drag-ghost"><Icon name={info.get(dragging.pane)?.icon ?? 'layout'} size={14} />{info.get(dragging.pane)?.title}</span>
     </div>
   {/if}
 </div>

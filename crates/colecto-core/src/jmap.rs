@@ -405,13 +405,13 @@ impl JmapAccount {
                 .map(|mailbox| json!({"name": mailbox.name, "email": mailbox.email.to_string()}))
                 .collect())
         };
-        let message_ids = |value: &str| -> Value {
+        fn message_ids(value: &str) -> Vec<&str> {
             value
                 .split_whitespace()
                 .map(|id| id.trim_matches(['<', '>']))
-                .collect::<Vec<_>>()
-                .into()
-        };
+                .filter(|id| !id.is_empty())
+                .collect()
+        }
         let mut email = json!({
             "from":[{"email":self.address}],"to":addresses(&input.recipient)?,"subject":input.subject,
             "textBody":[{"partId":"text","type":"text/plain"}],"bodyValues":{"text":{"value":input.body}}
@@ -419,11 +419,13 @@ impl JmapAccount {
         if !input.cc.trim().is_empty() {
             email["cc"] = json!(addresses(&input.cc)?);
         }
-        if !input.in_reply_to.is_empty() {
-            email["inReplyTo"] = message_ids(&input.in_reply_to);
+        let in_reply_to = message_ids(&input.in_reply_to);
+        if !in_reply_to.is_empty() {
+            email["inReplyTo"] = json!(in_reply_to);
         }
-        if !input.references.is_empty() {
-            email["references"] = message_ids(&input.references);
+        let references = message_ids(&input.references);
+        if !references.is_empty() {
+            email["references"] = json!(references);
         }
         let session = self.session()?;
         if !session.submission {
@@ -452,15 +454,23 @@ impl JmapAccount {
         let drafts = session.mailbox("drafts")?;
         let sent = session.mailbox("sent")?;
         email["mailboxIds"] = json!({(drafts.clone()): true});
-        email["keywords"] = json!({"$draft": true});
-        let created = session.call("Email/set", json!({"create":{"message":email}}))?;
-        let email = created_id(&created, "message")?;
-        let result = session.call("EmailSubmission/set", json!({"create":{"submission":{
-            "identityId":field(identity,"id")?,"emailId":email}},
-            "onSuccessUpdateEmail":{"#submission":{
-                (format!("mailboxIds/{drafts}")):null,(format!("mailboxIds/{sent}")):true,"keywords/$draft":null
-            }}}))?;
-        created_id(&result, "submission")?;
+        email["keywords"] = json!({"$draft": true, "$seen": true});
+        // Pipeline Email/set and EmailSubmission/set in one request via creation-id reference
+        // so a dropped connection cannot leave an orphan draft behind.
+        let results = session.calls(&[
+            ("Email/set", json!({"create":{"message":email}})),
+            (
+                "EmailSubmission/set",
+                json!({
+                    "create":{"submission":{"identityId":field(identity,"id")?,"emailId":"#message"}},
+                    "onSuccessUpdateEmail":{"#submission":{
+                        (format!("mailboxIds/{drafts}")):null,(format!("mailboxIds/{sent}")):true,"keywords/$draft":null
+                    }}
+                }),
+            ),
+        ])?;
+        created_id(&results[0], "message")?;
+        created_id(&results[1], "submission")?;
         Ok(())
     }
 }
@@ -540,15 +550,22 @@ impl Session<'_> {
         ])?;
         let ids = results[0]["ids"].as_array().ok_or_else(failed)?;
         let messages = list(&results[1])?;
-        ids.iter()
-            .map(|id| {
-                let message = messages
-                    .iter()
-                    .find(|v| v["id"] == *id)
-                    .ok_or_else(failed)?;
-                parse_message(message)
+        Ok(ids
+            .iter()
+            .filter_map(|id| {
+                let Some(message) = messages.iter().find(|v| v["id"] == *id) else {
+                    tracing::warn!(%id, "JMAP Email/get omitted a queried message");
+                    return None;
+                };
+                match parse_message(message) {
+                    Ok(parsed) => Some(parsed),
+                    Err(error) => {
+                        tracing::warn!(%error, %id, "Skipping unreadable JMAP message");
+                        None
+                    }
+                }
             })
-            .collect()
+            .collect())
     }
 
     fn call(&self, method: &str, args: Value) -> Result<Value, Error> {
@@ -725,11 +742,18 @@ fn parse_message(value: &Value) -> Result<Message, Error> {
             if part["type"] != "text/plain" {
                 continue;
             }
-            let body_value = &value["bodyValues"][field(part, "partId")?];
-            if body_value["isEncodingProblem"] == true {
-                return Err(failed());
-            }
-            let mut text = field(body_value, "value")?.to_owned();
+            let Some(part_id) = part["partId"].as_str() else {
+                continue;
+            };
+            let Some(body_value) = value["bodyValues"].get(part_id) else {
+                continue;
+            };
+            let Some(raw_text) = body_value["value"].as_str() else {
+                continue;
+            };
+            // RFC 8621 §4.1.2: `isEncodingProblem: true` already delivers valid UTF-8 with
+            // U+FFFD replacements, so keep the text instead of failing the whole page.
+            let mut text = raw_text.to_owned();
             if body_value["isTruncated"] == true {
                 text.push_str("\n[Body truncated]");
             }
@@ -1090,5 +1114,135 @@ mod tests {
         );
         assert_eq!(email_state(r#"{"@type":"Ping"}"#, "a1"), None);
         assert_eq!(email_state("not json", "a1"), None);
+    }
+    #[test]
+    fn parse_message_keeps_text_when_encoding_problem_is_flagged() {
+        let value = json!({
+            "id": "enc1",
+            "subject": "Legacy charset",
+            "textBody": [{"partId": "1", "type": "text/plain"}],
+            "bodyValues": {"1": {"value": "Hello \u{FFFD} world", "isEncodingProblem": true}}
+        });
+        let mail = parse_message(&value).unwrap();
+        assert_eq!(mail.id, "jmap-enc1");
+        assert_eq!(mail.body, "Hello \u{FFFD} world");
+    }
+    #[test]
+    fn send_pipelines_email_and_submission_marks_seen_and_filters_empty_ids() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base = format!("http://{addr}");
+        let api_url = format!("{base}/api");
+        let session_body = json!({
+            "apiUrl": api_url,
+            "downloadUrl": format!("{base}/download/{{accountId}}/{{blobId}}/{{name}}?type={{type}}"),
+            "uploadUrl": format!("{base}/upload/{{accountId}}"),
+            "capabilities": {
+                CORE: {"maxSizeUpload": 1000000},
+                MAIL: {},
+                SUBMISSION: {}
+            },
+            "accounts": {
+                "acc1": {
+                    "accountCapabilities": {
+                        MAIL: {},
+                        SUBMISSION: {}
+                    }
+                }
+            },
+            "primaryAccounts": {MAIL: "acc1"}
+        })
+        .to_string();
+        let server = std::thread::spawn(move || {
+            let mut api_requests = Vec::new();
+            for step in 0..5 {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = BufReader::new(socket.try_clone().unwrap());
+                let mut first_line = String::new();
+                reader.read_line(&mut first_line).unwrap();
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse::<usize>().unwrap();
+                    }
+                }
+                let mut bytes = vec![0; length];
+                if length > 0 {
+                    reader.read_exact(&mut bytes).unwrap();
+                }
+                let body = if step == 0 {
+                    assert!(first_line.starts_with("GET "));
+                    session_body.clone()
+                } else {
+                    let request: Value = serde_json::from_slice(&bytes).unwrap();
+                    let calls = request["methodCalls"].as_array().unwrap().clone();
+                    api_requests.push(calls.clone());
+                    let responses = match calls[0][0].as_str().unwrap() {
+                        "Identity/get" => {
+                            json!([["Identity/get", {"list": [{"id": "id1", "email": "me@example.test"}]}, "0"]])
+                        }
+                        "Mailbox/get" => json!([[
+                            "Mailbox/get",
+                            {"list": [{"id": "d1", "role": "drafts"}, {"id": "s1", "role": "sent"}]},
+                            "0"
+                        ]]),
+                        "Email/set" => {
+                            assert_eq!(calls.len(), 2);
+                            assert_eq!(calls[1][0], "EmailSubmission/set");
+                            let email = &calls[0][1]["create"]["message"];
+                            assert_eq!(email["keywords"], json!({"$draft": true, "$seen": true}));
+                            assert!(email.get("inReplyTo").is_none());
+                            assert_eq!(email["references"], json!(["a@x", "b@x"]));
+                            assert_eq!(
+                                calls[1][1]["create"]["submission"]["emailId"],
+                                json!("#message")
+                            );
+                            json!([
+                                ["Email/set", {"created": {"message": {"id": "e1"}}}, "0"],
+                                ["EmailSubmission/set", {"created": {"submission": {"id": "sub1"}}}, "1"]
+                            ])
+                        }
+                        other => panic!("unexpected JMAP method: {other}"),
+                    };
+                    json!({"methodResponses": responses}).to_string()
+                };
+                write!(
+                    socket,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            }
+            assert_eq!(api_requests.len(), 4);
+        });
+        let account = JmapAccount {
+            session_url: format!("{base}/session"),
+            token: "secret".into(),
+            address: "me@example.test".into(),
+            username: String::new(),
+        };
+        let draft = DraftInput {
+            id: None,
+            recipient: "you@example.test".into(),
+            cc: String::new(),
+            subject: "Hello".into(),
+            body: "World".into(),
+            in_reply_to: " <>  <> ".into(),
+            references: "<a@x> <> <b@x>".into(),
+            forward_of: None,
+            attachments: Vec::new(),
+        };
+        account.send(&draft, &[]).unwrap();
+        server.join().unwrap();
     }
 }

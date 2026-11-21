@@ -79,7 +79,7 @@
   /* A soft glow from a gradient, not a blur filter, which WebKitGTK repaints every frame (#97). */
   .mark-wrap::after { content: ''; position: absolute; inset: -24px; z-index: -1; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in oklch, var(--mint) 18%, transparent), transparent); animation: breathe 6s ease-in-out infinite; }
   .actions { display: grid; justify-items: center; gap: 10px; margin-top: 10px; }
-  .go { height: 40px; padding: 0 18px; font-size: calc(14px * var(--text-scale)); transition: transform 160ms var(--ease-out), box-shadow 220ms var(--ease-out), background-color 140ms ease; }
+  .go { height: 40px; padding: 0 18px; font-size: calc(14px * var(--text-scale)); transition: transform 160ms var(--ease-out), background-color 140ms ease; }
   .go :global(svg) { transition: transform 200ms var(--ease-out); }
   @media (hover: hover) and (pointer: fine) {
     .go:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 10px 28px -12px color-mix(in oklch, var(--mint) 70%, transparent); }

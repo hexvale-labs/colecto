@@ -15,6 +15,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 colecto-extension.workspace = true
-regex = { workspace = true, default-features = false, features = ["std", "unicode-case", "unicode-perl"] }
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

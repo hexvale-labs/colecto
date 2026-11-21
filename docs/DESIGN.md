@@ -234,10 +234,10 @@ composer, a panel, a Settings page) slides in over it: on iOS fully from the rig
 300 ms with the drawer curve (`cubic-bezier(0.32, 0.72, 0, 1)`), elsewhere as Material's
 shared-axis step (96 px or 30 % of the width, with a fade) in 240 ms. Going back plays it
 in reverse in about 200 ms, with the covered screen shown underneath. Gestures drive the
-same surfaces (see "Back and gestures"). Collapsing the Settings section list animates
-its column in 240 ms. The command palette opens
-instantly, because it is used hundreds of times a day. Docking previews slide
-between zones in 160 ms; resizing and tab switches do not animate. The palette closes
+same surfaces (see "Back and gestures"). Collapsing the Settings section list switches its
+column immediately without animating layout. The command palette opens
+instantly, because it is used hundreds of times a day. Docking previews fade in when
+dragging and snap cleanly between zones without animating layout; resizing and tab switches do not animate. The palette closes
 on Escape or a click outside it. HTML mail appears
 as soon as its body arrives, after a skeleton; it never waits for the frame's `load`
 event, which waits for every remote image and can hang on a slow server. List and folder changes do

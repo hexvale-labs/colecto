@@ -2,17 +2,20 @@
   // A button that opens a short menu, keyboard operable like the app's other menus.
   import { tick } from 'svelte';
   import Icon, { type IconName } from '../Icon.svelte';
+  import { prefersReducedMotion } from '../lib/ui';
   let { label, icon, items, disabled = false, onselect }: { label: string; icon?: IconName; items: { id: string; label: string; disabled?: boolean }[]; disabled?: boolean; onselect: (item: string) => void } = $props();
-  const id = `menu-${Math.random().toString(36).slice(2)}`;
+  const uid = $props.id();
+  const id = `menu-${uid}`;
   let open = $state(false);
   // Fixed to the window, so a scrolling or clipped parent (a row of chips) cannot hide it.
   let place = $state({ left: 0, top: 0 });
+  let positioned = $state(false);
   let button = $state<HTMLButtonElement>();
   let menu = $state<HTMLElement>();
-  const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Leaves quicker than it arrives, back toward the button.
-  function leave(_node: HTMLElement) { return { duration: reduced ? 0 : 120, css: (t: number) => `opacity:${t};transform:scale(${0.97 + 0.03 * t}) translateY(${(1 - t) * -4}px)` }; }
+  function leave(_node: HTMLElement) { return { duration: prefersReducedMotion() ? 0 : 120, css: (t: number) => `opacity:${t};transform:scale(${0.97 + 0.03 * t}) translateY(${(1 - t) * -4}px)` }; }
   async function show(focus: 'first' | 'last' = 'first') {
+    positioned = false;
     open = true; await tick();
     const anchor = button!.getBoundingClientRect();
     const width = menu?.offsetWidth ?? 0;
@@ -21,10 +24,12 @@
     const left = anchor.right - width >= 8 ? anchor.right - width : Math.min(anchor.left, window.innerWidth - width - 8);
     const below = anchor.bottom + 4 + height <= window.innerHeight - 8;
     place = { left: Math.max(8, left), top: below ? anchor.bottom + 4 : Math.max(8, anchor.top - 4 - height) };
+    positioned = true;
+    await tick();
     const buttons = menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
     buttons?.[focus === 'first' ? 0 : buttons.length - 1]?.focus();
   }
-  function hide(refocus = true) { open = false; if (refocus) button?.focus(); }
+  function hide(refocus = true) { open = false; positioned = false; if (refocus) button?.focus(); }
   function run(item: string) { hide(false); onselect(item); }
   function keydown(event: KeyboardEvent) {
     const buttons = [...(menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])];
@@ -44,7 +49,7 @@
     onkeydown={(event) => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); void show(event.key === 'ArrowDown' ? 'first' : 'last'); } }}>{#if icon}<Icon name={icon} />{/if}<span>{label}</span></button>
   {#if open}
     <div class="select-scrim" aria-hidden="true" onpointerdown={() => hide(false)}></div>
-    <div bind:this={menu} {id} class="select-menu below x-menu-list" role="menu" tabindex="-1" aria-label={label} style:left={`${place.left}px`} style:top={`${place.top}px`} out:leave onkeydown={keydown}>
+    <div bind:this={menu} {id} class="select-menu below x-menu-list" role="menu" tabindex="-1" aria-label={label} style:left={`${place.left}px`} style:top={`${place.top}px`} style:visibility={positioned ? undefined : 'hidden'} out:leave onkeydown={keydown}>
       {#each items as item (item.id)}<button role="menuitem" disabled={item.disabled} onclick={() => run(item.id)}>{item.label}</button>{/each}
     </div>
   {/if}

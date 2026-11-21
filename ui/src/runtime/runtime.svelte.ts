@@ -54,7 +54,7 @@ export class ExtensionRuntime {
   status = $state<Status>('starting');
   /** Why it stopped, in words for the owner. */
   reason = $state('');
-  trees = $state<Record<string, Node | null>>({});
+  trees = $state.raw<Record<string, Node | null>>({});
   /** What each surface reported with `state`. */
   states = $state<Record<string, SurfaceState>>({});
   dialog = $state<Node | null>(null);
@@ -72,6 +72,7 @@ export class ExtensionRuntime {
   #rendered = new Set<string>();
   #manifest: ExtensionState['manifest'];
   #context: () => RuntimeContext;
+  #onStarted?: () => void;
   readonly bundled: boolean;
   readonly capabilities: readonly string[];
   #token = '';
@@ -84,7 +85,7 @@ export class ExtensionRuntime {
   #generation = 0;
   #onCrash = (event: MessageEvent) => { if (event.source === this.#frame?.contentWindow && event.data?.t === 'colecto.crash') this.stop(`${this.name} stopped`); };
 
-  constructor(extension: ExtensionState, context: () => RuntimeContext) {
+  constructor(extension: ExtensionState, context: () => RuntimeContext, onStarted?: () => void) {
     this.#manifest = extension.manifest;
     this.bundled = extension.bundled;
     this.capabilities = extension.manifest.capabilities;
@@ -92,6 +93,7 @@ export class ExtensionRuntime {
     this.name = extension.manifest.name;
     this.surfaces = [...(extension.manifest.pane ? ['pane', 'pane.header'] : []), ...(extension.manifest.settings_page ? ['settings'] : []), 'dialog'];
     this.#context = context;
+    this.#onStarted = onStarted;
   }
 
   /** The credential, for the shared event stream; it never leaves the shell. */
@@ -132,6 +134,7 @@ export class ExtensionRuntime {
       this.#pinged = this.#answered = 0;
       this.#watchdog = setInterval(() => this.#ping(), 5000);
       if (this.#manifest.overlay && this.capabilities.includes('ui.canvas')) this.#overlay(this.#manifest.overlay.z_index);
+      this.#onStarted?.();
     } catch (error) {
       if (generation === this.#generation) this.stop(`${this.name} could not start: ${(error as Error).message}`);
     }
@@ -203,8 +206,8 @@ export class ExtensionRuntime {
         || buffers.reduce((total: number, buffer) => total + (buffer instanceof ArrayBuffer ? buffer.byteLength : typeof ImageBitmap === 'function' && buffer instanceof ImageBitmap ? buffer.width * buffer.height * 4 : Infinity), 0) > LIMITS.buffers) throw new ProtocolError('Message too large');
       const message = checkOutgoing(JSON.parse(json), this.surfaces);
       switch (message.t) {
-        case 'render': this.trees[message.surface] = message.tree; this.#rendered.add(message.surface); break;
-        case 'patch': this.trees[message.surface] = applyPatch(this.trees[message.surface] ?? null, message.ops); break;
+        case 'render': this.trees = { ...this.trees, [message.surface]: message.tree }; this.#rendered.add(message.surface); break;
+        case 'patch': this.trees = { ...this.trees, [message.surface]: applyPatch(this.trees[message.surface] ?? null, message.ops) }; break;
         case 'pong': this.#answered = Math.max(this.#answered, message.n); break;
         case 'call': void this.#call(message); break;
         case 'toast': this.#toast(message); break;

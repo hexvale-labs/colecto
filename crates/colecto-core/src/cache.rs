@@ -73,17 +73,26 @@ impl MailCacheStore {
         })
     }
     pub fn load(&self, provider: &str, folder: &str) -> Result<MailSnapshot, Error> {
+        self.load_with_bytes(provider, folder)
+            .map(|(snapshot, _)| snapshot)
+    }
+    fn load_with_bytes(
+        &self,
+        provider: &str,
+        folder: &str,
+    ) -> Result<(MailSnapshot, usize), Error> {
         crate::validate_query(folder, "")?;
         let connection = self.database.connection()?;
         futures_executor::block_on(async {
             let mut rows = connection.query("SELECT folder, fetched_at, messages FROM snapshots WHERE account=?1 AND provider=?2 AND folder=?3", [self.account.as_str(), provider, folder]).await.map_err(storage)?;
             let Some(row) = rows.next().await.map_err(storage)? else {
-                return Ok(MailSnapshot::default());
+                return Ok((MailSnapshot::default(), 0));
             };
             let text: String = row.get(2).map_err(storage)?;
             if text.len() > MAX_BYTES {
                 return Err(limit());
             }
+            let raw_bytes = text.len();
             let messages: Vec<Message> = serde_json::from_str(&text).map_err(storage)?;
             if messages.len() > 100 {
                 return Err(limit());
@@ -92,11 +101,14 @@ impl MailCacheStore {
             if fetched_at.is_some_and(|time| time < 0) {
                 return Err(storage("Invalid cache timestamp"));
             }
-            Ok(MailSnapshot {
-                folder: row.get(0).map_err(storage)?,
-                fetched_at: fetched_at.map(|time| time as u64),
-                messages,
-            })
+            Ok((
+                MailSnapshot {
+                    folder: row.get(0).map_err(storage)?,
+                    fetched_at: fetched_at.map(|time| time as u64),
+                    messages,
+                },
+                raw_bytes,
+            ))
         })
     }
     pub fn store(
@@ -166,16 +178,16 @@ impl MailCacheStore {
         provider: &str,
     ) -> Result<std::collections::BTreeMap<String, MailSnapshot>, Error> {
         let mut snapshots = std::collections::BTreeMap::new();
+        let mut count = 0usize;
+        let mut bytes = 0usize;
         for folder in ["inbox", "sent"] {
-            let snapshot = self.load(provider, folder)?;
+            let (snapshot, raw_bytes) = self.load_with_bytes(provider, folder)?;
             if !snapshot.folder.is_empty() {
+                count = count.saturating_add(snapshot.messages.len());
+                bytes = bytes.saturating_add(raw_bytes);
                 snapshots.insert(folder.into(), snapshot);
             }
         }
-        let count: usize = snapshots.values().map(|s| s.messages.len()).sum();
-        let bytes = snapshots.values().try_fold(0usize, |sum, snapshot| {
-            bounded_json(&snapshot.messages).map(|text| sum + text.len())
-        })?;
         if count > 100 || bytes > MAX_BYTES {
             return Err(limit());
         }
