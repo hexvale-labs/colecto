@@ -12,20 +12,24 @@ use axum::{
 };
 use base64::Engine as _;
 use colecto_daemon::{AccessPolicy, Assets, Daemon};
-use colecto_service::{MailService, events::ServiceEvent, secrets::open_accounts};
+use colecto_service::{MailService, WindowGuard, events::ServiceEvent, secrets::open_accounts};
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::{CStr, CString, c_char},
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
-use tokio::{runtime::Runtime, sync::broadcast};
+use tokio::{
+    runtime::Runtime,
+    sync::{broadcast, watch},
+};
 use tower::ServiceExt;
 
 const FFI_AUTHORITY: &str = "colecto.local";
 const FFI_ORIGIN: &str = "http://colecto.local";
 const MAX_FFI_BODY_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_SYNC_SECONDS: u64 = 60;
 
 struct FfiSession {
     runtime: Runtime,
@@ -33,12 +37,28 @@ struct FfiSession {
     router: Router,
     token: String,
     events: Mutex<broadcast::Receiver<ServiceEvent>>,
+    stop_tx: watch::Sender<bool>,
+    _window: WindowGuard,
 }
 
-static SESSION: OnceLock<Mutex<Option<FfiSession>>> = OnceLock::new();
+impl FfiSession {
+    fn shutdown(&self) {
+        let _ = self.stop_tx.send(true);
+        self.service.close();
+    }
+}
 
-fn session_slot() -> &'static Mutex<Option<FfiSession>> {
+static SESSION: OnceLock<Mutex<Option<Arc<FfiSession>>>> = OnceLock::new();
+
+fn session_slot() -> &'static Mutex<Option<Arc<FfiSession>>> {
     SESSION.get_or_init(|| Mutex::new(None))
+}
+
+fn current_session() -> Option<Arc<FfiSession>> {
+    session_slot()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
 }
 
 #[derive(Deserialize)]
@@ -69,6 +89,9 @@ struct FfiEventEnvelope {
 
 /// Safe Rust entry point used by both C-ABI exports and unit tests.
 pub fn init_in_process(data_dir: Option<&str>) -> Result<(), String> {
+    // Close any previous session before opening the database again.
+    shutdown_in_process();
+
     let dir = match data_dir.map(str::trim).filter(|s| !s.is_empty()) {
         Some(path) => PathBuf::from(path),
         None => default_data_dir(),
@@ -82,25 +105,33 @@ pub fn init_in_process(data_dir: Option<&str>) -> Result<(), String> {
 
     let accounts = open_accounts(&dir).map_err(|e| e.to_string())?;
     let service = MailService::new(accounts)?;
+    let window = service.open_window();
     let policy = AccessPolicy::local_ephemeral(FFI_AUTHORITY.to_owned())?;
     let token = policy.token().to_owned();
     let daemon = Daemon::new(service.clone(), policy, Assets::None)?;
     let router = daemon.router();
     let events = Mutex::new(service.subscribe());
 
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let bg_service = service.clone();
+    runtime.spawn(async move {
+        bg_service
+            .run_background(Duration::from_secs(DEFAULT_SYNC_SECONDS), stop_rx)
+            .await;
+    });
+
     let mut guard = session_slot()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(prev) = guard.take() {
-        prev.service.close();
-    }
-    *guard = Some(FfiSession {
+    *guard = Some(Arc::new(FfiSession {
         runtime,
         service,
         router,
         token,
         events,
-    });
+        stop_tx,
+        _window: window,
+    }));
     Ok(())
 }
 
@@ -113,10 +144,7 @@ pub fn invoke_json(request_json: &str) -> String {
         }
     };
 
-    let guard = session_slot()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(session) = guard.as_ref() else {
+    let Some(session) = current_session() else {
         return error_response(503, "Colecto FFI session is not initialized.");
     };
 
@@ -171,9 +199,22 @@ pub fn invoke_json(request_json: &str) -> String {
             .get(header::CONTENT_DISPOSITION)
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
-        let bytes = axum::body::to_bytes(resp.into_body(), MAX_FFI_BODY_BYTES)
-            .await
-            .unwrap_or_default();
+        let bytes = match axum::body::to_bytes(resp.into_body(), MAX_FFI_BODY_BYTES).await {
+            Ok(b) => b,
+            Err(_) => {
+                return FfiResponse {
+                    status: 413,
+                    content_type: "application/json".to_owned(),
+                    content_disposition: None,
+                    body: serde_json::json!({
+                        "error": "Response exceeds the 64 MiB in-process FFI limit.",
+                        "category": "storage_or_service"
+                    })
+                    .to_string(),
+                    is_base64: false,
+                };
+            }
+        };
         let is_binary =
             !content_type.starts_with("application/json") && !content_type.starts_with("text/");
         let body = if is_binary {
@@ -195,10 +236,7 @@ pub fn invoke_json(request_json: &str) -> String {
 
 /// Polls the next live `ServiceEvent`, waiting up to `timeout_ms` milliseconds.
 pub fn poll_event_json(timeout_ms: u64) -> Option<String> {
-    let guard = session_slot()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let session = guard.as_ref()?;
+    let session = current_session()?;
     let mut rx = session
         .events
         .lock()
@@ -215,7 +253,8 @@ pub fn poll_event_json(timeout_ms: u64) -> Option<String> {
                 return None;
             }
             let payload: serde_json::Value =
-                serde_json::from_str(&ev.payload_json(Some(1))).unwrap_or_default();
+                serde_json::from_str(&ev.payload_json(Some(session.service.open_windows())))
+                    .unwrap_or_default();
             serde_json::to_string(&FfiEventEnvelope {
                 event: name.to_owned(),
                 data: payload,
@@ -235,11 +274,14 @@ pub fn poll_event_json(timeout_ms: u64) -> Option<String> {
 
 /// Shuts down the active in-process `MailService` session.
 pub fn shutdown_in_process() {
-    let mut guard = session_slot()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(session) = guard.take() {
-        session.service.close();
+    let prev = {
+        let mut guard = session_slot()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.take()
+    };
+    if let Some(session) = prev {
+        session.shutdown();
     }
 }
 
@@ -260,10 +302,20 @@ fn default_data_dir() -> PathBuf {
     {
         return PathBuf::from(explicit);
     }
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA")
+        && !local_app_data.trim().is_empty()
+    {
+        return PathBuf::from(local_app_data).join("Colecto");
+    }
     if let Ok(home) = std::env::var("HOME")
         && !home.trim().is_empty()
     {
         return PathBuf::from(home).join(".colecto");
+    }
+    if let Ok(user_profile) = std::env::var("USERPROFILE")
+        && !user_profile.trim().is_empty()
+    {
+        return PathBuf::from(user_profile).join(".colecto");
     }
     PathBuf::from(".colecto")
 }

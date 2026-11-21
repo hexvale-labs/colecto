@@ -12,7 +12,6 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 axum.workspace = true
 base64.workspace = true
-colecto-core.workspace = true
 colecto-daemon = { path = "../colecto-daemon" }
 colecto-service.workspace = true
 serde.workspace = true

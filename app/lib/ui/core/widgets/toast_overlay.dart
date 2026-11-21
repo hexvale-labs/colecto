@@ -163,6 +163,11 @@ class _ToastCardState extends State<_ToastCard>
     duration: const Duration(milliseconds: 300),
     reverseDuration: const Duration(milliseconds: 220),
   );
+  late final CurvedAnimation _curve = CurvedAnimation(
+    parent: _c,
+    curve: ColectoMotion.easeOut,
+    reverseCurve: Curves.easeIn,
+  );
 
   @override
   void initState() {
@@ -182,14 +187,22 @@ class _ToastCardState extends State<_ToastCard>
   void didUpdateWidget(_ToastCard old) {
     super.didUpdateWidget(old);
     if (widget.leaving && !old.leaving) {
-      _c.reverse().whenComplete(() {
-        if (mounted) widget.onGone();
-      });
+      if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+        _c.value = 0;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.onGone();
+        });
+      } else {
+        _c.reverse().whenComplete(() {
+          if (mounted) widget.onGone();
+        });
+      }
     }
   }
 
   @override
   void dispose() {
+    _curve.dispose();
     _c.dispose();
     super.dispose();
   }
@@ -198,20 +211,15 @@ class _ToastCardState extends State<_ToastCard>
   Widget build(BuildContext context) {
     final p = ColectoPalette.of(context);
     final t = widget.toast;
-    final curve = CurvedAnimation(
-      parent: _c,
-      curve: ColectoMotion.easeOut,
-      reverseCurve: Curves.easeIn,
-    );
     return SizeTransition(
-      sizeFactor: curve,
+      sizeFactor: _curve,
       alignment: Alignment.topCenter,
       child: FadeTransition(
-        opacity: curve,
+        opacity: _curve,
         child: AnimatedBuilder(
-          animation: curve,
+          animation: _curve,
           builder: (context, child) => Transform.translate(
-            offset: widget.enter * (1 - curve.value),
+            offset: widget.enter * (1 - _curve.value),
             child: child,
           ),
           child: Padding(

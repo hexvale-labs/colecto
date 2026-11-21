@@ -26,7 +26,7 @@ build() {
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
   cargo build --frozen --release -p colecto-ffi -p colecto-daemon
-  (cd app && flutter build linux --release --build-name="$pkgver")
+  (cd app && flutter build linux --release --dart-define=COLECTO_BACKEND=ffi --build-name="$pkgver")
 }
 
 package() {

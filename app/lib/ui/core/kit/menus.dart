@@ -36,9 +36,6 @@ class ColectoMenuItem {
   final bool divider;
 }
 
-/// Kept for call sites written against the first scaffold.
-typedef ColectoContextMenuItem = ColectoMenuItem;
-
 /// Shows a context menu: a popover that grows from the pointer on desktop
 /// and web, a Cupertino action sheet on iOS, a Material bottom sheet on
 /// Android.
@@ -79,10 +76,14 @@ Future<void> _showCupertinoActions(
           CupertinoActionSheetAction(
             isDestructiveAction: item.danger,
             onPressed: () {
+              if (!item.enabled) return;
               chosen = item.onSelected;
               Navigator.of(ctx).pop();
             },
-            child: Text(item.label),
+            child: Opacity(
+              opacity: item.enabled ? 1 : 0.45,
+              child: Text(item.label),
+            ),
           ),
       ],
       cancelButton: CupertinoActionSheetAction(
@@ -428,11 +429,15 @@ class _ColectoMenuPanelState extends State<_ColectoMenuPanel> {
     final fluent = style == ColectoPlatformStyle.fluent;
     final item = widget.items[i];
     final active = i == _active;
-    final fg = !item.enabled
+    final inverted = mac && active && item.enabled && !item.danger;
+    final fg = inverted
+        ? p.accentInk
+        : !item.enabled
         ? p.ink3
         : item.danger
         ? p.danger
         : p.ink;
+    final secondaryFg = inverted ? p.accentInk.withValues(alpha: 0.78) : p.ink3;
     return MouseRegion(
       cursor: item.enabled ? SystemMouseCursors.click : MouseCursor.defer,
       onEnter: (_) {
@@ -463,7 +468,9 @@ class _ColectoMenuPanelState extends State<_ColectoMenuPanel> {
                 Icon(
                   item.icon,
                   size: 15,
-                  color: item.danger ? p.danger : p.ink2,
+                  color: inverted
+                      ? p.accentInk
+                      : (item.danger ? p.danger : p.ink2),
                 ),
                 const SizedBox(width: 10),
               ],
@@ -476,29 +483,30 @@ class _ColectoMenuPanelState extends State<_ColectoMenuPanel> {
                       item.label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: kStyle(
-                        mac ? 13 : (fluent ? 14 : 13.5),
-                        color: mac && active && !item.danger ? p.accentInk : fg,
-                      ),
+                      style: kStyle(mac ? 13 : (fluent ? 14 : 13.5), color: fg),
                     ),
                     if (item.subtitle != null)
                       Text(
                         item.subtitle!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: kStyle(12, color: p.ink3),
+                        style: kStyle(12, color: secondaryFg),
                       ),
                   ],
                 ),
               ),
               if (item.shortcut != null) ...[
                 const SizedBox(width: 12),
-                Text(item.shortcut!, style: kStyle(12, color: p.ink3)),
+                Text(item.shortcut!, style: kStyle(12, color: secondaryFg)),
               ],
               if (item.checked == true) ...[
                 const SizedBox(width: 12),
                 _PopIn(
-                  child: Icon(LucideIcons.check, size: 15, color: p.accent),
+                  child: Icon(
+                    LucideIcons.check,
+                    size: 15,
+                    color: inverted ? p.accentInk : p.accent,
+                  ),
                 ),
               ],
             ],

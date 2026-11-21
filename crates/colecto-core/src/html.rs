@@ -110,7 +110,7 @@ pub fn sanitize(
                     return None;
                 }
                 let mut guard = replacements_cb.lock().unwrap_or_else(|e| e.into_inner());
-                let sentinel = format!("https://cid.colecto.invalid/{nonce}/{}", guard.len());
+                let sentinel = format!("https://cid.colecto.invalid/{nonce}/{}/", guard.len());
                 guard.push((sentinel.clone(), cid));
                 return Some(sentinel.into());
             }
@@ -273,5 +273,34 @@ mod tests {
         assert!(!sanitized.html.contains("missing@example"));
         assert!(!sanitized.html.contains(r#"href="cid:"#));
         assert!(!sanitized.html.contains("cid.colecto.invalid"));
+    }
+
+    #[test]
+    fn resolves_twelve_or_more_inline_cid_images_without_prefix_collision() {
+        let mut inline = BTreeMap::new();
+        let mut html = String::new();
+        for i in 0..12 {
+            let cid = format!("img{i}@example");
+            inline.insert(
+                cid.clone(),
+                InlineImage {
+                    content_type: "image/png".into(),
+                    data: format!("IMG-{i:02}").into_bytes(),
+                },
+            );
+            html.push_str(&format!(r#"<img src="cid:{cid}">"#));
+        }
+        let sanitized = sanitize(&html, &inline, SanitizeOptions::default());
+        assert!(!sanitized.html.contains("cid.colecto.invalid"));
+        for i in 0..12 {
+            let encoded =
+                base64::engine::general_purpose::STANDARD.encode(format!("IMG-{i:02}").as_bytes());
+            let expected = format!(r#"src="data:image/png;base64,{encoded}""#);
+            assert!(
+                sanitized.html.contains(&expected),
+                "missing expected data URI for image {i} in {}",
+                sanitized.html
+            );
+        }
     }
 }

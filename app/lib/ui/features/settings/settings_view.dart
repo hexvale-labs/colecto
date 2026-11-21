@@ -55,7 +55,9 @@ class _SettingsViewState extends State<SettingsView> {
     final section = c.activeSettings ?? SettingsSection.accounts;
     if (_shown != section) {
       _shown = section;
-      if (_scroll.hasClients) _scroll.jumpTo(0);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
+      });
     }
 
     return LayoutBuilder(
@@ -343,7 +345,13 @@ class _NavItem extends StatelessWidget {
                   style: kStyle(
                     13.5,
                     weight: 560,
-                    color: selected || s.hovered ? p.ink : p.ink2,
+                    color: ios && selected
+                        ? p.accentInk
+                        : material && selected
+                        ? p.accentHi
+                        : selected || s.hovered
+                        ? p.ink
+                        : p.ink2,
                   ),
                 )
               else

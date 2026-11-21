@@ -41,7 +41,7 @@ build() {
   COLECTO_COMMIT=$(git rev-parse HEAD)
   export COLECTO_COMMIT
   cargo build --frozen --release -p colecto-ffi -p colecto-daemon
-  (cd app && flutter build linux --release)
+  (cd app && flutter build linux --release --dart-define=COLECTO_BACKEND=ffi)
 }
 
 package() {

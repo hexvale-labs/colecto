@@ -68,9 +68,9 @@ When when(String raw, {DateTime? now}) {
   if (parsed == null) {
     return When(label: text, group: 'Earlier', full: text);
   }
-  final today = DateTime(current.year, current.month, current.day);
-  final day = DateTime(parsed.year, parsed.month, parsed.day);
-  final days = today.difference(day).inHours ~/ 24;
+  final today = DateTime.utc(current.year, current.month, current.day);
+  final day = DateTime.utc(parsed.year, parsed.month, parsed.day);
+  final days = today.difference(day).inDays;
   final sameYear = parsed.year == current.year;
   final monthDay = '${_monthsShort[parsed.month - 1]} ${parsed.day}';
 
@@ -102,12 +102,10 @@ String readerTime(String raw, {DateTime? now}) {
   final parsed = DateTime.tryParse(raw.trim())?.toLocal();
   if (parsed == null) return raw;
   final current = now ?? DateTime.now();
-  final today = DateTime(current.year, current.month, current.day);
-  final days =
-      today
-          .difference(DateTime(parsed.year, parsed.month, parsed.day))
-          .inHours ~/
-      24;
+  final today = DateTime.utc(current.year, current.month, current.day);
+  final days = today
+      .difference(DateTime.utc(parsed.year, parsed.month, parsed.day))
+      .inDays;
   final time = clockTime(parsed);
   if (days <= 0) return 'Today $time';
   if (days == 1) return 'Yesterday $time';

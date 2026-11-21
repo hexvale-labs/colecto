@@ -417,7 +417,7 @@ async fn boundary(State(state): State<AppState>, request: Request, next: Next) -
     let headers = response.headers_mut();
     headers.entry(header::CONTENT_SECURITY_POLICY).or_insert(
         HeaderValue::from_static(
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
         ),
     );
     headers.insert(
