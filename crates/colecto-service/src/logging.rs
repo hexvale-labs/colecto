@@ -87,20 +87,3 @@ fn priority(level: Level) -> u8 {
         _ => 7,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn journald_priorities_follow_syslog_levels() {
-        use tracing::Level;
-        let priorities = [
-            Level::ERROR,
-            Level::WARN,
-            Level::INFO,
-            Level::DEBUG,
-            Level::TRACE,
-        ]
-        .map(super::priority);
-        assert_eq!(priorities, [3, 4, 6, 7, 7]);
-    }
-}

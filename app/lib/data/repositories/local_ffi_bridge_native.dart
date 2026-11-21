@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io';
 
-import '../../domain/models/account_models.dart';
 import '../../domain/models/service_event.dart';
 import 'local_ffi_bridge_stub.dart' show FfiResponse;
 
@@ -201,33 +200,7 @@ class NativeFfiBridge {
       final name = env['event'] as String? ?? '';
       final payload =
           (env['data'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-      return switch (name) {
-        'ready' => const ReadyServiceEvent(),
-        'resync' => const ResyncServiceEvent(),
-        'mail' => MailServiceEvent(
-          account: payload['account'] as String? ?? '',
-          ids: (payload['ids'] as List<dynamic>? ?? const [])
-              .map((e) => e.toString())
-              .toList(growable: false),
-        ),
-        'sync' => SyncServiceEvent(AccountSync.fromJson(payload)),
-        'approval' => ApprovalServiceEvent(
-          id: payload['id'] as String? ?? '',
-          account: payload['account'] as String? ?? '',
-          from: payload['from'] as String? ?? '',
-          subject: payload['subject'] as String? ?? '',
-        ),
-        'navigate' => NavigateServiceEvent(
-          target: payload['target'] as String? ?? '',
-          account: payload['account'] as String? ?? '',
-        ),
-        'mcp' => McpServiceEvent(on: payload['on'] == true),
-        'preferences' => const PreferencesServiceEvent(),
-        'labels' => LabelsUpdatedServiceEvent(
-          account: payload['account'] as String? ?? '',
-        ),
-        _ => null,
-      };
+      return ServiceEvent.fromWire(name, payload);
     } catch (_) {
       return null;
     }

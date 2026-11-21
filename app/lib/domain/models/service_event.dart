@@ -22,6 +22,38 @@ class MailBackendException implements Exception {
 @immutable
 sealed class ServiceEvent {
   const ServiceEvent();
+
+  /// Decodes a wire event emitted by Rust (`colecto-daemon` SSE or
+  /// `colecto-ffi` JSON envelope). Returns `null` for unknown event names.
+  static ServiceEvent? fromWire(String name, Map<String, dynamic> payload) {
+    return switch (name) {
+      'ready' => const ReadyServiceEvent(),
+      'resync' => const ResyncServiceEvent(),
+      'mail' => MailServiceEvent(
+        account: payload['account'] as String? ?? '',
+        ids: (payload['ids'] as List<dynamic>? ?? const [])
+            .map((e) => e.toString())
+            .toList(growable: false),
+      ),
+      'sync' => SyncServiceEvent(AccountSync.fromJson(payload)),
+      'approval' => ApprovalServiceEvent(
+        id: payload['id'] as String? ?? '',
+        account: payload['account'] as String? ?? '',
+        from: payload['from'] as String? ?? '',
+        subject: payload['subject'] as String? ?? '',
+      ),
+      'navigate' => NavigateServiceEvent(
+        target: payload['target'] as String? ?? '',
+        account: payload['account'] as String? ?? '',
+      ),
+      'mcp' => McpServiceEvent(on: payload['on'] == true),
+      'preferences' => const PreferencesServiceEvent(),
+      'labels' => LabelsUpdatedServiceEvent(
+        account: payload['account'] as String? ?? '',
+      ),
+      _ => null,
+    };
+  }
 }
 
 final class ReadyServiceEvent extends ServiceEvent {

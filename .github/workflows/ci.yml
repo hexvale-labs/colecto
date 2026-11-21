@@ -42,6 +42,7 @@ jobs:
             rust:
               - 'Cargo.toml'
               - 'Cargo.lock'
+              - '.config/nextest.toml'
               - 'crates/**'
               - 'just/**'
               - 'justfile'
@@ -104,10 +105,18 @@ jobs:
         run: just check lint
 
       - name: Run unit & integration tests
-        run: cargo nextest run --workspace --locked
+        run: cargo nextest run --workspace --locked --profile ci
 
       - name: Run doctests
         run: cargo test --workspace --doc --locked
+
+      - name: Upload colecto-daemon binary for E2E contract test
+        if: github.event_name != 'pull_request' || (needs.changes.outputs.rust == 'true' && needs.changes.outputs.flutter == 'true')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: colecto-daemon-bin
+          path: target/debug/colecto-daemon
+          retention-days: 1
 
   flutter:
     name: Flutter
@@ -154,8 +163,8 @@ jobs:
       - name: Analyze Flutter app
         run: just check app
 
-      - name: Test Flutter app
-        run: just test app
+      - name: Test Flutter app (multi-worker)
+        run: cd app && flutter test --concurrency=$(nproc) --reporter=expanded
 
       - name: Restore cached Flutter Web bundle
         id: web-cache
@@ -272,16 +281,54 @@ jobs:
             curl -fsS http://127.0.0.1:4173/ | grep -qi '<!DOCTYPE html>'
           fi
 
+  e2e:
+    name: Flutter ↔ Rust E2E
+    needs: [changes, rust, flutter]
+    if: >-
+      needs.rust.result == 'success' &&
+      needs.flutter.result == 'success' &&
+      (github.event_name != 'pull_request' || (needs.changes.outputs.rust == 'true' && needs.changes.outputs.flutter == 'true'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Restore Pub packages
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+
+      - name: Download colecto-daemon binary
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: colecto-daemon-bin
+          path: dist
+
+      - name: Run critical-path daemon E2E contract test
+        run: |
+          chmod +x dist/colecto-daemon
+          cd app && flutter pub get --offline || flutter pub get
+          COLECTO_DAEMON_BIN="$PWD/../dist/colecto-daemon" flutter test test/daemon_e2e_test.dart --reporter=expanded
+
   verify:
     name: verify
-    needs: [changes, rust, flutter]
+    needs: [changes, rust, flutter, e2e]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Check required jobs succeeded
         run: |
-          for result in "${{ needs.changes.result }}" "${{ needs.rust.result }}" "${{ needs.flutter.result }}"; do
+          for result in "${{ needs.changes.result }}" "${{ needs.rust.result }}" "${{ needs.flutter.result }}" "${{ needs.e2e.result }}"; do
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
               echo "::error::One or more required CI jobs failed"
               exit 1

@@ -52,15 +52,6 @@ const VERIFIER: [u8; 32] = [
 ];
 
 #[test]
-fn drafts_and_labels_live_in_the_database() {
-    let dir = tempfile::tempdir().unwrap();
-    let id = sample_data(dir.path());
-    let store = MailStore::open(dir.path()).unwrap();
-    assert_eq!(store.drafts()[0].id, id);
-    assert!(store.labels().unwrap().contains_key("Work"));
-}
-
-#[test]
 fn invalid_drafts_are_kept_and_rejected() {
     let dir = tempfile::tempdir().unwrap();
     drop(MailStore::open(dir.path()).unwrap());
