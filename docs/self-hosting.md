@@ -56,7 +56,7 @@ Set these under `environment:` in `compose.yaml`.
 | --- | --- | --- |
 | `COLECTO_PUBLIC_ORIGIN` | required | The public HTTPS address, such as `https://mail.example.org` |
 | `COLECTO_TOKEN_FILE` | `/data/access-token` | Access token file; created on first start if missing |
-| `COLECTO_DATA_DIR` | `/data` | Database, owner token and extension data |
+| `COLECTO_DATA_DIR` | `/data` | Database and the access token file |
 | `COLECTO_SYNC_SECONDS` | `60` | How often to poll for mail (at least 10); push still applies |
 | `COLECTO_LOG` | `info` | Log filter, such as `debug` or `warn,colecto_core=debug` |
 | `COLECTO_UPDATE_CHECK` | unset | `off` stops the Host from ever asking GitHub for new releases |
@@ -179,12 +179,15 @@ server. Upstream JMAP/IMAP/SMTP support remains separate from this choice.
 ### HTTP over a Unix socket
 
 ```sh
-install -d -m 700 "$HOME/.local/run/colecto"
+install -d -m 700 "$HOME/.local/run/colecto" "$HOME/.config/colecto"
+token_file="$HOME/.config/colecto/access-token"
+[ -e "$token_file" ] || (umask 077 && od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$token_file")
 COLECTO_SOCKET="$HOME/.local/run/colecto/mail.sock" \
 COLECTO_DATA_DIR="$HOME/.local/state/colecto" \
+COLECTO_TOKEN_FILE="$token_file" \
 ./target/debug/colecto-daemon
 auth_file=$(mktemp)
-printf 'Authorization: Bearer %s\n' "$(cat "$HOME/.local/state/colecto/owner-token")" > "$auth_file"
+printf 'Authorization: Bearer %s\n' "$(cat "$token_file")" > "$auth_file"
 curl --unix-socket "$HOME/.local/run/colecto/mail.sock" \
   -H "@$auth_file" -X POST -H 'Origin: http://localhost' \
   -H 'Host: localhost' http://localhost/api/v1/session
@@ -344,21 +347,22 @@ automatic browser cookie behavior.
 
 `POST /api/v1/session` validates an owner bearer with exact configured `Host` and
 `Origin`; it issues no cookie, session, or additional credential. Headers alone
-cannot authenticate an OS user. Local startup generates `owner-token` in the data
-directory with mode `0600`. It tightens an existing data directory to `0700` only
-after verifying it belongs to the current OS user; a foreign-owned directory
-fails with an actionable error. Read that private file to connect an ordinary
-browser. Its contents are never printed or put in the URL. The native shell
-injects it only at its exact local origin; HTTPS server navigation receives no
-local credential. Remote deployments continue to use `COLECTO_TOKEN_FILE` instead
-of a generated local token. Restart after owner token rotation.
+cannot authenticate an OS user. The owner token comes from `COLECTO_TOKEN_FILE`, a
+private file outside the data directory; nothing is written to the data directory.
+Without it, a loopback daemon generates a fresh token in memory on each start and
+prints it once as `Access token (ephemeral): …`; it is never put in a URL. Remote and
+relay modes require `COLECTO_TOKEN_FILE`. The daemon tightens an existing data
+directory to `0700` only after verifying it belongs to the current OS user; a
+foreign-owned directory fails with an actionable error. Restart after rotating the
+token file.
 
 Settings → API keys generates named keys for explicitly selected accounts and
 capabilities, with optional expiry. Copy the secret when created: list responses
 contain metadata only. Revocation and expiry are checked on each request. New
 accounts receive no existing key grants. A supplied invalid or scoped bearer
 never falls back to a privileged cookie or local bootstrap. Scoped keys cannot
-manage accounts, credentials, extensions, other keys, events, or owner-token validation.
+manage accounts, credentials, extensions, other keys or events, or check the owner
+token with `POST /api/v1/session`.
 Direct delivery is denied for scoped callers, including keys with `messages.send`;
 reviewed send requests use the approval flow described below.
 
@@ -548,8 +552,7 @@ supports `colecto daemon`, so installation does not require a separate daemon bi
 Keep that executable at its installed location. The unit reads the optional
 environment file `~/.config/colecto/daemon.env` and starts with `default.target`. The
 mail service uses `%t/colecto/mail.sock`, a private runtime directory, and
-`%h/.local/state/colecto`; its notifier reads `owner-token` from the data directory, so
-no token is copied into the unit. A relay unit names the app's `upstream-token` file
+`%h/.local/state/colecto`. A relay unit names the app's `upstream-token` file
 instead, never the token itself.
 
 After installing the mail service, Settings → Connection fills in its address
