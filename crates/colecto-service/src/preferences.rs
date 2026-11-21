@@ -36,6 +36,9 @@ pub struct Preferences {
     pub list_density: ListDensity,
     /// Group the message list under "Today", "Yesterday", month names and so on.
     pub date_groups: bool,
+    /// Automatically load older messages when scrolling to the bottom of the list.
+    /// When off, the list shows a "Load more" link instead.
+    pub auto_load_more: bool,
     /// The newest release the owner was already told about, so each version notifies once.
     pub notified_release: Option<String>,
     pub prefetch: Prefetch,
@@ -57,6 +60,7 @@ impl Default for Preferences {
             remote_images: false,
             list_density: ListDensity::Full,
             date_groups: true,
+            auto_load_more: true,
             notified_release: None,
             accounts_enabled: BTreeMap::new(),
             onboarded: false,
@@ -181,6 +185,7 @@ pub struct PreferencesInput {
     pub onboarded: Option<bool>,
     pub list_density: Option<ListDensity>,
     pub date_groups: Option<bool>,
+    pub auto_load_more: Option<bool>,
     pub notified_release: Option<String>,
     pub prefetch: Option<Prefetch>,
     /// Setting keys, such as `notifications.position`, to return to their defaults.
@@ -407,6 +412,9 @@ impl PreferenceStore {
         }
         if let Some(date_groups) = input.date_groups {
             next.date_groups = date_groups;
+        }
+        if let Some(auto_load_more) = input.auto_load_more {
+            next.auto_load_more = auto_load_more;
         }
         if let Some(version) = input.notified_release {
             next.notified_release = Some(version);

@@ -241,7 +241,7 @@ downloaded ahead of time so it opens without waiting for the provider.
 | Reader cache | The reader client part's memory (`ui/src/extensions/reader/client/main.ts`) | 150 messages | Warmed from the Host with `GET …/messages/{id}/content?cached=true`, which answers only from the content cache and never reaches the provider |
 | Folder lists | The inbox client part's memory (`ui/src/extensions/inbox/client/main.ts`) | Per account and folder | Switching Inbox, Drafts and Sent shows the last list at once, then refreshes it |
 
-Settings → Mail turns prefetch on or off and sets how many messages to keep ready.
+Settings → Mail turns prefetch on or off, sets how many messages to keep ready (and load per page, up to 100), and chooses whether older messages load automatically on scroll (`auto_load_more`, default on) or via a **Load more** link.
 
 ### Sync status
 

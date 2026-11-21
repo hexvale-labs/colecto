@@ -400,6 +400,7 @@ class RemoteHttpBackend implements MailBackend {
     String folder = 'inbox',
     String query = '',
     int offset = 0,
+    int? limit,
   }) async {
     final data = await _request(
       'GET',
@@ -409,6 +410,7 @@ class RemoteHttpBackend implements MailBackend {
         'folder': folder,
         if (query.isNotEmpty) 'q': query,
         if (offset > 0) 'offset': '$offset',
+        if (limit != null) 'limit': '$limit',
       },
     );
     return MailSnapshot.fromJson(_asMap(data, 'cached messages'));
@@ -420,6 +422,7 @@ class RemoteHttpBackend implements MailBackend {
     String folder = 'inbox',
     String query = '',
     int offset = 0,
+    int? limit,
   }) async {
     final data = _asList(
       await _request(
@@ -430,6 +433,7 @@ class RemoteHttpBackend implements MailBackend {
           'folder': folder,
           if (query.isNotEmpty) 'q': query,
           if (offset > 0) 'offset': '$offset',
+          if (limit != null) 'limit': '$limit',
         },
         body: const <String, dynamic>{},
       ),

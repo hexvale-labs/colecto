@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:colecto/data/repositories/in_memory_mail_backend.dart';
 import 'package:colecto/domain/models/automation_models.dart';
 import 'package:colecto/domain/models/mail_models.dart';
+import 'package:colecto/domain/models/preferences_models.dart';
+import 'package:colecto/domain/models/service_event.dart';
 import 'package:colecto/ui/core/theme/colecto_palette.dart';
 import 'package:colecto/ui/features/shell/mail_controller.dart';
 
@@ -152,5 +154,105 @@ void main() {
       expect(controller.contentFor(first.latest.id), isNull);
       expect(controller.summaryFor(first.latest.id), isNull);
     });
+
+    test('pagination loads configured warm batch size, deduplicates, and recovers from errors', () async {
+      final backend = _PagedBackend(total: 65);
+      final c = MailController(backend: backend);
+      addTearDown(c.dispose);
+      await c.initialize();
+      await c.updatePreferences(
+        const PreferencesPatch(
+          prefetch: PrefetchPreferences(enabled: true, count: 25),
+        ),
+      );
+      await c.loadMailbox(refresh: true);
+
+      expect(c.pageSize, 25);
+      expect(c.messages.length, 25);
+      expect(c.hasMore, isTrue);
+
+      // Next page overlaps by 2 messages to simulate new mail arriving.
+      backend.overlap = 2;
+      await c.loadMoreMessages();
+      expect(c.messages.length, 48);
+      expect(c.messages.map((m) => m.id).toSet().length, 48);
+      expect(c.hasMore, isTrue);
+
+      // Simulate a transient error, then retry.
+      backend.failNext = true;
+      await c.loadMoreMessages();
+      expect(c.loadMoreError, isNotNull);
+      expect(c.messages.length, 48);
+
+      // Keep the 2-message shift (as if 2 new messages arrived at the top).
+      await c.loadMoreMessages();
+      expect(c.loadMoreError, isNull);
+      expect(c.messages.length, 65);
+      expect(c.hasMore, isFalse);
+    });
   });
+}
+
+class _PagedBackend extends InMemoryMailBackend {
+  _PagedBackend({required int total})
+    : _items = List.generate(
+        total,
+        (i) => MailMessage(
+          id: 'p-$i',
+          sender: 'Sender $i',
+          address: 's$i@example.com',
+          subject: 'Paged message $i',
+          body: 'Body $i',
+          date: DateTime.utc(
+            2026,
+            11,
+            21,
+          ).subtract(Duration(minutes: i)).toIso8601String(),
+          seen: true,
+          thread: 't-$i',
+        ),
+      );
+
+  final List<MailMessage> _items;
+  int overlap = 0;
+  bool failNext = false;
+
+  @override
+  Future<MailSnapshot> cachedMessages(
+    String account, {
+    String folder = 'inbox',
+    String query = '',
+    int offset = 0,
+    int? limit,
+  }) async {
+    return MailSnapshot(
+      folder: folder,
+      messages: _slice(offset, limit),
+      fetchedAt: 1700000000,
+    );
+  }
+
+  @override
+  Future<List<MailMessage>> refreshMessages(
+    String account, {
+    String folder = 'inbox',
+    String query = '',
+    int offset = 0,
+    int? limit,
+  }) async {
+    if (failNext) {
+      failNext = false;
+      throw const MailBackendException('Temporary network error');
+    }
+    return _slice(offset, limit);
+  }
+
+  List<MailMessage> _slice(int offset, int? limit) {
+    final start = (offset - overlap).clamp(0, _items.length);
+    if (start >= _items.length) return const [];
+    final end = limit == null
+        ? _items.length
+        : (start + limit).clamp(start, _items.length);
+    return _items.sublist(start, end);
+  }
 }

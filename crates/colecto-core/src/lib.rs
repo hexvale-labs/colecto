@@ -169,6 +169,8 @@ pub struct QueryJob {
     search: String,
     /// Messages to skip from the newest, for loading older pages.
     offset: usize,
+    /// Maximum number of messages to fetch in this page (`1..=MAX_LIST_MESSAGES`).
+    limit: usize,
     known: std::collections::HashMap<String, Message>,
 }
 impl QueryJob {
@@ -186,11 +188,17 @@ impl QueryJob {
                 &self.folder,
                 &self.search,
                 self.offset,
+                self.limit,
                 &self.known,
                 progress,
             )?,
             Account::Jmap(account) => Listing {
-                messages: account.query_page(&self.folder, &self.search, self.offset)?,
+                messages: account.query_page_with_limit(
+                    &self.folder,
+                    &self.search,
+                    self.offset,
+                    self.limit,
+                )?,
                 identity: None,
                 raws: Vec::new(),
             },
@@ -668,7 +676,17 @@ impl MailStore {
         search: &str,
         offset: usize,
     ) -> Result<Vec<Message>, Error> {
-        let Some(job) = self.begin_query(folder, search, offset)? else {
+        self.query_page_with_limit(folder, search, offset, MAX_LIST_MESSAGES)
+    }
+    /// One page of a folder: up to `limit` messages (`1..=MAX_LIST_MESSAGES`), skipping the newest `offset`.
+    pub fn query_page_with_limit(
+        &mut self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Message>, Error> {
+        let Some(job) = self.begin_query_with_limit(folder, search, offset, limit)? else {
             let query = search::Query::parse(search.trim());
             let messages = match folder {
                 "inbox" => self.messages.clone(),
@@ -686,7 +704,7 @@ impl MailStore {
                 .into_iter()
                 .filter(|m| query.matches(m))
                 .skip(offset)
-                .take(MAX_LIST_MESSAGES)
+                .take(limit)
                 .collect();
             return self.apply_listing(folder, search.trim(), offset, messages);
         };
@@ -709,8 +727,19 @@ impl MailStore {
         search: &str,
         offset: usize,
     ) -> Result<Option<QueryJob>, Error> {
+        self.begin_query_with_limit(folder, search, offset, MAX_LIST_MESSAGES)
+    }
+    /// Prepare a provider query with an explicit page size (`1..=MAX_LIST_MESSAGES`).
+    pub fn begin_query_with_limit(
+        &self,
+        folder: &str,
+        search: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<QueryJob>, Error> {
         validate_query(folder, search)?;
         validate_offset(offset)?;
+        validate_limit(limit)?;
         let Some(reader) = self.reader() else {
             return Ok(None);
         };
@@ -733,6 +762,7 @@ impl MailStore {
             folder: folder.into(),
             search: search.trim().into(),
             offset,
+            limit,
             known,
         }))
     }
@@ -783,7 +813,7 @@ impl MailStore {
             remove += 1;
         }
         self.reader_cache.drain(..remove);
-        if folder == "inbox" && snapshot {
+        if folder == "inbox" && snapshot && self.account.is_some() {
             self.messages = messages.clone();
         }
         Ok(messages)
@@ -995,6 +1025,14 @@ fn validate_offset(offset: usize) -> Result<(), Error> {
     if offset > MAX_LIST_OFFSET {
         return Err(Error::Invalid(format!(
             "Older mail can be loaded up to {MAX_LIST_OFFSET} messages back"
+        )));
+    }
+    Ok(())
+}
+fn validate_limit(limit: usize) -> Result<(), Error> {
+    if limit == 0 || limit > MAX_LIST_MESSAGES {
+        return Err(Error::Invalid(format!(
+            "Page size must be between 1 and {MAX_LIST_MESSAGES}"
         )));
     }
     Ok(())

@@ -150,11 +150,13 @@ class LocalFfiBackend implements MailBackend {
     String folder = 'inbox',
     String query = '',
     int offset = 0,
+    int? limit,
   }) => _delegate.cachedMessages(
     account,
     folder: folder,
     query: query,
     offset: offset,
+    limit: limit,
   );
 
   @override
@@ -163,11 +165,13 @@ class LocalFfiBackend implements MailBackend {
     String folder = 'inbox',
     String query = '',
     int offset = 0,
+    int? limit,
   }) => _delegate.refreshMessages(
     account,
     folder: folder,
     query: query,
     offset: offset,
+    limit: limit,
   );
 
   @override
